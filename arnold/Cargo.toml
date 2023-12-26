@@ -9,6 +9,7 @@ edition = "2021"
 bytes.workspace = true
 futures.workspace = true
 http-body.workspace = true
+http-body-util.workspace = true
 http.workspace = true
 hyper = { workspace = true, optional = true }
 pin-project.workspace = true

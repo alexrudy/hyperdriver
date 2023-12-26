@@ -9,8 +9,9 @@ braid = { path = "./braid" }
 bytes = "1"
 camino = { version = "1" }
 futures = "^0.3"
-http = { version = "<1" }
-http-body = { version = "<1" }
+http = { version = "1" }
+http-body = { version = "1" }
+http-body-util = { version = "0.1" }
 hyper = { version = "<1" }
 pin-project = { version = "1" }
 rustls = "^0.21"
