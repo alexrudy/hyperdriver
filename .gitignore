@@ -1,0 +1,8 @@
+/.env
+/target
+
+# Arch-specific cargo options
+.cargo/config.toml
+
+# Local configuration
+/.envrc
