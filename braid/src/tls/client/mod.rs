@@ -8,9 +8,8 @@ use std::{future::Future, pin::Pin};
 
 use futures_core::future::BoxFuture;
 use futures_core::ready;
-use hyper::client::connect::Connection;
-use hyper::client::HttpConnector;
 use hyper::Uri;
+use hyper_util::client::legacy::connect::HttpConnector;
 use rustls::client::InvalidDnsNameError;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -61,7 +60,8 @@ impl Service<Uri> for TlsConnector {
 
         let fut = async move {
             let stream = conn.await?;
-            let connect = tokio_rustls::TlsConnector::from(tls).connect(domain?, stream);
+            let connect =
+                tokio_rustls::TlsConnector::from(tls).connect(domain?, stream.into_inner());
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(TlsStream::from(connect))
         };
         Box::pin(fut)
@@ -164,11 +164,5 @@ impl AsyncWrite for TlsStream {
             State::Handshake(_) => Poll::Ready(Ok(())),
             State::Streaming(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
         }
-    }
-}
-
-impl Connection for TlsStream {
-    fn connected(&self) -> hyper::client::connect::Connected {
-        todo!()
     }
 }

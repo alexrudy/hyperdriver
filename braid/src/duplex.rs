@@ -10,11 +10,11 @@ use std::{
 };
 
 use http::uri::Authority;
-use hyper::server::accept::Accept;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::info::{DuplexConnectionInfo, Protocol};
+use crate::server::Accept;
 
 #[derive(Debug)]
 #[pin_project]
@@ -159,12 +159,12 @@ impl Accept for DuplexIncoming {
     fn poll_accept(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
+    ) -> Poll<Result<Self::Conn, Self::Error>> {
         if let Some(request) = ready!(self.receiver.poll_recv(cx)) {
             let stream = request.ack()?;
-            Poll::Ready(Some(Ok(stream)))
+            Poll::Ready(Ok(stream))
         } else {
-            Poll::Ready(None)
+            Poll::Ready(Err(io::ErrorKind::ConnectionReset.into()))
         }
     }
 }
@@ -179,5 +179,48 @@ impl futures_core::Stream for DuplexIncoming {
         } else {
             Poll::Ready(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use http::Version;
+
+    #[tokio::test]
+    async fn test_duplex() {
+        use super::*;
+        use futures_util::StreamExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let name: Authority = "test".parse().unwrap();
+
+        let (client, incoming) = DuplexClient::new(name.clone());
+        let mut incoming = incoming.fuse();
+
+        let (mut client_stream, mut server_stream) = tokio::try_join!(
+            client.connect(1024, Protocol::Http(Version::HTTP_11)),
+            async { incoming.next().await.unwrap() }
+        )
+        .unwrap();
+
+        let mut buf = [0u8; 1024];
+
+        tokio::try_join!(
+            client_stream.write_all(b"hello"),
+            server_stream.read_exact(&mut buf[..5])
+        )
+        .unwrap();
+
+        assert_eq!(&buf[..5], b"hello");
+
+        tokio::try_join!(
+            server_stream.write_all(b"world"),
+            client_stream.read_exact(&mut buf[..5])
+        )
+        .unwrap();
+
+        assert_eq!(client_stream.info().authority, name);
+
+        assert_eq!(&buf[..5], b"world");
     }
 }

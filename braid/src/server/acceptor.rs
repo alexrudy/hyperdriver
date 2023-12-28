@@ -5,14 +5,13 @@ use std::{
     task::{Context, Poll},
 };
 
-use hyper::server::{accept::Accept, conn::AddrIncoming};
 use pin_project::pin_project;
-use tokio::net::UnixListener;
+use tokio::net::{TcpListener, UnixListener};
 
+use super::Accept;
+use super::Stream;
 use crate::duplex::DuplexIncoming;
 use crate::tls::server::acceptor::TlsAcceptor;
-
-use super::Stream;
 
 /// A stream of incoming connections.
 ///
@@ -22,15 +21,15 @@ use super::Stream;
 #[derive(Debug)]
 #[pin_project(project = AcceptorProj)]
 pub enum Acceptor {
-    Tcp(#[pin] AddrIncoming),
+    Tcp(#[pin] TcpListener),
     Tls(#[pin] TlsAcceptor),
     Duplex(#[pin] DuplexIncoming),
     Unix(#[pin] UnixListener),
 }
 
 impl Acceptor {
-    pub fn bind(addr: &SocketAddr) -> Result<Self, hyper::Error> {
-        Ok(Self::Tcp(AddrIncoming::bind(addr)?))
+    pub async fn bind(addr: &SocketAddr) -> Result<Self, io::Error> {
+        Ok(Self::Tcp(TcpListener::bind(addr).await?))
     }
 }
 
@@ -40,8 +39,8 @@ impl From<TlsAcceptor> for Acceptor {
     }
 }
 
-impl From<AddrIncoming> for Acceptor {
-    fn from(value: AddrIncoming) -> Self {
+impl From<TcpListener> for Acceptor {
+    fn from(value: TcpListener) -> Self {
         Self::Tcp(value)
     }
 }
@@ -65,19 +64,19 @@ impl Accept for Acceptor {
     fn poll_accept(
         self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
+    ) -> Poll<Result<Self::Conn, Self::Error>> {
         let this = self.project();
         match this {
             AcceptorProj::Tcp(acceptor) => acceptor.poll_accept(cx).map(|stream| {
-                stream.map(|stream| stream.and_then(|stream| stream.into_inner().try_into()))
+                stream.map(|(stream, remote_addr)| Stream::tcp(stream, remote_addr.into()))
             }),
             AcceptorProj::Tls(acceptor) => acceptor.poll_accept(cx).map_ok(|stream| stream.into()),
             AcceptorProj::Duplex(acceptor) => {
                 acceptor.poll_accept(cx).map_ok(|stream| stream.into())
             }
-            AcceptorProj::Unix(acceptor) => acceptor.poll_accept(cx).map(Some).map(|opt| {
-                opt.map(|stream| stream.and_then(|(stream, _address)| stream.try_into()))
-            }),
+            AcceptorProj::Unix(acceptor) => acceptor
+                .poll_accept(cx)
+                .map(|stream| stream.and_then(|(stream, _address)| stream.try_into())),
         }
     }
 }
@@ -86,6 +85,6 @@ impl futures_core::Stream for Acceptor {
     type Item = Result<Stream, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        self.poll_accept(cx)
+        self.poll_accept(cx).map(Some)
     }
 }

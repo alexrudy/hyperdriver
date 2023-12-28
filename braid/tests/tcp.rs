@@ -5,9 +5,10 @@ async fn braided_tcp() {
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let incoming =
-        hyper::server::conn::AddrIncoming::bind(&(Ipv4Addr::LOCALHOST, 0).into()).unwrap();
-    let addr = incoming.local_addr();
+    let incoming = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = incoming.local_addr().unwrap();
 
     let server = braid::server::acceptor::Acceptor::from(incoming);
     tokio::spawn(async move {
