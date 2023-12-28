@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, UnixListener};
 use super::Accept;
 use super::Stream;
 use crate::duplex::DuplexIncoming;
-use crate::tls::server::acceptor::TlsAcceptor;
+use crate::tls::server::TlsAcceptor;
 
 /// A stream of incoming connections.
 ///

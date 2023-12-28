@@ -21,6 +21,8 @@ pub(crate) mod info;
 pub mod sni;
 
 pub use self::acceptor::TlsAcceptor;
+pub use self::connector::TlsConnectLayer;
+
 /// State tracks the process of accepting a connection and turning it into a stream.
 enum TlsState {
     Handshake(tokio_rustls::Accept<TcpStream>),

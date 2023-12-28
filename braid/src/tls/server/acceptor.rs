@@ -28,7 +28,7 @@ use crate::server::Accept;
 pub(super) use super::TlsStream;
 
 impl TlsAcceptor {
-    /// Create a new TLS Acceptor with the given [rustls::ServerConfig] and [hyper::server::conn::AddrIncoming].
+    /// Create a new TLS Acceptor with the given [rustls::ServerConfig] and [tokio::net:TcpListener].
     pub fn new(config: Arc<ServerConfig>, incoming: TcpListener) -> TlsAcceptor {
         TlsAcceptor { config, incoming }
     }
