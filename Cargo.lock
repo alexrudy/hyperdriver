@@ -19,7 +19,7 @@ checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
 name = "arnold"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "http 1.0.0",
@@ -70,7 +70,7 @@ checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
 
 [[package]]
 name = "braid"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "camino",
  "futures",
