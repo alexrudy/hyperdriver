@@ -9,7 +9,7 @@ use std::{
     task::Poll,
 };
 
-use futures::future::BoxFuture;
+use futures_core::future::BoxFuture;
 use hyper::{Request, Response};
 use tower::{Layer, Service};
 use tracing::{dispatcher, Instrument};

@@ -10,7 +10,7 @@ use pin_project::pin_project;
 use tokio::net::UnixListener;
 
 use crate::duplex::DuplexIncoming;
-use crate::tls::server::accpetor::TlsAcceptor;
+use crate::tls::server::acceptor::TlsAcceptor;
 
 use super::Stream;
 
@@ -79,5 +79,13 @@ impl Accept for Acceptor {
                 opt.map(|stream| stream.and_then(|(stream, _address)| stream.try_into()))
             }),
         }
+    }
+}
+
+impl futures_core::Stream for Acceptor {
+    type Item = Result<Stream, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        self.poll_accept(cx)
     }
 }

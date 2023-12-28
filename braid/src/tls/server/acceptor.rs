@@ -4,7 +4,7 @@ use core::task::{Context, Poll};
 use std::pin::Pin;
 use std::{io, sync::Arc};
 
-use futures::ready;
+use futures_core::ready;
 use hyper::server::accept::Accept;
 use hyper::server::conn::AddrIncoming;
 use pin_project::pin_project;

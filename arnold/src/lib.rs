@@ -116,10 +116,10 @@ impl http_body::Body for Body {
             InnerBodyProj::Empty => std::task::Poll::Ready(None),
             InnerBodyProj::Full(body) => body
                 .poll_frame(cx)
-                .map(|opt| opt.map(|res| res.map(|bytes| bytes.into()).map_err(Into::into))),
+                .map(|opt| opt.map(|res| res.map_err(Into::into))),
             InnerBodyProj::Boxed(body) => body
                 .poll_frame(cx)
-                .map(|opt| opt.map(|res| res.map(|bytes| bytes.into()).map_err(Into::into))),
+                .map(|opt| opt.map(|res| res.map_err(Into::into))),
         }
     }
 

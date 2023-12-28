@@ -1,17 +1,15 @@
 [package]
 name = "arnold"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 bytes.workspace = true
-futures.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 http.workspace = true
-hyper = { workspace = true, optional = true }
 pin-project.workspace = true
 
 [dev-dependencies]
@@ -19,4 +17,3 @@ static-assertions.workspace = true
 
 [features]
 default = []
-hyper = ["dep:hyper"]

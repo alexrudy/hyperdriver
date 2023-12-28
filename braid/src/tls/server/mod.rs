@@ -7,19 +7,20 @@ use std::task::{Context, Poll};
 use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
-use futures::ready;
+use futures_core::ready;
 use hyper::server::conn::AddrStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
 use crate::info::{ConnectionInfo, SocketAddr};
 
-pub mod accpetor;
+pub mod acceptor;
 pub mod connector;
 pub(crate) mod info;
 #[cfg(feature = "sni")]
 pub mod sni;
 
+pub use self::acceptor::TlsAcceptor;
 /// State tracks the process of accepting a connection and turning it into a stream.
 enum TlsState {
     Handshake(tokio_rustls::Accept<AddrStream>),

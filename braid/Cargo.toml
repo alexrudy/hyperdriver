@@ -1,13 +1,13 @@
 [package]
 name = "braid"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 camino.workspace = true
-futures.workspace = true
+futures-core.workspace = true
 http.workspace = true
 hyper = { workspace = true, features = ["full"] }
 pin-project.workspace = true
@@ -17,3 +17,9 @@ tokio = { workspace = true, features = ["io-util", "net"] }
 tokio-rustls.workspace = true
 tower.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros"] }
