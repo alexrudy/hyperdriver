@@ -1,7 +1,6 @@
 //! Tower middleware for collecting TLS connection information after a handshake has been completed.
 //!
 //! This middleware applies to the request stack, but recieves the connection info from the acceptor stack.
-//! When using braid streams, prefer the [braid::info::ConnectionInfoLayer] middleware instead.
 
 use std::{
     convert::Infallible,
