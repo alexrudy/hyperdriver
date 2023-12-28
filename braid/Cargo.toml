@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 camino.workspace = true
-futures.workspace = true
+futures-core.workspace = true
 http.workspace = true
 hyper = { workspace = true, features = ["full"] }
 pin-project.workspace = true
@@ -19,6 +19,7 @@ tower.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
-tokio = { version = "1", features = ["macros"] }
 tempfile = "3"
+tokio = { version = "1", features = ["macros"] }

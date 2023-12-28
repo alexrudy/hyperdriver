@@ -2,7 +2,7 @@ use std::net::Ipv4Addr;
 
 #[tokio::test]
 async fn braided_tcp() {
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let incoming =

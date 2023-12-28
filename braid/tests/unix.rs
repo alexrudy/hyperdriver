@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn braided_unix() {
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let dir = tempfile::tempdir().unwrap();

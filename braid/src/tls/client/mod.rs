@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
-use futures::future::BoxFuture;
-use futures::ready;
+use futures_core::future::BoxFuture;
+use futures_core::ready;
 use hyper::client::connect::Connection;
 use hyper::client::HttpConnector;
 use hyper::Uri;

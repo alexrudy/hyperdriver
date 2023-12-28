@@ -82,7 +82,7 @@ impl Accept for Acceptor {
     }
 }
 
-impl futures::Stream for Acceptor {
+impl futures_core::Stream for Acceptor {
     type Item = Result<Stream, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {

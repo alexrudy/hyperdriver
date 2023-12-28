@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn braided_duplex() {
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let (client, incoming) = braid::duplex::DuplexClient::new("test".parse().unwrap());

@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
-use futures::ready;
+use futures_core::ready;
 use hyper::server::conn::AddrStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;

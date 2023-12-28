@@ -25,7 +25,7 @@ fn tls_root_store() -> rustls::RootCertStore {
 
 #[tokio::test]
 async fn braided_tls() {
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let incoming =

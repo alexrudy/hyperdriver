@@ -169,7 +169,7 @@ impl Accept for DuplexIncoming {
     }
 }
 
-impl futures::Stream for DuplexIncoming {
+impl futures_core::Stream for DuplexIncoming {
     type Item = Result<DuplexStream, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
