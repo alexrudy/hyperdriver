@@ -15,7 +15,7 @@ use hyper::{Request, Response};
 use tower::{Layer, Service};
 use tracing::{dispatcher, Instrument};
 
-use super::accpetor::TlsStream;
+use super::acceptor::TlsStream;
 
 pub struct TlsConnectLayer;
 

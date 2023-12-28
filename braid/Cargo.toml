@@ -17,3 +17,8 @@ tokio = { workspace = true, features = ["io-util", "net"] }
 tokio-rustls.workspace = true
 tower.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+tokio = { version = "1", features = ["macros"] }
+tempfile = "3"
