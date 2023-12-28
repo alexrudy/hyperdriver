@@ -80,5 +80,3 @@ jobs:
         env:
           RUSTDOCFLAGS: "-Dwarnings"
         run: cargo doc --all-features --no-deps
-
-
