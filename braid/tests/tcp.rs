@@ -20,7 +20,7 @@ async fn braided_tcp() {
         }
     });
 
-    let mut conn = braid::client::Stream::from(tokio::net::TcpStream::connect(addr).await.unwrap());
+    let mut conn = braid::client::Stream::connect(addr).await.unwrap();
 
     let mut buf = [0u8; 1024];
     conn.write_all(b"hello world").await.unwrap();

@@ -3,6 +3,8 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+use std::net::SocketAddr;
+
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
@@ -17,6 +19,13 @@ use crate::tls::client::TlsStream;
 pub struct Stream {
     #[pin]
     inner: Braid<TlsStream>,
+}
+
+impl Stream {
+    pub async fn connect(addr: impl Into<SocketAddr>) -> std::io::Result<Self> {
+        let stream = TcpStream::connect(addr.into()).await?;
+        Ok(stream.into())
+    }
 }
 
 impl From<TcpStream> for Stream {
