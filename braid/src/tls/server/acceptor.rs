@@ -2,13 +2,14 @@
 
 use core::task::{Context, Poll};
 use std::pin::Pin;
-use std::{io, sync::Arc};
+use std::sync::Arc;
 
 use futures_core::ready;
 use pin_project::pin_project;
 use rustls::ServerConfig;
-use tokio::net::TcpListener;
 
+use crate::info::Connection;
+use crate::server::Accept;
 /// TLS Acceptor which uses a [rustls::ServerConfig] to accept connections
 /// and start a TLS handshake.
 ///
@@ -17,26 +18,28 @@ use tokio::net::TcpListener;
 /// The TLS acceptor implements the [Accept] trait from hyper.
 #[derive(Debug)]
 #[pin_project]
-pub struct TlsAcceptor {
+pub struct TlsAcceptor<A> {
     config: Arc<ServerConfig>,
     #[pin]
-    incoming: TcpListener,
+    incoming: A,
 }
-
-use crate::server::Accept;
 
 pub(super) use super::TlsStream;
 
-impl TlsAcceptor {
+impl<A> TlsAcceptor<A> {
     /// Create a new TLS Acceptor with the given [rustls::ServerConfig] and [tokio::net::TcpListener].
-    pub fn new(config: Arc<ServerConfig>, incoming: TcpListener) -> TlsAcceptor {
+    pub fn new(config: Arc<ServerConfig>, incoming: A) -> Self {
         TlsAcceptor { config, incoming }
     }
 }
 
-impl Accept for TlsAcceptor {
-    type Conn = TlsStream;
-    type Error = io::Error;
+impl<A> Accept for TlsAcceptor<A>
+where
+    A: Accept,
+    A::Conn: Connection,
+{
+    type Conn = TlsStream<A::Conn>;
+    type Error = A::Error;
 
     fn poll_accept(
         self: Pin<&mut Self>,
@@ -46,10 +49,10 @@ impl Accept for TlsAcceptor {
 
         match ready!(this.incoming.poll_accept(cx)) {
             // A new TCP connection is ready to be accepted.
-            Ok((stream, remote_addr)) => {
+            Ok(stream) => {
                 let accept =
                     tokio_rustls::TlsAcceptor::from(Arc::clone(this.config)).accept(stream);
-                Poll::Ready(Ok(TlsStream::new(accept, remote_addr.into())))
+                Poll::Ready(Ok(TlsStream::new(accept)))
             }
 
             // An error occurred while accepting a new TCP connection.

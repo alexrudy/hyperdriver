@@ -4,40 +4,37 @@ use std::{
 };
 use tokio::sync::RwLock;
 
-use crate::info::{ConnectionInfo, SocketAddr};
+use crate::info::{ConnectionInfo, SocketAddr, TLSConnectionInfo};
 
 #[derive(Debug)]
 enum State {
-    Pending(tokio::sync::oneshot::Receiver<ConnectionInfo>),
+    Pending(tokio::sync::oneshot::Receiver<TLSConnectionInfo>),
     Received(ConnectionInfo),
 }
 
 #[derive(Debug, Clone)]
 pub struct TlsConnectionInfoReciever {
     state: Arc<RwLock<State>>,
-    peer_addr: SocketAddr,
-    local_addr: SocketAddr,
+    info: ConnectionInfo,
 }
 
 impl TlsConnectionInfoReciever {
     pub fn new(
-        inner: tokio::sync::oneshot::Receiver<ConnectionInfo>,
-        peer_addr: SocketAddr,
-        local_addr: SocketAddr,
+        inner: tokio::sync::oneshot::Receiver<TLSConnectionInfo>,
+        info: ConnectionInfo,
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(State::Pending(inner))),
-            peer_addr,
-            local_addr,
+            info,
         }
     }
 
-    pub fn local_addr(&self) -> &SocketAddr {
-        &self.local_addr
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.info.local_addr()
     }
 
-    pub fn remote_addr(&self) -> &SocketAddr {
-        &self.peer_addr
+    pub fn remote_addr(&self) -> Option<&SocketAddr> {
+        self.info.remote_addr()
     }
 
     pub async fn recv(&self) -> ConnectionInfo {
@@ -59,9 +56,12 @@ impl TlsConnectionInfoReciever {
             }
         };
 
-        let info = rx
+        let tls = rx
             .await
             .expect("connection info was never sent and is not available");
+
+        let info = self.info.clone().with_tls(tls);
+
         *state = State::Received(info.clone());
         info
     }

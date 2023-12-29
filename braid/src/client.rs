@@ -4,12 +4,13 @@
 //! TCP and Duplex streams are the same whether they are server or client.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::core::Braid;
+use crate::core::{Braid, BraidCore};
 use crate::duplex::DuplexStream;
 use crate::tls::client::TlsStream;
 
@@ -18,7 +19,7 @@ use crate::tls::client::TlsStream;
 #[pin_project]
 pub struct Stream {
     #[pin]
-    inner: Braid<TlsStream>,
+    inner: Braid<TlsStream<BraidCore>>,
 }
 
 impl Stream {
@@ -26,20 +27,26 @@ impl Stream {
         let stream = TcpStream::connect(addr.into()).await?;
         Ok(stream.into())
     }
+
+    pub fn tls(
+        self,
+        domain: rustls::ServerName,
+        roots: impl Into<Arc<rustls::RootCertStore>>,
+    ) -> Self {
+        let core = match self.inner {
+            Braid::NoTls(core) => core,
+            Braid::Tls(_) => panic!("Stream::tls called twice"),
+        };
+        Stream {
+            inner: Braid::Tls(TlsStream::new(core, domain, roots)),
+        }
+    }
 }
 
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
-            inner: Braid::Tcp(stream),
-        }
-    }
-}
-
-impl From<TlsStream> for Stream {
-    fn from(stream: TlsStream) -> Self {
-        Stream {
-            inner: Braid::Tls(stream),
+            inner: stream.into(),
         }
     }
 }
@@ -47,7 +54,7 @@ impl From<TlsStream> for Stream {
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
-            inner: Braid::Duplex(stream),
+            inner: stream.into(),
         }
     }
 }
@@ -55,7 +62,7 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            inner: Braid::Unix(stream),
+            inner: stream.into(),
         }
     }
 }

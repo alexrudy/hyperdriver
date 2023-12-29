@@ -37,7 +37,7 @@ impl TlsConnector {
 }
 
 impl Service<Uri> for TlsConnector {
-    type Response = TlsStream;
+    type Response = TlsStream<TcpStream>;
 
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -68,42 +68,34 @@ impl Service<Uri> for TlsConnector {
     }
 }
 
-enum State {
-    Handshake(tokio_rustls::Connect<TcpStream>),
-    Streaming(tokio_rustls::client::TlsStream<TcpStream>),
+enum State<IO> {
+    Handshake(tokio_rustls::Connect<IO>),
+    Streaming(tokio_rustls::client::TlsStream<IO>),
 }
 
-impl fmt::Debug for State {
+impl<IO> fmt::Debug for State<IO> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            State::Handshake(connect) => {
-                let remote = connect.get_ref().and_then(|stream| stream.peer_addr().ok());
-                if let Some(remote) = remote {
-                    write!(f, "State::Handshake({remote:?})")
-                } else {
-                    f.write_str("State::Handshake")
-                }
-            }
-            State::Streaming(stream) => {
-                let remote = stream.get_ref().0.peer_addr().ok();
-                write!(f, "State::Streaming({remote:?})")
-            }
+            State::Handshake(_) => f.write_str("State::Handshake"),
+            State::Streaming(_) => write!(f, "State::Streaming"),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct TlsStream {
-    state: State,
+pub struct TlsStream<IO> {
+    state: State<IO>,
 }
 
-impl TlsStream {
-    pub async fn connect(
-        addr: impl ToSocketAddrs,
+impl<IO> TlsStream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
+    pub fn new(
+        stream: IO,
         domain: rustls::ServerName,
         roots: impl Into<Arc<rustls::RootCertStore>>,
-    ) -> io::Result<Self> {
-        let stream = TcpStream::connect(addr).await?;
+    ) -> Self {
         let config = Arc::new(
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -111,17 +103,28 @@ impl TlsStream {
                 .with_no_client_auth(),
         );
         let connect = tokio_rustls::TlsConnector::from(config).connect(domain, stream);
-        Ok(Self::from(connect))
+        Self::from(connect)
     }
 }
 
-impl TlsStream {
+impl TlsStream<TcpStream> {
+    pub async fn connect(
+        addr: impl ToSocketAddrs,
+        domain: rustls::ServerName,
+        roots: impl Into<Arc<rustls::RootCertStore>>,
+    ) -> io::Result<Self> {
+        let stream = TcpStream::connect(addr).await?;
+        Ok(Self::new(stream, domain, roots))
+    }
+}
+
+impl<IO> TlsStream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
     fn handshake<F, R>(&mut self, cx: &mut Context, action: F) -> Poll<io::Result<R>>
     where
-        F: FnOnce(
-            &mut tokio_rustls::client::TlsStream<TcpStream>,
-            &mut Context,
-        ) -> Poll<io::Result<R>>,
+        F: FnOnce(&mut tokio_rustls::client::TlsStream<IO>, &mut Context) -> Poll<io::Result<R>>,
     {
         match self.state {
             State::Handshake(ref mut accept) => match ready!(Pin::new(accept).poll(cx)) {
@@ -141,15 +144,15 @@ impl TlsStream {
     }
 }
 
-impl From<tokio_rustls::Connect<TcpStream>> for TlsStream {
-    fn from(accept: tokio_rustls::Connect<TcpStream>) -> Self {
+impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO> {
+    fn from(accept: tokio_rustls::Connect<IO>) -> Self {
         Self {
             state: State::Handshake(accept),
         }
     }
 }
 
-impl AsyncRead for TlsStream {
+impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<IO> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -160,7 +163,7 @@ impl AsyncRead for TlsStream {
     }
 }
 
-impl AsyncWrite for TlsStream {
+impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsStream<IO> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

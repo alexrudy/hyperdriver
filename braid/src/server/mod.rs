@@ -3,15 +3,13 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
-use std::io;
-
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::core::Braid;
+use crate::core::{Braid, BraidCore};
 use crate::duplex::DuplexStream;
-use crate::info::{ConnectionInfo, SocketAddr};
+use crate::info::{Connection as HasConnectionInfo, ConnectionInfo, SocketAddr};
 use crate::tls::server::info::TlsConnectionInfoReciever;
 use crate::tls::server::TlsStream;
 
@@ -52,7 +50,7 @@ pub struct Stream {
     info: ConnectionInfoState,
 
     #[pin]
-    inner: Braid<TlsStream>,
+    inner: Braid<TlsStream<BraidCore>>,
 }
 
 impl Stream {
@@ -65,27 +63,25 @@ impl Stream {
 
     pub fn remote_addr(&self) -> Option<&SocketAddr> {
         match &self.info {
-            ConnectionInfoState::Handshake(rx) => Some(rx.remote_addr()),
+            ConnectionInfoState::Handshake(rx) => rx.remote_addr(),
             ConnectionInfoState::Connected(info) => info.remote_addr(),
-        }
-    }
-
-    pub fn tcp(stream: TcpStream, remote_addr: SocketAddr) -> Self {
-        Stream {
-            info: ConnectionInfoState::Connected(ConnectionInfo::Tcp(
-                crate::info::TcpConnectionInfo::new(
-                    stream.local_addr().expect("tcp stream local addr").into(),
-                    remote_addr,
-                    None,
-                ),
-            )),
-            inner: Braid::Tcp(stream),
         }
     }
 }
 
-impl From<TlsStream> for Stream {
-    fn from(stream: TlsStream) -> Self {
+impl HasConnectionInfo for Stream {
+    fn info(&self) -> ConnectionInfo {
+        match &self.info {
+            ConnectionInfoState::Handshake(_) => {
+                panic!("connection info is not avaialble before the handshake completes")
+            }
+            ConnectionInfoState::Connected(info) => info.clone(),
+        }
+    }
+}
+
+impl From<TlsStream<BraidCore>> for Stream {
+    fn from(stream: TlsStream<BraidCore>) -> Self {
         Stream {
             info: ConnectionInfoState::Handshake(stream.rx.clone()),
             inner: Braid::Tls(stream),
@@ -93,22 +89,41 @@ impl From<TlsStream> for Stream {
     }
 }
 
-impl From<DuplexStream> for Stream {
-    fn from(stream: DuplexStream) -> Self {
+impl From<TcpStream> for Stream {
+    fn from(stream: TcpStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected((&stream).into()),
-            inner: Braid::Duplex(stream),
+            info: ConnectionInfoState::Connected(<TcpStream as HasConnectionInfo>::info(&stream)),
+            inner: stream.into(),
         }
     }
 }
 
-impl TryFrom<UnixStream> for Stream {
-    type Error = io::Error;
-    fn try_from(stream: UnixStream) -> Result<Self, Self::Error> {
-        Ok(Stream {
-            info: ConnectionInfoState::Connected((&stream).try_into()?),
-            inner: Braid::Unix(stream),
-        })
+impl From<DuplexStream> for Stream {
+    fn from(stream: DuplexStream) -> Self {
+        Stream {
+            info: ConnectionInfoState::Connected(<DuplexStream as HasConnectionInfo>::info(
+                &stream,
+            )),
+            inner: stream.into(),
+        }
+    }
+}
+
+impl From<UnixStream> for Stream {
+    fn from(stream: UnixStream) -> Self {
+        Stream {
+            info: ConnectionInfoState::Connected(stream.info()),
+            inner: stream.into(),
+        }
+    }
+}
+
+impl From<BraidCore> for Stream {
+    fn from(stream: BraidCore) -> Self {
+        Stream {
+            info: ConnectionInfoState::Connected(stream.info()),
+            inner: stream.into(),
+        }
     }
 }
 
