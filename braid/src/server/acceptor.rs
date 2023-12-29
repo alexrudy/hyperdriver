@@ -65,8 +65,7 @@ impl Accept for Acceptor {
         self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Result<Self::Conn, Self::Error>> {
-        let this = self.project();
-        match this {
+        match self.project() {
             AcceptorProj::Tcp(acceptor) => acceptor.poll_accept(cx).map(|stream| {
                 stream.map(|(stream, remote_addr)| Stream::tcp(stream, remote_addr.into()))
             }),

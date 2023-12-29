@@ -92,7 +92,7 @@ where
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
-        let span = tracing::info_span!("TLS Connection");
+        let span = tracing::info_span!("Connection");
         dispatcher::get_default(|dispatch| {
             let id = span.id().expect("Missing ID; this is a bug");
             if let Some(current) = dispatch.current_span().id() {
@@ -102,7 +102,7 @@ where
 
         let fut = async move {
             async {
-                tracing::trace!("getting TLS Connection information (sent from the acceptor)");
+                tracing::trace!("getting Connection information (sent from the acceptor)");
                 let info = rx.recv().await;
                 req.extensions_mut().insert(info);
             }
