@@ -33,10 +33,7 @@ async fn braided_tls() {
         .unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let server = braid::server::acceptor::Acceptor::from(braid::tls::server::TlsAcceptor::new(
-        Arc::new(tls_config()),
-        incoming,
-    ));
+    let server = braid::server::acceptor::Acceptor::from(incoming).tls(Arc::new(tls_config()));
 
     tokio::spawn(async move {
         let mut incoming = server.fuse();
@@ -47,15 +44,10 @@ async fn braided_tls() {
         }
     });
 
-    let tls = braid::tls::client::TlsStream::connect(
-        addr,
-        "example.com".try_into().unwrap(),
-        tls_root_store(),
-    )
-    .await
-    .unwrap();
-
-    let mut conn = braid::client::Stream::from(tls);
+    let mut conn = braid::client::Stream::connect(addr)
+        .await
+        .unwrap()
+        .tls("example.com".try_into().unwrap(), tls_root_store());
 
     let mut buf = [0u8; 1024];
     conn.write_all(b"hello world").await.unwrap();

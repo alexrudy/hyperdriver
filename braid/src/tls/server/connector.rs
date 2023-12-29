@@ -37,7 +37,7 @@ impl<S> TlsConnectionInfoService<S> {
     }
 }
 
-impl<S> Service<&TlsStream> for TlsConnectionInfoService<S>
+impl<S, IO> Service<&TlsStream<IO>> for TlsConnectionInfoService<S>
 where
     S: Clone + Send + 'static,
 {
@@ -54,7 +54,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, stream: &TlsStream) -> Self::Future {
+    fn call(&mut self, stream: &TlsStream<IO>) -> Self::Future {
         let inner = self.inner.clone();
         let rx = stream.rx.clone();
         ready(Ok(TlsConnection { inner, rx }))
