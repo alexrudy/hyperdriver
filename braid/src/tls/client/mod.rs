@@ -8,13 +8,12 @@ use std::{future::Future, pin::Pin};
 
 use futures_core::future::BoxFuture;
 use futures_core::ready;
-use hyper::client::connect::Connection;
-use hyper::client::HttpConnector;
 use hyper::Uri;
+use hyper_util::client::legacy::connect::HttpConnector;
 use rustls::client::InvalidDnsNameError;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, ToSocketAddrs};
 use tower::Service;
 
 #[derive(Clone, Debug)]
@@ -61,7 +60,8 @@ impl Service<Uri> for TlsConnector {
 
         let fut = async move {
             let stream = conn.await?;
-            let connect = tokio_rustls::TlsConnector::from(tls).connect(domain?, stream);
+            let connect =
+                tokio_rustls::TlsConnector::from(tls).connect(domain?, stream.into_inner());
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(TlsStream::from(connect))
         };
         Box::pin(fut)
@@ -95,6 +95,24 @@ impl fmt::Debug for State {
 #[derive(Debug)]
 pub struct TlsStream {
     state: State,
+}
+
+impl TlsStream {
+    pub async fn connect(
+        addr: impl ToSocketAddrs,
+        domain: rustls::ServerName,
+        roots: impl Into<Arc<rustls::RootCertStore>>,
+    ) -> io::Result<Self> {
+        let stream = TcpStream::connect(addr).await?;
+        let config = Arc::new(
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        );
+        let connect = tokio_rustls::TlsConnector::from(config).connect(domain, stream);
+        Ok(Self::from(connect))
+    }
 }
 
 impl TlsStream {
@@ -164,11 +182,5 @@ impl AsyncWrite for TlsStream {
             State::Handshake(_) => Poll::Ready(Ok(())),
             State::Streaming(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
         }
-    }
-}
-
-impl Connection for TlsStream {
-    fn connected(&self) -> hyper::client::connect::Connected {
-        todo!()
     }
 }

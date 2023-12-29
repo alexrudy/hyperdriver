@@ -8,11 +8,11 @@ use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
 use futures_core::ready;
-use hyper::server::conn::AddrStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::TcpStream;
 use tokio_rustls::Accept;
 
-use crate::info::{ConnectionInfo, SocketAddr};
+use crate::info::{ConnectionInfo, SocketAddr, TLSConnectionInfo};
 
 pub mod acceptor;
 pub mod connector;
@@ -21,27 +21,19 @@ pub(crate) mod info;
 pub mod sni;
 
 pub use self::acceptor::TlsAcceptor;
+pub use self::connector::TlsConnectLayer;
+
 /// State tracks the process of accepting a connection and turning it into a stream.
 enum TlsState {
-    Handshake(tokio_rustls::Accept<AddrStream>),
-    Streaming(tokio_rustls::server::TlsStream<AddrStream>),
+    Handshake(tokio_rustls::Accept<TcpStream>),
+    Streaming(tokio_rustls::server::TlsStream<TcpStream>),
 }
 
 impl fmt::Debug for TlsState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TlsState::Handshake(accept) => {
-                let remote = accept.get_ref().map(|stream| stream.remote_addr());
-                if let Some(remote) = remote {
-                    write!(f, "State::Handshake({remote:?})")
-                } else {
-                    f.write_str("State::Handshake")
-                }
-            }
-            TlsState::Streaming(stream) => {
-                let remote = stream.get_ref().0.remote_addr();
-                write!(f, "State::Streaming({remote:?})")
-            }
+            TlsState::Handshake(_) => f.write_str("State::Handshake"),
+            TlsState::Streaming(_) => f.write_str("State::Streaming"),
         }
     }
 }
@@ -100,7 +92,7 @@ impl TlsStream {
     fn handshake<F, R>(&mut self, cx: &mut Context, action: F) -> Poll<io::Result<R>>
     where
         F: FnOnce(
-            &mut tokio_rustls::server::TlsStream<AddrStream>,
+            &mut tokio_rustls::server::TlsStream<TcpStream>,
             &mut Context,
         ) -> Poll<io::Result<R>>,
     {
@@ -109,7 +101,10 @@ impl TlsStream {
                 Ok(mut stream) => {
                     // Take some action here when the handshake happens
 
-                    let info = crate::info::ConnectionInfo::from(&stream);
+                    let info = crate::info::ConnectionInfo::Tcp(TLSConnectionInfo::from_stream(
+                        &stream,
+                        self.rx.remote_addr().clone(),
+                    ));
                     self.info.send(info.clone());
 
                     match &info {
@@ -131,8 +126,8 @@ impl TlsStream {
     }
 }
 
-impl From<Accept<AddrStream>> for TlsStream {
-    fn from(accept: Accept<AddrStream>) -> Self {
+impl TlsStream {
+    fn new(accept: Accept<TcpStream>, remote_addr: SocketAddr) -> Self {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         // We don't expect these to panic because we assume that the handshake has not finished when
@@ -140,17 +135,14 @@ impl From<Accept<AddrStream>> for TlsStream {
         // does this after the future has returned ready, we should be okay.
         let local_addr = accept
             .get_ref()
-            .map(|stream| stream.local_addr().into())
-            .expect("TLS handshake is not yet completed");
-        let remote_addr = accept
-            .get_ref()
-            .map(|stream| stream.remote_addr().into())
-            .expect("TLS handshake is not yet completed");
+            .and_then(|stream| stream.local_addr().ok())
+            .expect("TLS handshake is not yet completed")
+            .into();
 
         Self {
             state: TlsState::Handshake(accept),
             info: ConnectionInfoState::new(tx),
-            rx: self::info::TlsConnectionInfoReciever::new(rx, local_addr, remote_addr),
+            rx: self::info::TlsConnectionInfoReciever::new(rx, remote_addr, local_addr),
         }
     }
 }

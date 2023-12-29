@@ -35,6 +35,16 @@ impl ConnectionInfoState {
     }
 }
 
+pub trait Accept {
+    type Conn: AsyncRead + AsyncWrite + Send + Unpin + 'static;
+    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    fn poll_accept(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<Self::Conn, Self::Error>>;
+}
+
 /// Dispatching wrapper for potential stream connection types for clients
 #[derive(Debug)]
 #[pin_project]
@@ -59,15 +69,18 @@ impl Stream {
             ConnectionInfoState::Connected(info) => info.remote_addr(),
         }
     }
-}
 
-impl TryFrom<TcpStream> for Stream {
-    type Error = io::Error;
-    fn try_from(stream: TcpStream) -> Result<Self, Self::Error> {
-        Ok(Stream {
-            info: ConnectionInfoState::Connected((&stream).try_into()?),
+    pub fn tcp(stream: TcpStream, remote_addr: SocketAddr) -> Self {
+        Stream {
+            info: ConnectionInfoState::Connected(ConnectionInfo::Tcp(
+                crate::info::TcpConnectionInfo::new(
+                    stream.local_addr().expect("tcp stream local addr").into(),
+                    remote_addr,
+                    None,
+                ),
+            )),
             inner: Braid::Tcp(stream),
-        })
+        }
     }
 }
 

@@ -14,7 +14,8 @@ futures-util = "0.3"
 http = { version = "1" }
 http-body = { version = "1" }
 http-body-util = { version = "0.1" }
-hyper = { version = "<1" }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["client"] }
 pin-project = { version = "1" }
 rustls = "^0.21"
 static-assertions = { version = "1", package = "static_assertions" }

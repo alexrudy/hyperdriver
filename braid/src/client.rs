@@ -3,7 +3,8 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
-use hyper::client::connect::Connection;
+use std::net::SocketAddr;
+
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
@@ -18,6 +19,13 @@ use crate::tls::client::TlsStream;
 pub struct Stream {
     #[pin]
     inner: Braid<TlsStream>,
+}
+
+impl Stream {
+    pub async fn connect(addr: impl Into<SocketAddr>) -> std::io::Result<Self> {
+        let stream = TcpStream::connect(addr.into()).await?;
+        Ok(stream.into())
+    }
 }
 
 impl From<TcpStream> for Stream {
@@ -83,24 +91,5 @@ impl AsyncWrite for Stream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         self.project().inner.poll_shutdown(cx)
-    }
-}
-
-//TODO: This implementation of Connected is probably wrong
-// it doesn't actually respect anything about the connection states
-impl Connection for Stream {
-    fn connected(&self) -> hyper::client::connect::Connected {
-        match &self.inner {
-            Braid::Tcp(stream) => stream.connected(),
-            Braid::Duplex(stream) => {
-                if stream.info().protocol.is_http2() {
-                    hyper::client::connect::Connected::new().negotiated_h2()
-                } else {
-                    hyper::client::connect::Connected::new()
-                }
-            }
-            Braid::Tls(stream) => stream.connected(),
-            Braid::Unix(_) => hyper::client::connect::Connected::new().negotiated_h2(),
-        }
     }
 }

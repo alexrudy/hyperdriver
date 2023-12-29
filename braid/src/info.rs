@@ -6,7 +6,6 @@ use std::io;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use http::uri::Authority;
-use hyper::server::conn::AddrStream;
 use tokio::net::{TcpStream, UnixStream};
 
 use crate::duplex::DuplexStream;
@@ -128,11 +127,21 @@ pub struct TLSConnectionInfo {
 }
 
 impl TLSConnectionInfo {
-    fn build(stream: &tokio_rustls::server::TlsStream<AddrStream>) -> TcpConncectionInfo {
+    pub fn from_stream(
+        stream: &tokio_rustls::server::TlsStream<TcpStream>,
+        remote_addr: SocketAddr,
+    ) -> TcpConnectionInfo {
         let (stream, server_info) = stream.get_ref();
         let sni = server_info.server_name().map(|s| s.to_string());
 
-        let mut tcp = TcpConncectionInfo::from(stream);
+        let mut tcp = TcpConnectionInfo::new(
+            stream
+                .local_addr()
+                .expect("tcp stream should have local address")
+                .into(),
+            remote_addr,
+            None,
+        );
         tcp.tls = Some(Self {
             sni,
             validated_sni: false,
@@ -146,13 +155,13 @@ impl TLSConnectionInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct TcpConncectionInfo {
+pub struct TcpConnectionInfo {
     pub local_addr: SocketAddr,
     pub remote_addr: SocketAddr,
     pub tls: Option<TLSConnectionInfo>,
 }
 
-impl TcpConncectionInfo {
+impl TcpConnectionInfo {
     pub fn new(
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -163,33 +172,6 @@ impl TcpConncectionInfo {
             remote_addr,
             tls,
         }
-    }
-}
-
-impl From<&AddrStream> for TcpConncectionInfo {
-    fn from(stream: &AddrStream) -> Self {
-        let local_addr = stream.local_addr().into();
-        let remote_addr = stream.remote_addr().into();
-
-        Self {
-            local_addr,
-            remote_addr,
-            tls: None,
-        }
-    }
-}
-
-impl TryFrom<&TcpStream> for TcpConncectionInfo {
-    type Error = io::Error;
-    fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
-        let local_addr = stream.local_addr()?.into();
-        let remote_addr = stream.peer_addr()?.into();
-
-        Ok(Self {
-            local_addr,
-            remote_addr,
-            tls: None,
-        })
     }
 }
 
@@ -216,7 +198,7 @@ impl DuplexConnectionInfo {
 
 #[derive(Debug, Clone)]
 pub enum ConnectionInfo {
-    Tcp(TcpConncectionInfo),
+    Tcp(TcpConnectionInfo),
     Duplex(DuplexConnectionInfo),
     Unix(UnixConnectionInfo),
 }
@@ -236,25 +218,6 @@ impl ConnectionInfo {
             ConnectionInfo::Duplex(_) => None,
             ConnectionInfo::Unix(unix) => unix.remote_addr.as_ref(),
         }
-    }
-}
-
-impl From<&tokio_rustls::server::TlsStream<AddrStream>> for ConnectionInfo {
-    fn from(stream: &tokio_rustls::server::TlsStream<AddrStream>) -> Self {
-        ConnectionInfo::Tcp(TLSConnectionInfo::build(stream))
-    }
-}
-
-impl From<&AddrStream> for ConnectionInfo {
-    fn from(stream: &AddrStream) -> Self {
-        ConnectionInfo::Tcp(stream.into())
-    }
-}
-
-impl TryFrom<&TcpStream> for ConnectionInfo {
-    type Error = io::Error;
-    fn try_from(value: &TcpStream) -> Result<Self, Self::Error> {
-        Ok(ConnectionInfo::Tcp(value.try_into()?))
     }
 }
 
@@ -283,8 +246,8 @@ impl TryFrom<&UnixStream> for ConnectionInfo {
     }
 }
 
-impl From<TcpConncectionInfo> for ConnectionInfo {
-    fn from(value: TcpConncectionInfo) -> Self {
+impl From<TcpConnectionInfo> for ConnectionInfo {
+    fn from(value: TcpConnectionInfo) -> Self {
         Self::Tcp(value)
     }
 }

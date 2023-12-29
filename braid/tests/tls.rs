@@ -28,9 +28,10 @@ async fn braided_tls() {
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let incoming =
-        hyper::server::conn::AddrIncoming::bind(&(Ipv4Addr::LOCALHOST, 0).into()).unwrap();
-    let addr = incoming.local_addr();
+    let incoming = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = incoming.local_addr().unwrap();
 
     let server = braid::server::acceptor::Acceptor::from(braid::tls::server::TlsAcceptor::new(
         Arc::new(tls_config()),
@@ -46,16 +47,13 @@ async fn braided_tls() {
         }
     });
 
-    let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
-
-    let client_config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(tls_root_store())
-        .with_no_client_auth();
-    let connetor = tokio_rustls::TlsConnector::from(Arc::new(client_config));
-    let tls = braid::tls::client::TlsStream::from(
-        connetor.connect("example.com".try_into().unwrap(), tcp),
-    );
+    let tls = braid::tls::client::TlsStream::connect(
+        addr,
+        "example.com".try_into().unwrap(),
+        tls_root_store(),
+    )
+    .await
+    .unwrap();
 
     let mut conn = braid::client::Stream::from(tls);
 
