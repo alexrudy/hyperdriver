@@ -57,6 +57,12 @@ impl fmt::Display for Key {
     }
 }
 
+impl From<(http::uri::Scheme, http::uri::Authority)> for Key {
+    fn from(value: (http::uri::Scheme, http::uri::Authority)) -> Self {
+        Self(value.0, value.1)
+    }
+}
+
 impl From<http::Uri> for Key {
     fn from(value: http::Uri) -> Self {
         let parts = value.into_parts();
@@ -282,13 +288,11 @@ where
 impl<T: Poolable> Drop for Pooled<T> {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
-            if let Some(pool) = self.pool.upgrade() {
-                if let Ok(mut inner) = pool.lock() {
-                    if connection.is_open() && !connection.can_share() {
+            if connection.is_open() && !self.is_reused {
+                if let Some(pool) = self.pool.upgrade() {
+                    if let Ok(mut inner) = pool.lock() {
                         trace!(key=%self.key, "open connection returned to pool");
                         inner.push(self.key.clone(), connection);
-                    } else {
-                        trace!(key=%self.key, "closed connection not returned to pool");
                     }
                 }
             }
@@ -459,5 +463,195 @@ impl<T: Poolable, F, R, E> PinnedDrop for Checkout<T, F, R, E> {
                 inner.cancel_connection(&self.key);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        convert::Infallible,
+        sync::{
+            atomic::{AtomicBool, AtomicU16, Ordering},
+            Arc,
+        },
+    };
+
+    static IDENT: AtomicU16 = AtomicU16::new(1);
+
+    use super::*;
+
+    struct MockConnection {
+        open: Arc<AtomicBool>,
+        reuse: bool,
+        ident: u16,
+    }
+
+    impl MockConnection {
+        fn id(&self) -> u16 {
+            self.ident
+        }
+
+        fn new(reuse: bool) -> Self {
+            let conn = Self {
+                open: Arc::new(AtomicBool::new(true)),
+                reuse,
+                ident: IDENT.fetch_add(1, Ordering::SeqCst),
+            };
+            trace!(id=%conn.id(), "creating connection");
+            conn
+        }
+
+        async fn single() -> Result<Self, Infallible> {
+            Ok(Self::new(false))
+        }
+
+        async fn reusable() -> Result<Self, Infallible> {
+            Ok(Self::new(true))
+        }
+
+        fn close(&self) {
+            self.open.store(false, Ordering::SeqCst);
+        }
+    }
+
+    impl Poolable for MockConnection {
+        fn is_open(&self) -> bool {
+            self.open.load(Ordering::SeqCst)
+        }
+
+        fn can_share(&self) -> bool {
+            self.reuse
+        }
+
+        fn reuse(&mut self) -> Option<Self> {
+            if self.reuse && self.is_open() {
+                Some(Self {
+                    open: self.open.clone(),
+                    reuse: true,
+                    ident: self.ident,
+                })
+            } else {
+                None
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn checkout_simple() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+        });
+
+        let key: Key = (
+            http::uri::Scheme::HTTP,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let conn = pool
+            .checkout(key.clone(), false, move || MockConnection::single())
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        let cid = conn.id();
+        drop(conn);
+
+        let conn = pool
+            .checkout(key.clone(), false, move || MockConnection::single())
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        assert_eq!(conn.id(), cid, "connection should be re-used");
+
+        let c2 = pool
+            .checkout(key, false, move || MockConnection::single())
+            .await
+            .unwrap();
+
+        assert!(c2.is_open());
+        assert_ne!(c2.id(), cid, "connection should not be re-used");
+    }
+
+    #[tokio::test]
+    async fn checkout_multiplex() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+        });
+
+        let key: Key = (
+            http::uri::Scheme::HTTPS,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let conn = pool
+            .checkout(key.clone(), true, move || MockConnection::reusable())
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        let cid = conn.id();
+        drop(conn);
+
+        let conn = pool
+            .checkout(key.clone(), true, move || MockConnection::reusable())
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        assert_eq!(conn.id(), cid, "connection should be re-used");
+        conn.close();
+        drop(conn);
+
+        let conn = pool
+            .checkout(key.clone(), true, move || MockConnection::reusable())
+            .await
+            .unwrap();
+        assert!(conn.is_open());
+        assert_ne!(conn.id(), cid, "connection should not be re-used");
+    }
+
+    #[tokio::test]
+    async fn checkout_multiplex_contended() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+        });
+
+        let key: Key = (
+            http::uri::Scheme::HTTPS,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let mut checkout_a = std::pin::pin!(pool.checkout(key.clone(), true, move || rx));
+
+        assert!(futures_util::poll!(&mut checkout_a).is_pending());
+
+        let mut checkout_b =
+            std::pin::pin!(pool.checkout(key.clone(), true, move || MockConnection::reusable()));
+
+        assert!(futures_util::poll!(&mut checkout_b).is_pending());
+        assert!(tx.send(MockConnection::reusable().await.unwrap()).is_ok());
+        assert!(futures_util::poll!(&mut checkout_b).is_pending());
+
+        let conn_a = checkout_a.await.unwrap();
+        assert!(conn_a.is_open());
+
+        let conn_b = checkout_b.await.unwrap();
+        assert!(conn_b.is_open());
+        assert_eq!(conn_b.id(), conn_a.id(), "connection should be re-used");
     }
 }

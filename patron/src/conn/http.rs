@@ -32,7 +32,7 @@ where
         self.transport.poll_ready(cx).map_err(Into::into)
     }
 
-    #[tracing::instrument("http connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
+    #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
     fn call(&mut self, req: Uri) -> Self::Future {
         let next = self.transport.clone();
         let transport = std::mem::replace(&mut self.transport, next);
@@ -49,8 +49,6 @@ mod future {
     use braid::client::Stream;
     use http::Uri;
     use pin_project::pin_project;
-    use tower::util::Oneshot;
-    use tower::ServiceExt as _;
 
     use crate::conn::tcp::TcpConnectionError;
     use crate::conn::{Builder, ClientConnection, ConnectionError};
@@ -65,7 +63,7 @@ mod future {
         Error(Option<ConnectionError>),
         Connecting {
             #[pin]
-            oneshot: Oneshot<T, Uri>,
+            oneshot: T::Future,
             builder: Builder,
         },
         Handshaking {
@@ -86,10 +84,10 @@ mod future {
     where
         T: tower::Service<Uri>,
     {
-        pub(super) fn new(transport: T, builder: Builder, uri: Uri) -> Self {
+        pub(super) fn new(mut transport: T, builder: Builder, uri: Uri) -> Self {
             Self {
                 state: State::Connecting {
-                    oneshot: transport.oneshot(uri),
+                    oneshot: transport.call(uri),
                     builder,
                 },
             }
