@@ -28,17 +28,14 @@ impl Stream {
         Ok(stream.into())
     }
 
-    pub fn tls(
-        self,
-        domain: rustls::ServerName,
-        roots: impl Into<Arc<rustls::RootCertStore>>,
-    ) -> Self {
+    pub fn tls(self, domain: &str, config: Arc<rustls::ClientConfig>) -> Self {
         let core = match self.inner {
             Braid::NoTls(core) => core,
             Braid::Tls(_) => panic!("Stream::tls called twice"),
         };
+
         Stream {
-            inner: Braid::Tls(TlsStream::new(core, domain, roots)),
+            inner: Braid::Tls(TlsStream::new(core, domain, config)),
         }
     }
 }

@@ -18,10 +18,12 @@ hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["client"] }
 ouroboros = "0.18"
 pin-project = { version = "1" }
-rustls = "^0.21"
+rustls = "^0.22"
+rustls-native-certs = "0.7.0"
+socket2 = "0.5"
 static-assertions = { version = "1", package = "static_assertions" }
 thiserror = { version = "1" }
 tokio = { version = "1" }
-tokio-rustls = "0.24.1"
+tokio-rustls = "0.25"
 tower = { version = "0.4" }
 tracing = { version = "^0.1" }
