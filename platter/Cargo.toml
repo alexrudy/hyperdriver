@@ -24,3 +24,8 @@ tokio = { workspace = true, features = ["full"] }
 tower.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+rustls.workspace = true
+pem-rfc7468.workspace = true
+tracing-subscriber = "*"

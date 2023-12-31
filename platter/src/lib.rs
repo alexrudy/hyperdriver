@@ -11,7 +11,7 @@ use braid::server::Accept;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto::Builder;
 use tower::make::MakeService;
-use tracing::debug;
+use tracing::{debug, trace};
 
 mod connecting;
 use self::connecting::Connecting;
@@ -83,10 +83,17 @@ where
             }
             StateProj::Making { future, .. } => {
                 let service = ready!(future.poll(cx)).map_err(ServerError::make)?;
+                trace!("Server is ready to accept");
                 me.future.set(State::Accepting { service });
             }
             StateProj::Accepting { .. } => match ready!(Pin::new(me.incoming).poll_accept(cx)) {
                 Ok(stream) => {
+                    if let Some(addr) = stream.remote_addr() {
+                        trace!("accepted connection from {}", addr);
+                    } else {
+                        trace!("accepted connection from unknown address");
+                    }
+
                     if let StateProjOwn::Accepting { service } =
                         me.future.project_replace(State::Preparing)
                     {

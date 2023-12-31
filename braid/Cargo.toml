@@ -24,6 +24,6 @@ features = ["client", "client-legacy", "tokio"]
 
 [dev-dependencies]
 futures-util.workspace = true
-pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+pem-rfc7468.workspace = true
 tempfile = "3"
-tokio = { version = "1", features = ["macros"] }
+tokio = { workspace = true, features = ["macros"] }

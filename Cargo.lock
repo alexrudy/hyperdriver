@@ -624,11 +624,14 @@ dependencies = [
  "hyper",
  "hyper-util",
  "ouroboros",
+ "pem-rfc7468",
  "pin-project",
+ "rustls",
  "thiserror",
  "tokio",
  "tower",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
