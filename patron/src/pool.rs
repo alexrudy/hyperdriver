@@ -19,12 +19,16 @@ use std::time::Instant;
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::sync::oneshot::{Receiver, Sender};
+use tracing::debug;
 use tracing::instrument::Instrumented;
 use tracing::trace;
 use tracing::Instrument;
 
 use crate::lazy;
 use crate::lazy::Lazy;
+
+#[cfg(debug_assertions)]
+static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
 struct WeakOpt<T>(Option<Weak<T>>);
 
@@ -94,7 +98,7 @@ impl<T> Pool<T> {
 }
 
 impl<T: Poolable> Pool<T> {
-    #[tracing::instrument(skip(self, key, multiplex, connect), fields(key = %key))]
+    #[tracing::instrument(skip(self, key, multiplex, connect), fields(key = %key), level="debug")]
     pub(crate) fn checkout<F, R, E>(
         &self,
         key: Key,
@@ -110,36 +114,16 @@ impl<T: Poolable> Pool<T> {
             if inner.connecting.contains(&key) {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 inner.waiting.entry(key.clone()).or_default().push_back(tx);
-
-                Checkout {
-                    key: key.clone(),
-                    pool: WeakOpt::downgrade(&self.inner),
-                    waiter: Some(rx),
-                    connect: lazy::lazy(connect),
-                    connection_error: PhantomData,
-                }
-                .in_current_span()
+                trace!(%key, "waiting for connection");
+                Checkout::new(key, Some(&self.inner), Some(rx), connect).in_current_span()
             } else {
                 inner.connecting.insert(key.clone());
-
-                Checkout {
-                    key: key.clone(),
-                    pool: WeakOpt::downgrade(&self.inner),
-                    waiter: None,
-                    connect: lazy::lazy(connect),
-                    connection_error: PhantomData,
-                }
-                .in_current_span()
+                trace!(%key, "connecting to new host");
+                Checkout::new(key, Some(&self.inner), None, connect).in_current_span()
             }
         } else {
-            Checkout {
-                key: key.clone(),
-                pool: WeakOpt::downgrade(&self.inner),
-                waiter: None,
-                connect: lazy::lazy(connect),
-                connection_error: PhantomData,
-            }
-            .in_current_span()
+            trace!(%key, "connecting to host");
+            Checkout::new(key, Some(&self.inner), None, connect).in_current_span()
         }
     }
 }
@@ -171,14 +155,25 @@ impl<T> PoolInner<T> {
         }
         self.waiting.remove(key);
     }
-
-    fn push(&mut self, key: Key, connection: T) {
-        let idle = Idle::new(connection);
-        self.idle.entry(key).or_default().push(idle);
-    }
 }
 
 impl<T: Poolable> PoolInner<T> {
+    fn push(&mut self, key: Key, mut connection: T) {
+        self.connecting.remove(&key);
+        if let Some(waiters) = self.waiting.remove(&key) {
+            for waiter in waiters.into_iter().filter(|waiter| !waiter.is_closed()) {
+                if let Some(conn) = connection.reuse() {
+                    let _ = waiter.send(conn);
+                } else {
+                    panic!("waiter waiting on connection which can't be re-used");
+                }
+            }
+        }
+
+        let idle = Idle::new(connection);
+        self.idle.entry(key).or_default().push(idle);
+    }
+
     fn pop(&mut self, key: &Key) -> Option<T> {
         let mut empty = false;
         let mut idle_entry = None;
@@ -322,6 +317,40 @@ pub(crate) struct Checkout<T: Poolable, F, R, E> {
     #[pin]
     connect: Lazy<F, R>,
     connection_error: PhantomData<E>,
+    #[cfg(debug_assertions)]
+    id: usize,
+}
+
+impl<T: Poolable, F, R, E> Checkout<T, F, R, E>
+where
+    F: FnOnce() -> R,
+    R: Future<Output = Result<T, E>>,
+{
+    fn new(
+        key: Key,
+        pool: Option<&Arc<Mutex<PoolInner<T>>>>,
+        waiter: Option<Receiver<T>>,
+        connect: F,
+    ) -> Self {
+        #[cfg(debug_assertions)]
+        let id = CHECKOUT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let pool = if let Some(pool) = pool {
+            WeakOpt::downgrade(pool)
+        } else {
+            WeakOpt::none()
+        };
+
+        Self {
+            key,
+            pool,
+            waiter,
+            connect: lazy::lazy(connect),
+            connection_error: PhantomData,
+            #[cfg(debug_assertions)]
+            id,
+        }
+    }
 }
 
 impl<T: Poolable, F, R, E> Future for Checkout<T, F, R, E>
@@ -331,24 +360,27 @@ where
 {
     type Output = Result<Pooled<T>, Error<E>>;
 
+    #[cfg_attr(debug_assertions, tracing::instrument(skip_all, fields(id=%self.id), level="trace"))]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Some(connection) = ready!(self.as_mut().poll_waiter(cx)?) {
-            trace!(key=%self.key, "connection recieved from waiter");
+            debug!(key=%self.key, "connection recieved from waiter");
             return Poll::Ready(Ok(connection));
         }
 
+        trace!(key=%self.key, "checking pool for connection");
         if let Some(connection) = self.as_mut().checkout() {
             if connection.is_open() {
-                trace!(key=%self.key, "connection recieved from pool");
+                debug!(key=%self.key, "connection recieved from pool");
                 return Poll::Ready(Ok(connection));
             }
         }
 
+        trace!(key=%self.key, "polling for new connection");
         // Try to connect while we also wait for a checkout to be ready.
         let this = self.as_mut().project();
         match this.connect.poll(cx) {
             Poll::Ready(Ok(connection)) => {
-                trace!(key=%self.key, "connection recieved from connect");
+                debug!(key=%self.key, "connection recieved from connect");
                 Poll::Ready(Ok(self.as_mut().connected(connection)))
             }
             Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Connecting(e))),
@@ -424,17 +456,6 @@ where
     fn connected(self: Pin<&mut Self>, mut connection: T) -> Pooled<T> {
         if let Some(pool) = self.pool.upgrade() {
             if let Ok(mut inner) = pool.lock() {
-                inner.connecting.remove(&self.key);
-                if let Some(waiters) = inner.waiting.remove(&self.key) {
-                    for waiter in waiters.into_iter().filter(|waiter| !waiter.is_closed()) {
-                        if let Some(conn) = connection.reuse() {
-                            let _ = waiter.send(conn);
-                        } else {
-                            panic!("waiter waiting on connection which can't be re-used");
-                        }
-                    }
-                }
-
                 if let Some(reused) = connection.reuse() {
                     inner.push(self.key.clone(), reused);
                     return Pooled {

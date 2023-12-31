@@ -87,14 +87,7 @@ where
 {
     let res = client.get(uri).await.unwrap();
 
-    println!("Response: {} - {:?}", res.status(), res.version());
-
-    for (name, value) in res.headers() {
-        if let Ok(value) = value.to_str() {
-            println!("  {}: {}", name, value);
-        }
-    }
-    let mut body = res.into_body();
+    let (parts, mut body) = res.into_parts();
     let mut stdout = tokio::io::stdout();
     let mut total = 0usize;
     while let Some(Ok(frame)) = body.frame().await {
@@ -104,6 +97,8 @@ where
         }
     }
 
-    println!("Recieved {} body bytes", total);
+    let res = http::Response::from_parts(parts, ());
+
+    println!("Response: {} - {:?} {total}", res.status(), res.version());
     barrier.wait().await;
 }
