@@ -2,6 +2,8 @@ use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
 use hyper::body::Incoming;
+use hyper::server::conn::http2;
+use hyper_util::rt::TokioExecutor;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
     let cert_data = std::fs::read(format!("minica/{domain}/cert.pem")).unwrap();
@@ -36,6 +38,7 @@ async fn main() {
 
     let acceptor =
         braid::server::acceptor::Acceptor::from(incoming).tls(Arc::new(tls_config("localhost")));
+
     let server = platter::Server::new(
         acceptor,
         tower::service_fn(|_| async {
@@ -45,7 +48,8 @@ async fn main() {
                 Ok::<_, hyper::Error>(hyper::Response::new(arnold::Body::from(data.to_bytes())))
             }))
         }),
-    );
+    )
+    .with_protocol(http2::Builder::new(TokioExecutor::new()));
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -65,6 +69,7 @@ async fn main() {
 
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
+        eprintln!();
         println!("ctrl-c received, shutting down");
         tx.send(()).unwrap();
     });

@@ -58,7 +58,7 @@ where
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Output = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    type Output = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
