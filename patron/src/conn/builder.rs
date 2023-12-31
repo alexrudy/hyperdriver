@@ -80,10 +80,25 @@ pub enum ConnectionError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Builder {
+pub struct Builder {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
     pub(crate) protocol: ConnectionProtocol,
+}
+
+impl Builder {
+    pub fn set_protocol(&mut self, protocol: ConnectionProtocol) -> &mut Self {
+        self.protocol = protocol;
+        self
+    }
+
+    pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
+        &mut self.http1
+    }
+
+    pub fn http2(&mut self) -> &mut hyper::client::conn::http2::Builder<TokioExecutor> {
+        &mut self.http2
+    }
 }
 
 impl Builder {

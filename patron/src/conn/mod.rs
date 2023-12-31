@@ -8,7 +8,8 @@ mod dns;
 mod http;
 mod tcp;
 
-pub(crate) use self::builder::{Builder, ClientConnection, ConnectionError};
+pub use self::builder::ConnectionError;
+pub(crate) use self::builder::{Builder, ClientConnection};
 pub(crate) use self::http::HttpConnector;
 pub(crate) use self::tcp::TcpConnectionConfig;
 use self::tcp::TcpConnectionError;
@@ -31,7 +32,7 @@ where
 impl<T> Connect for T where T: Service<Uri, Response = ClientConnection, Error = ConnectionError> {}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub(crate) enum ConnectionProtocol {
+pub enum ConnectionProtocol {
     Http1,
 
     #[allow(dead_code)]

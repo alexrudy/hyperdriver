@@ -1,13 +1,17 @@
-use conn::{Connect, ConnectionError, HttpConnector};
+use conn::{Connect, HttpConnector};
 use hyper::body::{Body as _, Incoming};
 use pool::{Poolable, Pooled};
 use tower::ServiceExt;
 
+mod builder;
 mod conn;
 mod lazy;
 mod pool;
 
-fn tls_config() -> rustls::ClientConfig {
+pub use conn::ConnectionError;
+pub use conn::ConnectionProtocol;
+
+pub fn default_tls_config() -> rustls::ClientConfig {
     let mut roots = rustls::RootCertStore::empty();
     for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs") {
         roots.add(cert).unwrap();
@@ -24,6 +28,10 @@ pub struct Client<C> {
 }
 
 impl Client<HttpConnector> {
+    pub fn builder() -> builder::Builder {
+        builder::Builder::default()
+    }
+
     pub fn new() -> Self {
         Self {
             pool: pool::Pool::new(pool::Config {
@@ -31,7 +39,7 @@ impl Client<HttpConnector> {
                 max_idle_per_host: 32,
             }),
             connector: conn::HttpConnector::new(
-                conn::TcpConnector::new(conn::TcpConnectionConfig::default(), tls_config()),
+                conn::TcpConnector::new(conn::TcpConnectionConfig::default(), default_tls_config()),
                 conn::Builder::default(),
             ),
         }

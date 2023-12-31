@@ -230,6 +230,15 @@ pub struct Config {
     pub max_idle_per_host: usize,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            idle_timeout: Some(Duration::from_secs(90)),
+            max_idle_per_host: 32,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Idle<T> {
     at: Instant,
