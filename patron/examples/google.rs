@@ -11,8 +11,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uri: Uri = "https://www.google.com".parse()?;
     let res = client.get(uri.clone()).await?;
 
-    println!("Response: {}", res.status());
-    println!("Headers: {:#?}", res.headers());
+    println!("Response: {} - {:?}", res.status(), res.version());
+
+    for (name, value) in res.headers() {
+        if let Ok(value) = value.to_str() {
+            println!("  {}: {}", name, value);
+        }
+    }
 
     let r2 = client.get(uri.clone()).await?;
     println!("Response: {}", r2.status());

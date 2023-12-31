@@ -4,6 +4,7 @@ use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use thiserror::Error;
 use tower::Service;
+use tracing::trace;
 
 use crate::pool::Poolable;
 
@@ -131,6 +132,7 @@ impl Builder {
     ) -> Result<ClientConnection, ConnectionError> {
         match self.protocol {
             ConnectionProtocol::Http2 => {
+                trace!("handshake http2");
                 let (sender, conn) = self
                     .http2
                     .handshake(TokioIo::new(stream))
@@ -146,6 +148,7 @@ impl Builder {
                 })
             }
             ConnectionProtocol::Http1 => {
+                trace!("handshake http1");
                 let (sender, conn) = self
                     .http1
                     .handshake(TokioIo::new(stream))

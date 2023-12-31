@@ -13,7 +13,7 @@ use rustls::ClientConfig;
 use thiserror::Error;
 use tokio::net::TcpSocket;
 use tower::ServiceExt as _;
-use tracing::{trace, warn};
+use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 
@@ -64,15 +64,20 @@ where
         let transport = self.clone();
         let transport = std::mem::replace(self, transport);
 
-        Box::pin(async move {
-            let stream = transport.connect(host.clone(), port).await?;
-            if req.scheme_str() == Some("https") {
-                let stream = stream.tls(host.as_ref(), transport.tls.clone());
-                Ok(stream)
-            } else {
-                Ok(stream)
+        let span = tracing::trace_span!("tcp", host = %host, port = %port);
+
+        Box::pin(
+            async move {
+                let stream = transport.connect(host.clone(), port).await?;
+                if req.scheme_str() == Some("https") {
+                    let stream = stream.tls(host.as_ref(), transport.tls.clone());
+                    Ok(stream)
+                } else {
+                    Ok(stream)
+                }
             }
-        })
+            .instrument(span),
+        )
     }
 }
 
@@ -80,7 +85,6 @@ impl<R> TcpConnector<R>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {
-    #[tracing::instrument(skip(self), level = "debug")]
     async fn connect(&self, host: Box<str>, port: u16) -> Result<Stream, TcpConnectionError> {
         let mut addrs = self
             .resolver
@@ -283,9 +287,6 @@ impl Default for TcpConnectionConfig {
 }
 
 fn get_host_and_port(uri: &Uri) -> Result<(Box<str>, u16), TcpConnectionError> {
-    let port = uri.port_u16().map(|p| p.to_string()).unwrap_or("-".into());
-
-    trace!(scheme=%uri.scheme_str().unwrap_or("-"), host=%uri.host().unwrap_or("-"), port=%port, "tcp connecting");
     let host = uri.host().ok_or(TcpConnectionError::new("missing host"))?;
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let port = match uri.port_u16() {

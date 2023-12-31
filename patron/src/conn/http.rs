@@ -1,4 +1,5 @@
 use http::Uri;
+use tracing::{instrument::Instrumented, Instrument};
 
 use super::{Builder, ClientConnection, ConnectionError, TcpConnector, Transport};
 
@@ -22,7 +23,7 @@ where
 
     type Error = ConnectionError;
 
-    type Future = future::HttpConnectFuture<T>;
+    type Future = Instrumented<future::HttpConnectFuture<T>>;
 
     fn poll_ready(
         &mut self,
@@ -31,11 +32,12 @@ where
         self.transport.poll_ready(cx).map_err(Into::into)
     }
 
+    #[tracing::instrument("http connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
     fn call(&mut self, req: Uri) -> Self::Future {
         let next = self.transport.clone();
         let transport = std::mem::replace(&mut self.transport, next);
 
-        future::HttpConnectFuture::new(transport, self.builder.clone(), req)
+        future::HttpConnectFuture::new(transport, self.builder.clone(), req).in_current_span()
     }
 }
 

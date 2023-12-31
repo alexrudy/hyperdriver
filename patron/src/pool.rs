@@ -19,7 +19,9 @@ use std::time::Instant;
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::sync::oneshot::{Receiver, Sender};
+use tracing::instrument::Instrumented;
 use tracing::trace;
+use tracing::Instrument;
 
 use crate::lazy;
 use crate::lazy::Lazy;
@@ -86,12 +88,13 @@ impl<T> Pool<T> {
 }
 
 impl<T: Poolable> Pool<T> {
+    #[tracing::instrument(skip(self, key, multiplex, connect), fields(key = %key))]
     pub(crate) fn checkout<F, R, E>(
         &self,
         key: Key,
         multiplex: bool,
         connect: F,
-    ) -> Checkout<T, F, R, E>
+    ) -> Instrumented<Checkout<T, F, R, E>>
     where
         F: FnOnce() -> R,
         R: Future<Output = Result<T, E>>,
@@ -109,6 +112,7 @@ impl<T: Poolable> Pool<T> {
                     connect: lazy::lazy(connect),
                     connection_error: PhantomData,
                 }
+                .in_current_span()
             } else {
                 inner.connecting.insert(key.clone());
 
@@ -119,6 +123,7 @@ impl<T: Poolable> Pool<T> {
                     connect: lazy::lazy(connect),
                     connection_error: PhantomData,
                 }
+                .in_current_span()
             }
         } else {
             Checkout {
@@ -128,6 +133,7 @@ impl<T: Poolable> Pool<T> {
                 connect: lazy::lazy(connect),
                 connection_error: PhantomData,
             }
+            .in_current_span()
         }
     }
 }
@@ -168,38 +174,47 @@ impl<T> PoolInner<T> {
 
 impl<T: Poolable> PoolInner<T> {
     fn pop(&mut self, key: &Key) -> Option<T> {
+        let mut empty = false;
+        let mut idle_entry = None;
         if let Some(idle) = self.idle.get_mut(key) {
-            if idle.is_empty() {
-                return None;
-            }
+            if !idle.is_empty() {
+                let exipred = self
+                    .config
+                    .idle_timeout
+                    .filter(|timeout| timeout.as_secs_f64() > 0.0)
+                    .and_then(|timeout| {
+                        let now: Instant = Instant::now();
+                        now.checked_sub(timeout)
+                    });
 
-            let exipred = self
-                .config
-                .idle_timeout
-                .filter(|timeout| timeout.as_secs_f64() > 0.0)
-                .and_then(|timeout| {
-                    let now: Instant = Instant::now();
-                    now.checked_sub(timeout)
-                });
+                trace!(%key, "checking {} idle connections", idle.len());
 
-            trace!(%key, "checking {} idle connections", idle.len());
+                while let Some(entry) = idle.pop() {
+                    if exipred.map(|expired| entry.at < expired).unwrap_or(false) {
+                        trace!(%key, "found expired connection");
+                        empty = true;
+                        break;
+                    }
 
-            while let Some(entry) = idle.pop() {
-                if exipred.map(|expired| entry.at < expired).unwrap_or(false) {
-                    trace!(%key, "found expired connection");
-                    break;
+                    if entry.inner.is_open() {
+                        trace!(%key, "found idle connection");
+                        idle_entry = Some(entry.inner);
+                        break;
+                    } else {
+                        trace!(%key, "found closed connection");
+                    }
                 }
 
-                if entry.inner.is_open() {
-                    trace!(%key, "found idle connection");
-                    return Some(entry.inner);
-                } else {
-                    trace!(%key, "found closed connection");
-                }
+                empty |= idle.is_empty();
             }
         }
 
-        None
+        if empty {
+            trace!(%key, "removing empty idle list");
+            self.idle.remove(key);
+        }
+
+        idle_entry
     }
 }
 
