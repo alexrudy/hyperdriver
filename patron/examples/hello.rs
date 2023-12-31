@@ -22,6 +22,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .alias("tls-root")
                 .help("Where to find the TLS root"),
         )
+        .arg(
+            clap::Arg::new("protocol")
+                .short('1')
+                .long("http1")
+                .action(clap::ArgAction::SetTrue)
+                .help("Use HTTP/1.1"),
+        )
         .get_matches();
 
     let mut client = Client::builder();
@@ -38,7 +45,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = config.with_root_certificates(roots).with_no_client_auth();
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         client.with_tls(config);
-        client.conn().set_protocol(ConnectionProtocol::Http2);
+
+        if args.get_flag("protocol") {
+            client.conn().set_protocol(ConnectionProtocol::Http1);
+        } else {
+            client.conn().set_protocol(ConnectionProtocol::Http2);
+        }
     }
 
     client.conn();
