@@ -1,3 +1,5 @@
+use std::fmt;
+
 use ::http::{Response, Version};
 use braid::client::Stream;
 use hyper::body::Incoming;
@@ -11,6 +13,14 @@ use super::{tcp, ConnectionProtocol};
 
 pub struct ClientConnection {
     inner: InnerClientConnection,
+}
+
+impl fmt::Debug for ClientConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClientConnection")
+            .field("version", &self.version())
+            .finish()
+    }
 }
 
 impl ClientConnection {

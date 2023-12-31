@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use http::Uri;
 use http_body_util::BodyExt as _;
-use patron::{Client, ConnectionProtocol};
+use patron::{Client, Connect, ConnectionProtocol};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
@@ -29,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .action(clap::ArgAction::SetTrue)
                 .help("Use HTTP/1.1"),
         )
+        .arg(clap::Arg::new("requests").short('n').long("count"))
         .get_matches();
 
     let mut client = Client::builder();
@@ -53,15 +56,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    client.conn();
+    let client = client.build();
 
-    let mut client = client.build();
+    let n = *args.get_one::<usize>("requests").unwrap_or(&10);
+    let done = Arc::new(tokio::sync::Barrier::new(n + 1));
 
     let uri: Uri = args
         .get_one::<String>("uri")
         .expect("uri argument must be present")
         .parse()?;
-    let res = client.get(uri.clone()).await?;
+    for _ in 1usize..=n {
+        tokio::spawn(send(client.clone(), uri.clone(), done.clone()));
+    }
+
+    done.wait().await;
+
+    let done = Arc::new(tokio::sync::Barrier::new(n + 1));
+    for _ in 1usize..=n {
+        tokio::spawn(send(client.clone(), uri.clone(), done.clone()));
+    }
+
+    done.wait().await;
+
+    Ok(())
+}
+
+async fn send<C>(mut client: Client<C>, uri: Uri, barrier: Arc<tokio::sync::Barrier>)
+where
+    C: Connect + Clone,
+{
+    let res = client.get(uri).await.unwrap();
 
     println!("Response: {} - {:?}", res.status(), res.version());
 
@@ -76,11 +100,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(Ok(frame)) = body.frame().await {
         if let Some(data) = frame.data_ref() {
             total += data.len();
-            stdout.write_all(&data).await?;
+            stdout.write_all(&data).await.unwrap();
         }
     }
 
     println!("Recieved {} body bytes", total);
-
-    Ok(())
+    barrier.wait().await;
 }

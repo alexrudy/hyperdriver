@@ -1,4 +1,4 @@
-use conn::{Connect, HttpConnector};
+use conn::HttpConnector;
 use hyper::body::{Body as _, Incoming};
 use pool::{Poolable, Pooled};
 use tower::ServiceExt;
@@ -8,6 +8,7 @@ mod conn;
 mod lazy;
 mod pool;
 
+pub use conn::Connect;
 pub use conn::ConnectionError;
 pub use conn::ConnectionProtocol;
 
@@ -22,9 +23,24 @@ pub fn default_tls_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
+#[derive(Debug)]
 pub struct Client<C> {
     connector: C,
     pool: pool::Pool<conn::ClientConnection>,
+    protocol: ConnectionProtocol,
+}
+
+impl<C> Clone for Client<C>
+where
+    C: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            connector: self.connector.clone(),
+            pool: self.pool.clone(),
+            protocol: self.protocol,
+        }
+    }
 }
 
 impl Client<HttpConnector> {
@@ -42,6 +58,7 @@ impl Client<HttpConnector> {
                 conn::TcpConnector::new(conn::TcpConnectionConfig::default(), default_tls_config()),
                 conn::Builder::default(),
             ),
+            protocol: ConnectionProtocol::Http1,
         }
     }
 }
@@ -66,7 +83,7 @@ where
 
         //TODO: How do we handle potential multiplexing here? Really, the connector should decide?
         self.pool
-            .checkout(key, false, move || async move {
+            .checkout(key, self.protocol.multiplex(), move || async move {
                 let mut conn = connecting.await?;
                 conn.when_ready()
                     .await

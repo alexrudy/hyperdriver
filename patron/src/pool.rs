@@ -167,7 +167,7 @@ impl<T> PoolInner<T> {
     fn cancel_connection(&mut self, key: &Key) {
         let existed = self.connecting.remove(key);
         if existed {
-            trace!(?key, "connection cancelled");
+            trace!(?key, "pending connection cancelled");
         }
         self.waiting.remove(key);
     }
@@ -215,7 +215,7 @@ impl<T: Poolable> PoolInner<T> {
             }
         }
 
-        if empty {
+        if empty && !idle_entry.as_ref().map(|i| i.can_share()).unwrap_or(false) {
             trace!(%key, "removing empty idle list");
             self.idle.remove(key);
         }
@@ -311,7 +311,6 @@ impl<T: Poolable> Drop for Pooled<T> {
 
 #[derive(Debug, Error)]
 pub enum Error<E> {
-    Closed,
     Connecting(#[source] E),
 }
 
@@ -380,10 +379,10 @@ where
                             pool: this.pool.clone(),
                         })))
                     } else {
-                        Poll::Ready(Err(Error::Closed))
+                        Poll::Ready(Ok(None))
                     }
                 }
-                Poll::Ready(Err(_)) => Poll::Ready(Err(Error::Closed)),
+                Poll::Ready(Err(_)) => Poll::Ready(Ok(None)),
                 Poll::Pending => {
                     *this.waiter = Some(rx);
                     Poll::Pending
@@ -400,6 +399,7 @@ where
             if let Ok(mut inner) = pool.lock() {
                 if let Some(mut connection) = inner.pop(&self.key) {
                     if let Some(reuse) = connection.reuse() {
+                        trace!("checking out re-usable connection");
                         inner.push(self.key.clone(), reuse);
                         return Some(Pooled {
                             connection: Some(connection),

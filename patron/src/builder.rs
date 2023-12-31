@@ -32,10 +32,12 @@ impl Builder {
 impl Builder {
     pub fn build(self) -> Client<HttpConnector> {
         let tls = self.tls.unwrap_or_else(super::default_tls_config);
+        let protocol = self.conn.protocol;
 
         Client {
             connector: HttpConnector::new(crate::conn::TcpConnector::new(self.tcp, tls), self.conn),
             pool: crate::pool::Pool::new(self.pool),
+            protocol,
         }
     }
 }
