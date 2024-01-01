@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 camino.workspace = true
 futures-core.workspace = true
+futures-util.workspace = true
 http.workspace = true
 hyper = { workspace = true, features = ["full"] }
 pin-project.workspace = true

@@ -15,6 +15,10 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tower::Service;
 
+use crate::info::{Connection, ConnectionInfo};
+
+use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+
 #[derive(Clone, Debug)]
 pub struct TlsConnector {
     http: HttpConnector,
@@ -85,11 +89,28 @@ impl<IO> fmt::Debug for State<IO> {
 #[derive(Debug)]
 pub struct TlsStream<IO> {
     state: State<IO>,
+    tx: TlsConnectionInfoSender,
+    rx: TlsConnectionInfoReciever,
+}
+
+impl<IO> TlsStream<IO> {
+    pub async fn info(&self) -> io::Result<ConnectionInfo> {
+        self.rx.recv().await
+    }
 }
 
 impl<IO> TlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
+{
+    pub async fn finish_handshake(&mut self) -> io::Result<()> {
+        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
+    }
+}
+
+impl<IO> TlsStream<IO>
+where
+    IO: Connection + AsyncRead + AsyncWrite + Unpin,
 {
     pub fn new(stream: IO, domain: &str, config: Arc<ClientConfig>) -> Self {
         let domain = rustls::pki_types::ServerName::try_from(domain)
@@ -124,6 +145,9 @@ where
             State::Handshake(ref mut accept) => match ready!(Pin::new(accept).poll(cx)) {
                 Ok(mut stream) => {
                     // Take some action here when the handshake happens
+                    let (_, client_info) = stream.get_ref();
+                    let info = TlsConnectionInfo::client(client_info);
+                    self.tx.send(info.clone());
 
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
@@ -137,10 +161,21 @@ where
     }
 }
 
-impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO> {
+impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO>
+where
+    IO: Connection,
+{
     fn from(accept: tokio_rustls::Connect<IO>) -> Self {
+        let stream = accept.get_ref().expect("tls connect should have stream");
+
+        let info = stream.info();
+
+        let (tx, rx) = TlsConnectionInfo::channel(info);
+
         Self {
             state: State::Handshake(accept),
+            tx,
+            rx,
         }
     }
 }

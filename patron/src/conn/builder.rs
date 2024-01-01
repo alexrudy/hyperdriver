@@ -7,7 +7,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use thiserror::Error;
 use tracing::trace;
 
-use crate::pool::Poolable;
+use crate::{conn::tcp::TcpConnectionError, pool::Poolable};
 
 use super::{tcp, ConnectionProtocol};
 
@@ -121,42 +121,65 @@ impl Builder {
 }
 
 impl Builder {
+    async fn handshake_h2(&self, stream: Stream) -> Result<ClientConnection, ConnectionError> {
+        trace!("handshake http2");
+        let (sender, conn) = self
+            .http2
+            .handshake(TokioIo::new(stream))
+            .await
+            .map_err(ConnectionError::Handshake)?;
+        tokio::spawn(async {
+            if let Err(err) = conn.await {
+                tracing::error!(%err, "h2 connection error");
+            }
+        });
+        Ok(ClientConnection {
+            inner: InnerClientConnection::H2(sender),
+        })
+    }
+
+    async fn handshake_h1(&self, stream: Stream) -> Result<ClientConnection, ConnectionError> {
+        trace!("handshake http1");
+        let (sender, conn) = self
+            .http1
+            .handshake(TokioIo::new(stream))
+            .await
+            .map_err(ConnectionError::Handshake)?;
+        tokio::spawn(async {
+            if let Err(err) = conn.await {
+                tracing::error!(%err, "h1 connection error");
+            }
+        });
+        Ok(ClientConnection {
+            inner: InnerClientConnection::H1(sender),
+        })
+    }
+
     pub(crate) async fn handshake(
         &self,
-        stream: Stream,
+        mut stream: Stream,
     ) -> Result<ClientConnection, ConnectionError> {
         match self.protocol {
-            ConnectionProtocol::Http2 => {
-                trace!("handshake http2");
-                let (sender, conn) = self
-                    .http2
-                    .handshake(TokioIo::new(stream))
-                    .await
-                    .map_err(ConnectionError::Handshake)?;
-                tokio::spawn(async {
-                    if let Err(err) = conn.await {
-                        tracing::error!(%err, "h2 connection error");
-                    }
-                });
-                Ok(ClientConnection {
-                    inner: InnerClientConnection::H2(sender),
-                })
-            }
+            ConnectionProtocol::Http2 => self.handshake_h2(stream).await,
             ConnectionProtocol::Http1 => {
-                trace!("handshake http1");
-                let (sender, conn) = self
-                    .http1
-                    .handshake(TokioIo::new(stream))
-                    .await
-                    .map_err(ConnectionError::Handshake)?;
-                tokio::spawn(async {
-                    if let Err(err) = conn.await {
-                        tracing::error!(%err, "h1 connection error");
-                    }
-                });
-                Ok(ClientConnection {
-                    inner: InnerClientConnection::H1(sender),
-                })
+                stream.finish_handshake().await.map_err(|error| {
+                    ConnectionError::Connecting(TcpConnectionError::msg("tls handshake error")(
+                        error,
+                    ))
+                })?;
+
+                let info = stream.info().await.map_err(|error| {
+                    ConnectionError::Connecting(TcpConnectionError::msg("tls info error")(error))
+                })?;
+
+                if info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
+                    == Some(&braid::info::Protocol::Http(http::Version::HTTP_2))
+                {
+                    trace!("alpn h2 switching");
+                    return self.handshake_h2(stream).await;
+                }
+
+                self.handshake_h1(stream).await
             }
         }
     }

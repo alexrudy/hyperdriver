@@ -160,11 +160,7 @@ where
             }
             StateProj::Accepting { .. } => match ready!(Pin::new(me.incoming).poll_accept(cx)) {
                 Ok(stream) => {
-                    if let Some(addr) = stream.remote_addr() {
-                        trace!("accepted connection from {}", addr);
-                    } else {
-                        trace!("accepted connection from unknown address");
-                    }
+                    trace!("accepted connection from {}", stream.remote_addr());
 
                     if let StateProjOwn::Accepting { service } =
                         me.future.project_replace(State::Preparing)
