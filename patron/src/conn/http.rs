@@ -1,7 +1,7 @@
 use http::Uri;
 use tracing::{instrument::Instrumented, Instrument};
 
-use super::{Builder, ClientConnection, ConnectionError, TcpConnector, Transport};
+use super::{Builder, Connection, ConnectionError, TcpConnector, Transport};
 
 #[derive(Debug, Clone)]
 pub struct HttpConnector<T = TcpConnector> {
@@ -19,7 +19,7 @@ impl<T> tower::Service<Uri> for HttpConnector<T>
 where
     T: Transport + Clone,
 {
-    type Response = ClientConnection;
+    type Response = Connection;
 
     type Error = ConnectionError;
 
@@ -51,7 +51,7 @@ mod future {
     use pin_project::pin_project;
 
     use crate::conn::tcp::TcpConnectionError;
-    use crate::conn::{Builder, ClientConnection, ConnectionError};
+    use crate::conn::{Builder, Connection, ConnectionError};
 
     type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
@@ -67,7 +67,7 @@ mod future {
             builder: Builder,
         },
         Handshaking {
-            future: BoxFuture<'static, ClientConnection, ConnectionError>,
+            future: BoxFuture<'static, Connection, ConnectionError>,
         },
     }
 
@@ -105,7 +105,7 @@ mod future {
     where
         T: tower::Service<Uri, Response = Stream, Error = TcpConnectionError>,
     {
-        type Output = Result<ClientConnection, ConnectionError>;
+        type Output = Result<Connection, ConnectionError>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let mut this = self.project();

@@ -11,11 +11,11 @@ use crate::{conn::tcp::TcpConnectionError, pool::Poolable};
 
 use super::{tcp, ConnectionProtocol};
 
-pub struct ClientConnection {
-    inner: InnerClientConnection,
+pub struct Connection {
+    inner: InnerConnection,
 }
 
-impl fmt::Debug for ClientConnection {
+impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ClientConnection")
             .field("version", &self.version())
@@ -23,59 +23,59 @@ impl fmt::Debug for ClientConnection {
     }
 }
 
-impl ClientConnection {
+impl Connection {
     pub(crate) async fn send_request(
         &mut self,
         request: arnold::Request,
     ) -> Result<Response<Incoming>, hyper::Error> {
         match &mut self.inner {
-            InnerClientConnection::H2(conn) => conn.send_request(request).await,
-            InnerClientConnection::H1(conn) => conn.send_request(request).await,
+            InnerConnection::H2(conn) => conn.send_request(request).await,
+            InnerConnection::H1(conn) => conn.send_request(request).await,
         }
     }
 
     #[allow(dead_code)]
     pub(crate) fn version(&self) -> Version {
         match &self.inner {
-            InnerClientConnection::H2(_) => Version::HTTP_2,
-            InnerClientConnection::H1(_) => Version::HTTP_11,
+            InnerConnection::H2(_) => Version::HTTP_2,
+            InnerConnection::H1(_) => Version::HTTP_11,
         }
     }
 
     pub(crate) async fn when_ready(&mut self) -> Result<(), hyper::Error> {
         match &mut self.inner {
-            InnerClientConnection::H2(conn) => conn.ready().await,
-            InnerClientConnection::H1(conn) => conn.ready().await,
+            InnerConnection::H2(conn) => conn.ready().await,
+            InnerConnection::H1(conn) => conn.ready().await,
         }
     }
 }
 
-enum InnerClientConnection {
+enum InnerConnection {
     H2(hyper::client::conn::http2::SendRequest<arnold::Body>),
     H1(hyper::client::conn::http1::SendRequest<arnold::Body>),
 }
 
-impl Poolable for ClientConnection {
+impl Poolable for Connection {
     fn is_open(&self) -> bool {
         match &self.inner {
-            InnerClientConnection::H2(ref conn) => conn.is_ready(),
-            InnerClientConnection::H1(ref conn) => conn.is_ready(),
+            InnerConnection::H2(ref conn) => conn.is_ready(),
+            InnerConnection::H1(ref conn) => conn.is_ready(),
         }
     }
 
     fn can_share(&self) -> bool {
         match &self.inner {
-            InnerClientConnection::H2(_) => true,
-            InnerClientConnection::H1(_) => false,
+            InnerConnection::H2(_) => true,
+            InnerConnection::H1(_) => false,
         }
     }
 
     fn reuse(&mut self) -> Option<Self> {
         match &self.inner {
-            InnerClientConnection::H2(conn) => Some(Self {
-                inner: InnerClientConnection::H2(conn.clone()),
+            InnerConnection::H2(conn) => Some(Self {
+                inner: InnerConnection::H2(conn.clone()),
             }),
-            InnerClientConnection::H1(_) => None,
+            InnerConnection::H1(_) => None,
         }
     }
 }
@@ -121,7 +121,7 @@ impl Builder {
 }
 
 impl Builder {
-    async fn handshake_h2(&self, stream: Stream) -> Result<ClientConnection, ConnectionError> {
+    async fn handshake_h2(&self, stream: Stream) -> Result<Connection, ConnectionError> {
         trace!("handshake http2");
         let (sender, conn) = self
             .http2
@@ -133,12 +133,12 @@ impl Builder {
                 tracing::error!(%err, "h2 connection error");
             }
         });
-        Ok(ClientConnection {
-            inner: InnerClientConnection::H2(sender),
+        Ok(Connection {
+            inner: InnerConnection::H2(sender),
         })
     }
 
-    async fn handshake_h1(&self, stream: Stream) -> Result<ClientConnection, ConnectionError> {
+    async fn handshake_h1(&self, stream: Stream) -> Result<Connection, ConnectionError> {
         trace!("handshake http1");
         let (sender, conn) = self
             .http1
@@ -150,15 +150,15 @@ impl Builder {
                 tracing::error!(%err, "h1 connection error");
             }
         });
-        Ok(ClientConnection {
-            inner: InnerClientConnection::H1(sender),
+        Ok(Connection {
+            inner: InnerConnection::H1(sender),
         })
     }
 
     pub(crate) async fn handshake(
         &self,
         mut stream: Stream,
-    ) -> Result<ClientConnection, ConnectionError> {
+    ) -> Result<Connection, ConnectionError> {
         match self.protocol {
             ConnectionProtocol::Http2 => self.handshake_h2(stream).await,
             ConnectionProtocol::Http1 => {
@@ -176,6 +176,10 @@ impl Builder {
                     == Some(&braid::info::Protocol::Http(http::Version::HTTP_2))
                 {
                     trace!("alpn h2 switching");
+                    //TODO: There should be some way to multiplex at this point.
+                    // One strategy: separate the transport and protocol pieces,
+                    // and allow the pool to introspect the transport to see if we
+                    // are doing ALPN.
                     return self.handshake_h2(stream).await;
                 }
 

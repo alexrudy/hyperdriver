@@ -9,7 +9,7 @@ mod http;
 mod tcp;
 
 pub use self::builder::ConnectionError;
-pub(crate) use self::builder::{Builder, ClientConnection};
+pub(crate) use self::builder::{Builder, Connection};
 pub(crate) use self::http::HttpConnector;
 pub(crate) use self::tcp::TcpConnectionConfig;
 use self::tcp::TcpConnectionError;
@@ -25,11 +25,11 @@ impl<T> Transport for T where T: Service<Uri, Response = Stream, Error = TcpConn
 
 pub trait Connect
 where
-    Self: Service<Uri, Response = ClientConnection, Error = ConnectionError>,
+    Self: Service<Uri, Response = Connection, Error = ConnectionError>,
 {
 }
 
-impl<T> Connect for T where T: Service<Uri, Response = ClientConnection, Error = ConnectionError> {}
+impl<T> Connect for T where T: Service<Uri, Response = Connection, Error = ConnectionError> {}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum ConnectionProtocol {

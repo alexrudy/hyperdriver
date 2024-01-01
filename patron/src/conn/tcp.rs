@@ -390,3 +390,39 @@ fn connect(
         .map(Stream::from)
     })
 }
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn test_get_host_and_port() {
+        let uri: Uri = "http://example.com".parse().unwrap();
+        assert_eq!(get_host_and_port(&uri).unwrap(), ("example.com".into(), 80));
+
+        let uri: Uri = "http://example.com:8080".parse().unwrap();
+        assert_eq!(
+            get_host_and_port(&uri).unwrap(),
+            ("example.com".into(), 8080)
+        );
+
+        let uri: Uri = "https://example.com".parse().unwrap();
+        assert_eq!(
+            get_host_and_port(&uri).unwrap(),
+            ("example.com".into(), 443)
+        );
+
+        let uri: Uri = "https://example.com:8443".parse().unwrap();
+        assert_eq!(
+            get_host_and_port(&uri).unwrap(),
+            ("example.com".into(), 8443)
+        );
+
+        let uri: Uri = "grpc://example.com".parse().unwrap();
+        assert!(get_host_and_port(&uri).is_err());
+
+        let uri: Uri = "grpc://[::1]".parse().unwrap();
+        assert!(get_host_and_port(&uri).is_err());
+    }
+}

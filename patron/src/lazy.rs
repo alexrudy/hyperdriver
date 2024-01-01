@@ -51,3 +51,22 @@ where
         unreachable!("lazy future is empty");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn lazy_future() {
+        let count = AtomicUsize::new(0);
+        let mut future = std::pin::pin!(lazy(|| async {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        (&mut future).await;
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+}

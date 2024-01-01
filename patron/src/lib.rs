@@ -6,6 +6,7 @@ use http::Version;
 use hyper::body::Incoming;
 use thiserror::Error;
 use tower::ServiceExt;
+use tracing::warn;
 
 mod builder;
 mod conn;
@@ -72,7 +73,7 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 #[derive(Debug)]
 pub struct Client<C> {
     connector: C,
-    pool: pool::Pool<conn::ClientConnection>,
+    pool: pool::Pool<conn::Connection>,
     protocol: ConnectionProtocol,
 }
 
@@ -122,7 +123,7 @@ where
     async fn connect_to(
         &self,
         uri: http::Uri,
-    ) -> Result<Pooled<conn::ClientConnection>, pool::Error<conn::ConnectionError>> {
+    ) -> Result<Pooled<conn::Connection>, pool::Error<conn::ConnectionError>> {
         let key: pool::Key = uri.clone().into();
 
         let connecting = self.connector.clone().oneshot(uri);
@@ -160,10 +161,11 @@ where
 
         if conn.version() == Version::HTTP_11 {
             if request.version() == Version::HTTP_2 {
+                warn!("refusing to send HTTP/2 request to HTTP/1.1 connection");
                 return Err(Error::UnsupportedProtocol);
             }
 
-            //TODO: Configure set host header
+            //TODO: Configure set host header?
             let uri = request.uri().clone();
             request
                 .headers_mut()

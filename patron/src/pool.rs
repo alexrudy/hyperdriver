@@ -262,6 +262,12 @@ pub(crate) struct Pooled<T: Poolable> {
     pool: WeakOpt<Mutex<PoolInner<T>>>,
 }
 
+impl<T: fmt::Debug + Poolable> fmt::Debug for Pooled<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Pooled").field(&self.connection).finish()
+    }
+}
+
 impl<T: Poolable> Deref for Pooled<T> {
     type Target = T;
 
@@ -273,19 +279,6 @@ impl<T: Poolable> Deref for Pooled<T> {
 impl<T: Poolable> DerefMut for Pooled<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.connection.as_mut().unwrap()
-    }
-}
-
-impl<T: Poolable> fmt::Debug for Pooled<T>
-where
-    T: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Pooled")
-            .field("connection", &self.connection)
-            .field("key", &self.key)
-            .field("is_reused", &self.is_reused)
-            .finish()
     }
 }
 
@@ -601,6 +594,8 @@ mod tests {
 
         assert!(conn.is_open());
         assert_eq!(conn.id(), cid, "connection should be re-used");
+        conn.close();
+        drop(conn);
 
         let c2 = pool
             .checkout(key, false, move || MockConnection::single())
