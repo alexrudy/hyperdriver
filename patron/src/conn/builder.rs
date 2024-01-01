@@ -87,6 +87,15 @@ pub enum ConnectionError {
 
     #[error("handshake: {0}")]
     Handshake(#[source] hyper::Error),
+
+    #[error("connection cancelled")]
+    Canceled(#[source] hyper::Error),
+
+    #[error("connection closed")]
+    Closed(#[source] hyper::Error),
+
+    #[error("connection timeout")]
+    Timeout,
 }
 
 #[derive(Debug, Clone)]

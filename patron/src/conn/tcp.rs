@@ -104,7 +104,7 @@ where
                 self.config.local_address_ipv6,
             ));
 
-            let prefered = TcpConnectingSet::new(prefered, self.config.keep_alive_timeout);
+            let prefered = TcpConnectingSet::new(prefered, self.config.connect_timeout);
             if fallback.is_empty() {
                 return TcpConnecting {
                     prefered,
@@ -113,10 +113,11 @@ where
                 };
             }
 
-            let fallback = TcpConnectingSet::new(fallback, self.config.keep_alive_timeout);
+            let fallback = TcpConnectingSet::new(fallback, self.config.connect_timeout);
             let fallback = TcpFallback {
                 connect: fallback,
                 delay: *fallback_delay,
+                config: &self.config,
             };
 
             return TcpConnecting {
@@ -125,7 +126,7 @@ where
                 config: &self.config,
             };
         }
-        let prefered = TcpConnectingSet::new(addrs, self.config.keep_alive_timeout);
+        let prefered = TcpConnectingSet::new(addrs, self.config.connect_timeout);
         TcpConnecting {
             prefered,
             fallback: None,
@@ -137,7 +138,7 @@ where
 /// Future which combines a primary and fallback connection set.
 pub(crate) struct TcpConnecting<'c> {
     prefered: TcpConnectingSet,
-    fallback: Option<TcpFallback>,
+    fallback: Option<TcpFallback<'c>>,
     config: &'c TcpConnectionConfig,
 }
 
@@ -147,7 +148,7 @@ impl<'c> TcpConnecting<'c> {
             futures_util::future::Either::Left(async move {
                 tokio::time::sleep(fallback.delay).await;
                 trace!("tcp starting connection fallback");
-                fallback.connect
+                fallback.connect.connect(fallback.config).await
             })
         } else {
             futures_util::future::Either::Right(futures_util::future::pending())
@@ -155,34 +156,28 @@ impl<'c> TcpConnecting<'c> {
 
         let mut fallback = std::pin::pin!(fallback_delay);
         let mut primary = std::pin::pin!(self.prefered.connect(self.config));
+        let mut primary_error = None;
 
-        // First, try the primary while waiting on the secondary.
-        //TODO: This won't work, because if primary errors, and secondary is always pending, we've got a problem!
-        let secondary_connection = tokio::select! {
-            biased;
-            Ok(stream) = &mut primary => return Ok(stream),
-            secondary = &mut fallback => secondary
-        };
-
-        let mut secondary = std::pin::pin!(secondary_connection.connect(self.config));
-        // Next, try both connections at the same time.
         tokio::select! {
             biased;
-            Ok(stream) = &mut primary => Ok(stream),
-            Ok(stream) = &mut secondary => Ok(stream),
-            else => {
-                // If we got here, both connections are erroring.
-                // Wait for the primary to finish.
-                primary.await.map_err(TcpConnectionError::msg("tcp primary connection error"))
-            }
-        }
+            res = &mut primary => match res {
+                Ok(stream) => return Ok(stream),
+                Err(e) => primary_error = Some(e),
+            },
+            Ok(stream) = &mut fallback => return Ok(stream),
+            else => {}
+        };
+
+        // If we got here, both the primary and fallback failed. Return the error from the primary
+        Err(primary_error.expect("primary should have failed"))
     }
 }
 
 /// Wraps a connector with a delay as a fallback.
-struct TcpFallback {
+struct TcpFallback<'c> {
     connect: TcpConnectingSet,
     delay: Duration,
+    config: &'c TcpConnectionConfig,
 }
 
 /// A connector which will try to connect to addresses in sequence.
@@ -261,6 +256,7 @@ impl fmt::Display for TcpConnectionError {
 
 #[derive(Debug)]
 pub struct TcpConnectionConfig {
+    pub connect_timeout: Option<Duration>,
     pub keep_alive_timeout: Option<Duration>,
     pub happy_eyeballs_timeout: Option<Duration>,
     pub local_address_ipv4: Option<Ipv4Addr>,
@@ -274,6 +270,7 @@ pub struct TcpConnectionConfig {
 impl Default for TcpConnectionConfig {
     fn default() -> Self {
         Self {
+            connect_timeout: Some(Duration::from_secs(10)),
             keep_alive_timeout: Some(Duration::from_secs(90)),
             happy_eyeballs_timeout: Some(Duration::from_millis(300)),
             local_address_ipv4: None,

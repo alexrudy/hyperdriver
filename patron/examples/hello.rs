@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use http::Uri;
 use http_body_util::BodyExt as _;
 use patron::{Client, Connect, ConnectionProtocol};
@@ -59,33 +57,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = client.build();
 
     let n = *args.get_one::<usize>("requests").unwrap_or(&10);
-    let done = Arc::new(tokio::sync::Barrier::new(n + 1));
+    let (dtx, mut drx) = tokio::sync::mpsc::channel(n);
 
     let uri: Uri = args
         .get_one::<String>("uri")
         .expect("uri argument must be present")
         .parse()?;
     for _ in 1usize..=n {
-        tokio::spawn(send(client.clone(), uri.clone(), done.clone()));
+        tokio::spawn(send(client.clone(), uri.clone(), dtx.clone()));
     }
 
-    done.wait().await;
+    drop(dtx);
+    let _ = drx.recv().await;
 
-    let done = Arc::new(tokio::sync::Barrier::new(n + 1));
+    let (dtx, mut drx) = tokio::sync::mpsc::channel(n);
     for _ in 1usize..=n {
-        tokio::spawn(send(client.clone(), uri.clone(), done.clone()));
+        tokio::spawn(send(client.clone(), uri.clone(), dtx.clone()));
     }
 
-    done.wait().await;
+    drop(dtx);
+    let _ = drx.recv().await;
 
     Ok(())
 }
 
-async fn send<C>(mut client: Client<C>, uri: Uri, barrier: Arc<tokio::sync::Barrier>)
+async fn send<C>(mut client: Client<C>, uri: Uri, done: tokio::sync::mpsc::Sender<()>)
 where
     C: Connect + Clone,
 {
-    let res = client.get(uri).await.unwrap();
+    let res = match client.get(uri).await {
+        Ok(res) => res,
+        Err(err) => {
+            println!("Error: {}", err);
+            return;
+        }
+    };
 
     let (parts, mut body) = res.into_parts();
     let mut stdout = tokio::io::stdout();
@@ -100,5 +106,5 @@ where
     let res = http::Response::from_parts(parts, ());
 
     println!("Response: {} - {:?} {total}", res.status(), res.version());
-    barrier.wait().await;
+    drop(done);
 }

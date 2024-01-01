@@ -114,7 +114,7 @@ impl<T: Poolable> Pool<T> {
             if inner.connecting.contains(&key) {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 inner.waiting.entry(key.clone()).or_default().push_back(tx);
-                trace!(%key, "waiting for connection");
+                trace!(%key, "connection in progress, will wait");
                 Checkout::new(key, Some(&self.inner), Some(rx), connect).in_current_span()
             } else {
                 inner.connecting.insert(key.clone());
@@ -383,7 +383,10 @@ where
                 debug!(key=%self.key, "connection recieved from connect");
                 Poll::Ready(Ok(self.as_mut().connected(connection)))
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Connecting(e))),
+            Poll::Ready(Err(e)) => {
+                debug!(key=%self.key, "connection error");
+                Poll::Ready(Err(Error::Connecting(e)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -401,6 +404,7 @@ where
     ) -> Poll<Result<Option<Pooled<T>>, Error<E>>> {
         let this = self.project();
         if let Some(mut rx) = this.waiter.take() {
+            trace!(key=%this.key, "polling for waiter");
             match Pin::new(&mut rx).poll(cx) {
                 Poll::Ready(Ok(connection)) => {
                     if connection.is_open() {
@@ -452,7 +456,7 @@ where
         None
     }
 
-    /// Called to add a connection to a pool
+    /// Called to register a new connection with the pool.
     fn connected(self: Pin<&mut Self>, mut connection: T) -> Pooled<T> {
         if let Some(pool) = self.pool.upgrade() {
             if let Ok(mut inner) = pool.lock() {
