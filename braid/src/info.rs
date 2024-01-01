@@ -2,30 +2,68 @@
 
 use std::fmt;
 use std::io;
+use std::str::FromStr;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use http::uri::Authority;
+use thiserror::Error;
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::duplex::DuplexStream;
+use crate::tls::info::TlsConnectionInfo;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Protocol {
     Http(http::Version),
     Grpc,
-    Websocket,
+    WebSocket,
+    Other(String),
 }
 
-impl Protocol {
-    pub fn is_http2(&self) -> bool {
-        matches!(self, Self::Http(http::Version::HTTP_2) | Self::Grpc)
+impl std::fmt::Display for Protocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // http::Version uses the debug format to write out the version
+            Self::Http(version) => write!(f, "{:?}", version),
+            Self::Grpc => write!(f, "gRPC"),
+            Self::WebSocket => write!(f, "WebSocket"),
+            Self::Other(s) => write!(f, "{}", s),
+        }
     }
 }
 
-impl From<http::Version> for Protocol {
-    fn from(version: http::Version) -> Self {
+impl Protocol {
+    pub fn http(version: http::Version) -> Self {
         Self::Http(version)
+    }
+
+    pub fn grpc() -> Self {
+        Self::Grpc
+    }
+
+    pub fn web_socket() -> Self {
+        Self::WebSocket
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("invalid protocol")]
+pub struct InvalidProtocol;
+
+impl FromStr for Protocol {
+    type Err = InvalidProtocol;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "http/0.9" => Ok(Self::Http(http::Version::HTTP_09)),
+            "http/1.0" => Ok(Self::Http(http::Version::HTTP_10)),
+            "http/1.1" => Ok(Self::Http(http::Version::HTTP_11)),
+            "h2" => Ok(Self::Http(http::Version::HTTP_2)),
+            "h3" => Ok(Self::Http(http::Version::HTTP_3)),
+            "gRPC" => Ok(Self::Grpc),
+            "WebSocket" => Ok(Self::WebSocket),
+            _ => Ok(Self::Other(s.to_string())),
+        }
     }
 }
 
@@ -49,6 +87,7 @@ pub enum SocketAddr {
     Tcp(std::net::SocketAddr),
     Duplex,
     Unix(Utf8PathBuf),
+    UnixUnnamed,
 }
 
 impl std::fmt::Display for SocketAddr {
@@ -57,6 +96,7 @@ impl std::fmt::Display for SocketAddr {
             Self::Tcp(addr) => write!(f, "{}", addr),
             Self::Duplex => write!(f, "<duplex>"),
             Self::Unix(path) => write!(f, "{}", path),
+            Self::UnixUnnamed => write!(f, "<unnamed>"),
         }
     }
 }
@@ -93,21 +133,21 @@ impl From<std::net::SocketAddr> for SocketAddr {
 impl TryFrom<tokio::net::unix::SocketAddr> for SocketAddr {
     type Error = io::Error;
     fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
-        Ok(Self::Unix(
-            addr.as_pathname()
-                .map(|path| path.to_owned())
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "missing unix socket address")
-                })
-                .and_then(|path| {
-                    Utf8PathBuf::from_path_buf(path).map_err(|_| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "invalid (non-utf8) unix socket address",
-                        )
-                    })
-                })?,
-        ))
+        let path = match addr.as_pathname() {
+            Some(path) => path.to_path_buf(),
+            None => {
+                return Ok(Self::UnixUnnamed);
+            }
+        };
+
+        let path = Utf8PathBuf::from_path_buf(path).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid (non-utf8) unix socket address",
+            )
+        })?;
+
+        Ok(Self::Unix(path))
     }
 }
 
@@ -142,158 +182,74 @@ impl From<Utf8PathBuf> for SocketAddr {
 }
 
 #[derive(Debug, Clone)]
-pub struct TLSConnectionInfo {
-    pub sni: Option<String>,
-    pub validated_sni: bool,
-}
-
-impl TLSConnectionInfo {
-    pub fn new(sni: Option<String>) -> Self {
-        Self {
-            sni,
-            validated_sni: false,
-        }
-    }
-
-    pub fn validated_sni(&mut self) -> &mut Self {
-        self.validated_sni = true;
-        self
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TcpConnectionInfo {
+pub struct ConnectionInfo {
+    pub protocol: Option<Protocol>,
+    pub authority: Option<Authority>,
     pub local_addr: SocketAddr,
     pub remote_addr: SocketAddr,
-}
 
-#[derive(Debug, Clone)]
-pub struct UnixConnectionInfo {
-    pub local_addr: Option<SocketAddr>,
-    pub remote_addr: Option<SocketAddr>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DuplexConnectionInfo {
-    pub authority: Authority,
-    pub protocol: Protocol,
-}
-
-impl DuplexConnectionInfo {
-    pub fn new(authority: Authority, protocol: Protocol) -> Self {
-        Self {
-            authority,
-            protocol,
-        }
-    }
-}
-
-impl From<&DuplexStream> for DuplexConnectionInfo {
-    fn from(stream: &DuplexStream) -> Self {
-        stream.info().clone()
-    }
-}
-
-impl TryFrom<&TcpStream> for TcpConnectionInfo {
-    type Error = io::Error;
-    fn try_from(value: &TcpStream) -> Result<Self, Self::Error> {
-        Ok(Self {
-            local_addr: value.local_addr()?.into(),
-            remote_addr: value.peer_addr()?.into(),
-        })
-    }
-}
-
-impl TryFrom<&UnixStream> for UnixConnectionInfo {
-    type Error = io::Error;
-    fn try_from(stream: &UnixStream) -> Result<Self, Self::Error> {
-        Ok(UnixConnectionInfo {
-            local_addr: stream
-                .local_addr()?
-                .as_pathname()
-                .and_then(|path| Utf8PathBuf::from_path_buf(path.to_owned()).ok())
-                .map(|path| path.into()),
-            remote_addr: stream
-                .peer_addr()
-                .ok()
-                .and_then(|address| address.as_pathname().map(|path| path.to_owned()))
-                .and_then(|path| Utf8PathBuf::from_path_buf(path).ok())
-                .map(|path| path.into()),
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-enum ConnectionInfoInner {
-    NoTls(ConnectionInfoCore),
-    Tls(ConnectionInfoCore, TLSConnectionInfo),
-}
-
-#[derive(Debug, Clone)]
-pub struct ConnectionInfo {
-    inner: ConnectionInfoInner,
+    /// Transport Layer Security information for this connection.
+    pub tls: Option<TlsConnectionInfo>,
 }
 
 impl ConnectionInfo {
-    pub(crate) fn with_tls(self, tls: TLSConnectionInfo) -> Self {
-        match self.inner {
-            ConnectionInfoInner::NoTls(core) => Self {
-                inner: ConnectionInfoInner::Tls(core, tls),
-            },
-            ConnectionInfoInner::Tls(_, _) => panic!("ConnectionInfo::tls called twice"),
+    pub(crate) fn duplex(name: Authority, protocol: Protocol) -> ConnectionInfo {
+        ConnectionInfo {
+            protocol: Some(protocol),
+            authority: Some(name),
+            local_addr: SocketAddr::Duplex,
+            remote_addr: SocketAddr::Duplex,
+            tls: None,
         }
     }
 
-    pub(crate) fn new(core: ConnectionInfoCore) -> Self {
-        Self {
-            inner: ConnectionInfoInner::NoTls(core),
+    pub(crate) fn tls(self, tls: TlsConnectionInfo) -> ConnectionInfo {
+        ConnectionInfo {
+            tls: Some(tls),
+            ..self
         }
     }
 
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        match &self.inner {
-            ConnectionInfoInner::NoTls(core) => core.local_addr(),
-            ConnectionInfoInner::Tls(core, _) => core.local_addr(),
-        }
+    pub fn local_addr(&self) -> &SocketAddr {
+        &self.local_addr
     }
 
-    pub fn remote_addr(&self) -> Option<&SocketAddr> {
-        match &self.inner {
-            ConnectionInfoInner::NoTls(core) => core.remote_addr(),
-            ConnectionInfoInner::Tls(core, _) => core.remote_addr(),
-        }
-    }
-
-    pub fn tls(&self) -> Option<&TLSConnectionInfo> {
-        match &self.inner {
-            ConnectionInfoInner::NoTls(_) => None,
-            ConnectionInfoInner::Tls(_, tls) => Some(tls),
-        }
+    pub fn remote_addr(&self) -> &SocketAddr {
+        &self.remote_addr
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum ConnectionInfoCore {
-    Tcp(TcpConnectionInfo),
-    Duplex(DuplexConnectionInfo),
-    Unix(UnixConnectionInfo),
+impl TryFrom<&TcpStream> for ConnectionInfo {
+    type Error = io::Error;
+
+    fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
+        let local_addr = stream.local_addr()?;
+        let remote_addr = stream.peer_addr()?;
+
+        Ok(Self {
+            protocol: None,
+            authority: None,
+            local_addr: local_addr.into(),
+            remote_addr: remote_addr.into(),
+            tls: None,
+        })
+    }
 }
 
-impl ConnectionInfoCore {
-    pub(crate) fn local_addr(&self) -> Option<SocketAddr> {
-        match self {
-            ConnectionInfoCore::Tcp(tcp) => Some(tcp.local_addr.clone()),
-            ConnectionInfoCore::Duplex(_) => None,
-            ConnectionInfoCore::Unix(unix) => unix.local_addr.clone().map(SocketAddr::from),
-        }
-    }
+impl TryFrom<&UnixStream> for ConnectionInfo {
+    type Error = io::Error;
 
-    pub(crate) fn remote_addr(&self) -> Option<&SocketAddr> {
-        match self {
-            ConnectionInfoCore::Tcp(tcp) => Some(&tcp.remote_addr),
-            ConnectionInfoCore::Duplex(_) => None,
-            ConnectionInfoCore::Unix(unix) => unix.remote_addr.as_ref(),
-        }
+    fn try_from(stream: &UnixStream) -> Result<Self, Self::Error> {
+        let local_addr = stream.local_addr()?;
+        let remote_addr = stream.peer_addr()?;
+
+        Ok(Self {
+            protocol: None,
+            authority: None,
+            local_addr: local_addr.try_into()?,
+            remote_addr: remote_addr.try_into()?,
+            tls: None,
+        })
     }
 }
 
@@ -303,24 +259,14 @@ pub trait Connection {
 
 impl Connection for TcpStream {
     fn info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(ConnectionInfoCore::Tcp(
-            self.try_into()
-                .expect("TCP stream should always have both addresses"),
-        ))
-    }
-}
-
-impl Connection for DuplexStream {
-    fn info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(ConnectionInfoCore::Duplex(self.into()))
+        self.try_into()
+            .expect("connection info should be available")
     }
 }
 
 impl Connection for UnixStream {
     fn info(&self) -> ConnectionInfo {
-        ConnectionInfo::new(ConnectionInfoCore::Unix(
-            self.try_into()
-                .expect("Unix stream should always have both addresses"),
-        ))
+        self.try_into()
+            .expect("connection info should be available")
     }
 }

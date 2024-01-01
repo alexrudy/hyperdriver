@@ -26,6 +26,7 @@ impl<S> Layer<S> for TlsConnectLayer {
     }
 }
 
+/// Tower middleware to set up TLS connection information after a handshake has been completed on initial TLS stream.
 #[derive(Debug, Clone)]
 pub struct TlsConnectionInfoService<S> {
     inner: S,
@@ -61,9 +62,10 @@ where
     }
 }
 
+/// Tower middleware for collecting TLS connection information after a handshake has been completed.
 pub struct TlsConnection<S> {
     inner: S,
-    rx: super::info::TlsConnectionInfoReciever,
+    rx: crate::tls::info::TlsConnectionInfoReciever,
 }
 
 impl<S, BIn, BOut> Service<Request<BIn>> for TlsConnection<S>
@@ -97,8 +99,9 @@ where
         let fut = async move {
             async {
                 tracing::trace!("getting TLS Connection information (sent from the acceptor)");
-                let info = rx.recv().await;
-                req.extensions_mut().insert(info);
+                if let Ok(info) = rx.recv().await {
+                    req.extensions_mut().insert(info);
+                }
             }
             .instrument(span.clone())
             .await;

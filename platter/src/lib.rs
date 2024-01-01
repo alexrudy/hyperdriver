@@ -7,24 +7,86 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
-use braid::server::Accept;
-use hyper_util::rt::TokioExecutor;
+use braid::server::{Accept, Stream};
+use hyper::server::conn::http1;
+use hyper::server::conn::http2;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
+use hyper_util::service::TowerToHyperService;
 use tower::make::MakeService;
-use tracing::debug;
+use tracing::{debug, trace};
 
 mod connecting;
 use self::connecting::Connecting;
 
+pub trait Protocol<S> {
+    type Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>;
+    type Connection: Future<Output = Result<(), Self::Error>> + Send + 'static;
+
+    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection;
+}
+
+impl<S> Protocol<S> for Builder<TokioExecutor>
+where
+    S: tower::Service<http::Request<hyper::body::Incoming>, Response = arnold::Response>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
+{
+    type Connection = Connecting<S>;
+    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
+        Connecting::build(self.clone(), service, stream)
+    }
+}
+
+impl<S> Protocol<S> for http1::Builder
+where
+    S: tower::Service<http::Request<hyper::body::Incoming>, Response = arnold::Response>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
+{
+    type Connection = http1::UpgradeableConnection<TokioIo<Stream>, TowerToHyperService<S>>;
+    type Error = hyper::Error;
+
+    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
+        let conn = self.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service));
+        conn.with_upgrades()
+    }
+}
+
+impl<S> Protocol<S> for http2::Builder<TokioExecutor>
+where
+    S: tower::Service<http::Request<hyper::body::Incoming>, Response = arnold::Response>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
+{
+    type Connection = http2::Connection<TokioIo<Stream>, TowerToHyperService<S>, TokioExecutor>;
+    type Error = hyper::Error;
+
+    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
+        self.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service))
+    }
+}
+
 #[pin_project::pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Server<S>
+pub struct Server<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
     incoming: braid::server::acceptor::Acceptor,
     make_service: S,
-    protocol: Builder<TokioExecutor>,
+    protocol: P,
 
     #[pin]
     future: State<S::Service, S::Future>,
@@ -43,7 +105,7 @@ enum State<S, F> {
     },
 }
 
-impl<S> Server<S>
+impl<S> Server<S, Builder<TokioExecutor>>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
@@ -55,15 +117,25 @@ where
             future: State::Preparing,
         }
     }
+
+    pub fn with_protocol<P>(self, protocol: P) -> Server<S, P> {
+        Server {
+            incoming: self.incoming,
+            make_service: self.make_service,
+            protocol,
+            future: State::Preparing,
+        }
+    }
 }
 
-impl<S> Server<S>
+impl<S, P> Server<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = arnold::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
+    P: Protocol<S::Service>,
 {
     /// Polls the server to accept a single new connection.
     ///
@@ -72,7 +144,7 @@ where
     fn poll_once(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Connecting<S::Service>>, ServerError<S::MakeError>>> {
+    ) -> Poll<Result<Option<P::Connection>, ServerError<S::MakeError>>> {
         let mut me = self.as_mut().project();
 
         match me.future.as_mut().project() {
@@ -83,18 +155,19 @@ where
             }
             StateProj::Making { future, .. } => {
                 let service = ready!(future.poll(cx)).map_err(ServerError::make)?;
+                trace!("Server is ready to accept");
                 me.future.set(State::Accepting { service });
             }
             StateProj::Accepting { .. } => match ready!(Pin::new(me.incoming).poll_accept(cx)) {
                 Ok(stream) => {
+                    trace!("accepted connection from {}", stream.remote_addr());
+
                     if let StateProjOwn::Accepting { service } =
                         me.future.project_replace(State::Preparing)
                     {
-                        return Poll::Ready(Ok(Some(Connecting::build(
-                            me.protocol.clone(),
-                            service,
-                            stream,
-                        ))));
+                        let conn = me.protocol.serve_connection_with_upgrades(stream, service);
+
+                        return Poll::Ready(Ok(Some(conn)));
                     } else {
                         unreachable!("state must still be accepting");
                     }
@@ -109,7 +182,7 @@ where
     }
 }
 
-impl<S> fmt::Debug for Server<S>
+impl<S, P> fmt::Debug for Server<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
@@ -118,13 +191,14 @@ where
     }
 }
 
-impl<S> Future for Server<S>
+impl<S, P> Future for Server<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = arnold::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
+    P: Protocol<S::Service>,
 {
     type Output = Result<(), ServerError<S::MakeError>>;
 
@@ -132,7 +206,11 @@ where
         loop {
             match self.as_mut().poll_once(cx) {
                 Poll::Ready(Ok(Some(conn))) => {
-                    tokio::spawn(conn);
+                    tokio::spawn(async move {
+                        if let Err(error) = conn.await {
+                            debug!("connection error: {}", error.into());
+                        }
+                    });
                 }
                 Poll::Ready(Ok(None)) => {}
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),

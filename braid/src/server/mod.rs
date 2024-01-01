@@ -3,6 +3,8 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+use std::io;
+
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
@@ -10,7 +12,7 @@ use tokio::net::{TcpStream, UnixStream};
 use crate::core::{Braid, BraidCore};
 use crate::duplex::DuplexStream;
 use crate::info::{Connection as HasConnectionInfo, ConnectionInfo, SocketAddr};
-use crate::tls::server::info::TlsConnectionInfoReciever;
+use crate::tls::info::TlsConnectionInfoReciever;
 use crate::tls::server::TlsStream;
 
 pub mod acceptor;
@@ -25,10 +27,10 @@ enum ConnectionInfoState {
 }
 
 impl ConnectionInfoState {
-    async fn recv(&self) -> ConnectionInfo {
+    async fn recv(&self) -> io::Result<ConnectionInfo> {
         match self {
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
-            ConnectionInfoState::Connected(info) => info.clone(),
+            ConnectionInfoState::Connected(info) => Ok(info.clone()),
         }
     }
 }
@@ -54,17 +56,24 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub async fn info(&self) -> ConnectionInfo {
+    pub async fn info(&self) -> io::Result<ConnectionInfo> {
         match &self.info {
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
-            ConnectionInfoState::Connected(info) => info.clone(),
+            ConnectionInfoState::Connected(info) => Ok(info.clone()),
         }
     }
 
-    pub fn remote_addr(&self) -> Option<&SocketAddr> {
+    pub fn remote_addr(&self) -> &SocketAddr {
         match &self.info {
             ConnectionInfoState::Handshake(rx) => rx.remote_addr(),
             ConnectionInfoState::Connected(info) => info.remote_addr(),
+        }
+    }
+
+    pub async fn finish_handshake(&mut self) -> io::Result<()> {
+        match self.inner {
+            Braid::Tls(ref mut stream) => stream.finish_handshake().await,
+            _ => Ok(()),
         }
     }
 }

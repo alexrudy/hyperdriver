@@ -103,8 +103,9 @@ where
         let fut = async move {
             async {
                 tracing::trace!("getting Connection information (sent from the acceptor)");
-                let info = rx.recv().await;
-                req.extensions_mut().insert(info);
+                if let Ok(info) = rx.recv().await {
+                    req.extensions_mut().insert(info);
+                }
             }
             .instrument(span.clone())
             .await;

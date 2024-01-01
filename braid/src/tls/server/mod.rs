@@ -2,7 +2,6 @@
 //! which additionally provides connection information after the
 //! handshake has been completed.
 
-use core::panic;
 use std::task::{Context, Poll};
 use std::{fmt, io};
 use std::{future::Future, pin::Pin};
@@ -11,11 +10,11 @@ use futures_core::ready;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
-use crate::info::{Connection, ConnectionInfo, TLSConnectionInfo};
+use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use crate::info::{Connection, ConnectionInfo};
 
 pub mod acceptor;
 pub mod connector;
-pub(crate) mod info;
 #[cfg(feature = "sni")]
 pub mod sni;
 
@@ -38,43 +37,20 @@ impl<IO> fmt::Debug for TlsState<IO> {
 }
 
 #[derive(Debug)]
-enum ConnectionInfoState {
-    Pending(tokio::sync::oneshot::Sender<TLSConnectionInfo>),
-    Received,
-}
-
-impl ConnectionInfoState {
-    fn new(tx: tokio::sync::oneshot::Sender<TLSConnectionInfo>) -> Self {
-        Self::Pending(tx)
-    }
-
-    fn send(&mut self, info: TLSConnectionInfo) {
-        if matches!(self, ConnectionInfoState::Received) {
-            panic!("ConnectionInfo already sent");
-        }
-
-        let sender = std::mem::replace(self, ConnectionInfoState::Received);
-
-        match sender {
-            ConnectionInfoState::Pending(tx) => {
-                let _ = tx.send(info);
-            }
-            ConnectionInfoState::Received => unreachable!("ConnectionInfo already sent"),
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct TlsStream<IO> {
     state: TlsState<IO>,
-    info: ConnectionInfoState,
-    pub(crate) rx: self::info::TlsConnectionInfoReciever,
+    tx: TlsConnectionInfoSender,
+    pub(crate) rx: TlsConnectionInfoReciever,
 }
 
 impl<IO> TlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
+    pub async fn finish_handshake(&mut self) -> io::Result<()> {
+        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
+    }
+
     fn handshake<F, R>(&mut self, cx: &mut Context, action: F) -> Poll<io::Result<R>>
     where
         F: FnOnce(&mut tokio_rustls::server::TlsStream<IO>, &mut Context) -> Poll<io::Result<R>>,
@@ -85,16 +61,12 @@ where
                     // Take some action here when the handshake happens
 
                     let (_, server_info) = stream.get_ref();
-                    let sni = server_info.server_name().map(|s| s.to_string());
-                    let info = TLSConnectionInfo::new(sni);
-                    self.info.send(info.clone());
+                    let info = TlsConnectionInfo::server(server_info);
+                    self.tx.send(info.clone());
 
-                    if let Some(local) = self.rx.local_addr() {
-                        if let Some(remote) = self.rx.remote_addr() {
-                            let host = info.sni.as_deref().unwrap_or("-");
-                            tracing::trace!(%local, %remote, %host,  "TLS Handshake complete");
-                        }
-                    }
+                    let host = info.server_name.as_deref().unwrap_or("-");
+                    tracing::trace!(local=%self.rx.local_addr(), remote=%self.rx.remote_addr(), %host,  "TLS Handshake complete");
+
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
                     self.state = TlsState::Streaming(stream);
@@ -112,8 +84,6 @@ where
     IO: Connection,
 {
     pub(crate) fn new(accept: Accept<IO>) -> Self {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
         // We don't expect these to panic because we assume that the handshake has not finished when
         // this implementation is called. As long as no-one manually polls the future and then
         // does this after the future has returned ready, we should be okay.
@@ -122,10 +92,12 @@ where
             .map(|stream| stream.info())
             .expect("TLS handshake should have access to underlying IO");
 
+        let (tx, rx) = TlsConnectionInfo::channel(info);
+
         Self {
             state: TlsState::Handshake(accept),
-            info: ConnectionInfoState::new(tx),
-            rx: self::info::TlsConnectionInfoReciever::new(rx, info),
+            tx,
+            rx,
         }
     }
 }

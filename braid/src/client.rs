@@ -3,6 +3,7 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ use tokio::net::{TcpStream, UnixStream};
 
 use crate::core::{Braid, BraidCore};
 use crate::duplex::DuplexStream;
+use crate::info::Connection as _;
 use crate::tls::client::TlsStream;
 
 /// Dispatching wrapper for potential stream connection types for clients
@@ -28,17 +30,28 @@ impl Stream {
         Ok(stream.into())
     }
 
-    pub fn tls(
-        self,
-        domain: rustls::ServerName,
-        roots: impl Into<Arc<rustls::RootCertStore>>,
-    ) -> Self {
+    pub fn tls(self, domain: &str, config: Arc<rustls::ClientConfig>) -> Self {
         let core = match self.inner {
             Braid::NoTls(core) => core,
             Braid::Tls(_) => panic!("Stream::tls called twice"),
         };
+
         Stream {
-            inner: Braid::Tls(TlsStream::new(core, domain, roots)),
+            inner: Braid::Tls(TlsStream::new(core, domain, config)),
+        }
+    }
+
+    pub async fn finish_handshake(&mut self) -> io::Result<()> {
+        match self.inner {
+            Braid::Tls(ref mut stream) => stream.finish_handshake().await,
+            _ => Ok(()),
+        }
+    }
+
+    pub async fn info(&self) -> io::Result<crate::info::ConnectionInfo> {
+        match self.inner {
+            Braid::Tls(ref stream) => stream.info().await,
+            Braid::NoTls(ref stream) => Ok(stream.info()),
         }
     }
 }

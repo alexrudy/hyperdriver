@@ -10,11 +10,14 @@ use futures_core::future::BoxFuture;
 use futures_core::ready;
 use hyper::Uri;
 use hyper_util::client::legacy::connect::HttpConnector;
-use rustls::client::InvalidDnsNameError;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tower::Service;
+
+use crate::info::{Connection, ConnectionInfo};
+
+use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
 
 #[derive(Clone, Debug)]
 pub struct TlsConnector {
@@ -53,8 +56,9 @@ impl Service<Uri> for TlsConnector {
     fn call(&mut self, req: Uri) -> Self::Future {
         let domain = req
             .host()
-            .ok_or(InvalidDnsNameError)
-            .and_then(rustls::ServerName::try_from);
+            .ok_or(rustls::pki_types::InvalidDnsNameError)
+            .and_then(|host| host.to_owned().try_into());
+
         let tls = self.tls.clone();
         let conn = self.http.call(req);
 
@@ -85,23 +89,34 @@ impl<IO> fmt::Debug for State<IO> {
 #[derive(Debug)]
 pub struct TlsStream<IO> {
     state: State<IO>,
+    tx: TlsConnectionInfoSender,
+    rx: TlsConnectionInfoReciever,
+}
+
+impl<IO> TlsStream<IO> {
+    pub async fn info(&self) -> io::Result<ConnectionInfo> {
+        self.rx.recv().await
+    }
 }
 
 impl<IO> TlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(
-        stream: IO,
-        domain: rustls::ServerName,
-        roots: impl Into<Arc<rustls::RootCertStore>>,
-    ) -> Self {
-        let config = Arc::new(
-            ClientConfig::builder()
-                .with_safe_defaults()
-                .with_root_certificates(roots)
-                .with_no_client_auth(),
-        );
+    pub async fn finish_handshake(&mut self) -> io::Result<()> {
+        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
+    }
+}
+
+impl<IO> TlsStream<IO>
+where
+    IO: Connection + AsyncRead + AsyncWrite + Unpin,
+{
+    pub fn new(stream: IO, domain: &str, config: Arc<ClientConfig>) -> Self {
+        let domain = rustls::pki_types::ServerName::try_from(domain)
+            .expect("should be valid dns name")
+            .to_owned();
+
         let connect = tokio_rustls::TlsConnector::from(config).connect(domain, stream);
         Self::from(connect)
     }
@@ -110,11 +125,11 @@ where
 impl TlsStream<TcpStream> {
     pub async fn connect(
         addr: impl ToSocketAddrs,
-        domain: rustls::ServerName,
-        roots: impl Into<Arc<rustls::RootCertStore>>,
+        domain: &str,
+        config: Arc<ClientConfig>,
     ) -> io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
-        Ok(Self::new(stream, domain, roots))
+        Ok(Self::new(stream, domain, config))
     }
 }
 
@@ -130,7 +145,9 @@ where
             State::Handshake(ref mut accept) => match ready!(Pin::new(accept).poll(cx)) {
                 Ok(mut stream) => {
                     // Take some action here when the handshake happens
-                    //TODO: Provide client connection info?
+                    let (_, client_info) = stream.get_ref();
+                    let info = TlsConnectionInfo::client(client_info);
+                    self.tx.send(info.clone());
 
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
@@ -144,10 +161,21 @@ where
     }
 }
 
-impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO> {
+impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO>
+where
+    IO: Connection,
+{
     fn from(accept: tokio_rustls::Connect<IO>) -> Self {
+        let stream = accept.get_ref().expect("tls connect should have stream");
+
+        let info = stream.info();
+
+        let (tx, rx) = TlsConnectionInfo::channel(info);
+
         Self {
             state: State::Handshake(accept),
+            tx,
+            rx,
         }
     }
 }

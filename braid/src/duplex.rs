@@ -13,7 +13,7 @@ use http::uri::Authority;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::info::{DuplexConnectionInfo, Protocol};
+use crate::info::{Connection, ConnectionInfo, Protocol};
 use crate::server::Accept;
 
 #[derive(Debug)]
@@ -21,17 +21,19 @@ use crate::server::Accept;
 pub struct DuplexStream {
     #[pin]
     inner: tokio::io::DuplexStream,
-    info: DuplexConnectionInfo,
+    info: ConnectionInfo,
+}
+
+impl Connection for DuplexStream {
+    fn info(&self) -> ConnectionInfo {
+        self.info.clone()
+    }
 }
 
 impl DuplexStream {
-    pub fn info(&self) -> &DuplexConnectionInfo {
-        &self.info
-    }
-
     pub fn new(name: Authority, protocol: Protocol, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info = DuplexConnectionInfo::new(name, protocol);
+        let info = ConnectionInfo::duplex(name, protocol);
         (
             DuplexStream {
                 inner: a,
@@ -219,7 +221,7 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(client_stream.info().authority, name);
+        assert_eq!(client_stream.info().authority, Some(name));
 
         assert_eq!(&buf[..5], b"world");
     }

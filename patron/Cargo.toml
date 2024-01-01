@@ -1,5 +1,5 @@
 [package]
-name = "platter"
+name = "patron"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,24 +8,22 @@ edition = "2021"
 [dependencies]
 arnold.workspace = true
 braid.workspace = true
+futures-util.workspace = true
 http.workspace = true
-http-body-util.workspace = true
-hyper-util = { workspace = true, features = [
-    "server",
-    "server-auto",
-    "service",
-    "http1",
-    "http2",
-] }
+hyper-util.workspace = true
 hyper.workspace = true
-ouroboros.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["full"] }
+rustls-native-certs.workspace = true
+rustls.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
 tower.workspace = true
 tracing.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
-rustls.workspace = true
-pem-rfc7468.workspace = true
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = "*"
+clap = "*"
+pem-rfc7468.workspace = true
