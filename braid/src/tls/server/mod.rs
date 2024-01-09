@@ -36,6 +36,7 @@ impl<IO> fmt::Debug for TlsState<IO> {
     }
 }
 
+/// A TLS stream, generic over the underlying IO.
 #[derive(Debug)]
 pub struct TlsStream<IO> {
     state: TlsState<IO>,
@@ -47,6 +48,11 @@ impl<IO> TlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
+    /// Wait for the TLS handshake to complete.
+    ///
+    /// This will drive the underlying connection to complete the handshake. If this method
+    /// is not called, the handshake will complete the first time the underlying IO is
+    /// read or written to.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
         futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
     }

@@ -350,6 +350,7 @@ fn connect(
     )
     .map_err(TcpConnectionError::msg("tcp bind local address"))?;
 
+    #[allow(unsafe_code)]
     let socket = unsafe {
         // Safety: `from_raw_fd` is only safe to call if ownership of the raw
         // file descriptor is transferred. Since we call `into_raw_fd` on the

@@ -4,10 +4,17 @@ use tokio::sync::RwLock;
 
 use crate::info::{ConnectionInfo, Protocol, SocketAddr};
 
+/// Information about a TLS connection.
 #[derive(Debug, Clone)]
 pub struct TlsConnectionInfo {
+    /// The server name used for this connection, as provided by the SNI
+    /// extension.
     pub server_name: Option<String>,
+
+    /// Whether the server name was validated against the certificate.
     pub validated_server_name: bool,
+
+    /// The application layer protocol negotiated for this connection.
     pub alpn: Option<Protocol>,
 }
 
@@ -53,6 +60,11 @@ impl TlsConnectionInfo {
             alpn,
         }
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn validated(&mut self) {
+        self.validated_server_name = true;
+    }
 }
 
 #[derive(Debug)]
@@ -79,14 +91,16 @@ impl RxState {
     }
 }
 
+/// A receiver for TLS connection info.
 #[derive(Debug, Clone)]
-pub struct TlsConnectionInfoReciever {
+pub(crate) struct TlsConnectionInfoReciever {
     state: Arc<RwLock<RxState>>,
     info: ConnectionInfo,
 }
 
 impl TlsConnectionInfoReciever {
-    pub fn new(
+    /// Create a new TLS connection info receiver.
+    pub(crate) fn new(
         inner: tokio::sync::oneshot::Receiver<TlsConnectionInfo>,
         info: ConnectionInfo,
     ) -> Self {
@@ -107,15 +121,21 @@ impl TlsConnectionInfoReciever {
         self.info.clone()
     }
 
+    /// Get the local address for this connection.
     pub fn local_addr(&self) -> &SocketAddr {
         self.info.local_addr()
     }
 
+    /// Get the remote address for this connection.
     pub fn remote_addr(&self) -> &SocketAddr {
         self.info.remote_addr()
     }
 
-    pub async fn recv(&self) -> io::Result<ConnectionInfo> {
+    /// Receive the TLS connection info.
+    ///
+    /// This will wait until the handshake completes,
+    /// and return the underlying connection info.
+    pub(crate) async fn recv(&self) -> io::Result<ConnectionInfo> {
         {
             let state = self.state.read().await;
 
@@ -136,35 +156,43 @@ enum TxState {
     Sent(TlsConnectionInfo),
 }
 
-pub struct TlsConnectionInfoSender {
+/// A sender for TLS connection info.
+pub(crate) struct TlsConnectionInfoSender {
     state: TxState,
     info: ConnectionInfo,
 }
 
+#[allow(dead_code)]
 impl TlsConnectionInfoSender {
-    pub fn new(tx: tokio::sync::oneshot::Sender<TlsConnectionInfo>, info: ConnectionInfo) -> Self {
+    pub(crate) fn new(
+        tx: tokio::sync::oneshot::Sender<TlsConnectionInfo>,
+        info: ConnectionInfo,
+    ) -> Self {
         Self {
             state: TxState::Handshake(tx),
             info,
         }
     }
 
-    pub fn send(&mut self, info: TlsConnectionInfo) {
+    pub(crate) fn send(&mut self, info: TlsConnectionInfo) {
         let state = std::mem::replace(&mut self.state, TxState::Sent(info.clone()));
         if let TxState::Handshake(tx) = state {
             let _ = tx.send(info);
         }
     }
 
-    pub fn local_addr(&self) -> &SocketAddr {
+    /// Get the local address for this connection.
+    pub(crate) fn local_addr(&self) -> &SocketAddr {
         self.info.local_addr()
     }
 
-    pub fn remote_addr(&self) -> &SocketAddr {
+    /// Get the remote address for this connection.
+    pub(crate) fn remote_addr(&self) -> &SocketAddr {
         self.info.remote_addr()
     }
 
-    pub fn info(&self) -> ConnectionInfo {
+    /// Get the connection info for this connection.
+    pub(crate) fn info(&self) -> ConnectionInfo {
         match &self.state {
             TxState::Handshake(_) => self.info.clone(),
             TxState::Sent(tls) => self.info.clone().tls(tls.clone()),

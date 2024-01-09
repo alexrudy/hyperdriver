@@ -35,6 +35,8 @@ pub struct StartConnectionInfoService<C> {
 }
 
 impl<C> StartConnectionInfoService<C> {
+    /// Create a new `StartConnectionInfoService` wrapping `inner` service,
+    /// and applying `info` to the request extensions.
     pub fn new(inner: C) -> Self {
         Self { inner }
     }

@@ -1,8 +1,8 @@
-use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
+use std::{fmt, io};
 
 use futures_util::Future;
 use pin_project::{pin_project, pinned_drop};
@@ -159,10 +159,18 @@ impl tower::Service<Box<str>> for GaiResolver {
     }
 }
 
+/// Future returned by `GaiResolver` when resolving
+/// via getaddrinfo.
 #[pin_project(PinnedDrop)]
 pub struct GaiFuture {
     #[pin]
     handle: JoinHandle<Result<SocketAddrs, io::Error>>,
+}
+
+impl fmt::Debug for GaiFuture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GaiFuture").finish()
+    }
 }
 
 impl Future for GaiFuture {

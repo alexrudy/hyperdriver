@@ -15,9 +15,10 @@ use crate::info::{Connection as HasConnectionInfo, ConnectionInfo, SocketAddr};
 use crate::tls::info::TlsConnectionInfoReciever;
 use crate::tls::server::TlsStream;
 
-pub mod acceptor;
+mod acceptor;
 mod connector;
 
+pub use acceptor::Acceptor;
 pub use connector::{Connection, StartConnectionInfoLayer, StartConnectionInfoService};
 
 #[derive(Debug, Clone)]
@@ -35,10 +36,15 @@ impl ConnectionInfoState {
     }
 }
 
+/// An async generator of new connections
 pub trait Accept {
+    /// The connection type for this acceptor
     type Conn: AsyncRead + AsyncWrite + Send + Unpin + 'static;
+
+    /// The error type for this acceptor
     type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Poll for a new connection
     fn poll_accept(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -56,6 +62,10 @@ pub struct Stream {
 }
 
 impl Stream {
+    /// Get the connection info for this stream
+    ///
+    /// This will block until the handshake completes for
+    /// TLS connections.
     pub async fn info(&self) -> io::Result<ConnectionInfo> {
         match &self.info {
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
@@ -63,6 +73,9 @@ impl Stream {
         }
     }
 
+    /// Get the remote address for this stream.
+    ///
+    /// This can be done before the TLS handshake completes.
     pub fn remote_addr(&self) -> &SocketAddr {
         match &self.info {
             ConnectionInfoState::Handshake(rx) => rx.remote_addr(),
@@ -70,6 +83,9 @@ impl Stream {
         }
     }
 
+    /// Finish the TLS handshake now, driving the connection to completion.
+    ///
+    /// This is a no-op for non-TLS connections.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
         match self.inner {
             Braid::Tls(ref mut stream) => stream.finish_handshake().await,

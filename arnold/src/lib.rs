@@ -1,4 +1,13 @@
-//! Arnold is a Body (http_body::Body) builder
+//! Arnold is a [Body](http_body::Body) builder, useful for wrapping
+//! different potential bodies for sending responses or requests.
+#![cfg_attr(
+    feature = "docs",
+    doc = r#"
+For reading incoming requests, defer to [hyper::body::Incoming].
+"#
+)]
+#![deny(missing_docs)]
+#![deny(unsafe_code)]
 
 use std::fmt;
 use std::pin::pin;
@@ -11,9 +20,18 @@ use http_body_util::{Empty, Full};
 
 type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
 
+/// An http request using [Body] as the body.
 pub type Request = http::Request<Body>;
+
+/// An http response using [Body] as the body.
 pub type Response = http::Response<Body>;
 
+/// A wrapper for different internal body types which implements [http_body::Body](http_body::Body)
+///
+/// Bodies can be created from [`Bytes`](bytes::Bytes), [`String`](std::string::String),
+/// or [`&'static str`](str) using [`From`](std::convert::From) implementations.
+///
+/// An empty body can be created with [Body::empty](Body::empty).
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct Body {
@@ -22,6 +40,7 @@ pub struct Body {
 }
 
 impl Body {
+    /// Create a new empty body.
     pub fn empty() -> Self {
         Self {
             inner: InnerBody::Empty,

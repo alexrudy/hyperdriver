@@ -36,8 +36,7 @@ async fn main() {
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let acceptor =
-        braid::server::acceptor::Acceptor::from(incoming).tls(Arc::new(tls_config("localhost")));
+    let acceptor = braid::server::Acceptor::from(incoming).tls(Arc::new(tls_config("localhost")));
 
     let server = platter::Server::new(
         acceptor,

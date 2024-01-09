@@ -42,6 +42,7 @@ where
 }
 
 mod future {
+    use std::fmt;
     use std::future::Future;
     use std::pin::Pin;
     use std::task::{ready, Context, Poll};
@@ -52,6 +53,14 @@ mod future {
 
     use crate::conn::tcp::TcpConnectionError;
     use crate::conn::{Builder, Connection, ConnectionError};
+
+    struct DebugLiteral<T: fmt::Display>(T);
+
+    impl<T: fmt::Display> fmt::Debug for DebugLiteral<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
 
     type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
@@ -78,6 +87,23 @@ mod future {
     {
         #[pin]
         state: State<T>,
+    }
+
+    impl<T> fmt::Debug for HttpConnectFuture<T>
+    where
+        T: tower::Service<Uri>,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let field = match &self.state {
+                State::Error(_) => "Error",
+                State::Connecting { .. } => "Connecting",
+                State::Handshaking { .. } => "Handshaking",
+            };
+
+            f.debug_struct("HttpConnectFuture")
+                .field("state", &DebugLiteral(field))
+                .finish()
+        }
     }
 
     impl<T> HttpConnectFuture<T>

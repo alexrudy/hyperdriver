@@ -80,20 +80,26 @@ impl Poolable for Connection {
     }
 }
 
+/// Error returned when a connection could not be established.
 #[derive(Debug, Error)]
 pub enum ConnectionError {
+    /// Error connecting to the remote host via TCP
     #[error(transparent)]
     Connecting(#[from] tcp::TcpConnectionError),
 
+    /// Error completing the handshake.
     #[error("handshake: {0}")]
     Handshake(#[source] hyper::Error),
 
+    /// Connection was cancelled, probably because another one was established.
     #[error("connection cancelled")]
     Canceled(#[source] hyper::Error),
 
+    /// Connection was closed.
     #[error("connection closed")]
     Closed(#[source] hyper::Error),
 
+    /// Connection timed out.
     #[error("connection timeout")]
     Timeout,
 }

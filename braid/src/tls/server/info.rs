@@ -13,13 +13,13 @@ enum State {
 }
 
 #[derive(Debug, Clone)]
-pub struct TlsConnectionInfoReciever {
+pub(crate) struct TlsConnectionInfoReciever {
     state: Arc<RwLock<State>>,
     info: ConnectionInfo,
 }
 
 impl TlsConnectionInfoReciever {
-    pub fn new(
+    pub(crate) fn new(
         inner: tokio::sync::oneshot::Receiver<TLSConnectionInfo>,
         info: ConnectionInfo,
     ) -> Self {
@@ -29,15 +29,15 @@ impl TlsConnectionInfoReciever {
         }
     }
 
-    pub fn local_addr(&self) -> Option<SocketAddr> {
+    pub(crate) fn local_addr(&self) -> Option<SocketAddr> {
         self.info.local_addr()
     }
 
-    pub fn remote_addr(&self) -> Option<&SocketAddr> {
+    pub(crate) fn remote_addr(&self) -> Option<&SocketAddr> {
         self.info.remote_addr()
     }
 
-    pub async fn recv(&self) -> ConnectionInfo {
+    pub(crate) async fn recv(&self) -> ConnectionInfo {
         {
             let state = self.state.read().await;
 

@@ -1,3 +1,11 @@
+//! # Patron
+//!
+//! Patron is a HTTP client library for Rust, built on top of [hyper] and [braid].
+
+#![warn(missing_docs)]
+#![warn(missing_debug_implementations)]
+#![deny(unsafe_code)]
+
 use http::uri::Port;
 use http::uri::Scheme;
 use http::HeaderValue;
@@ -20,17 +28,22 @@ pub use conn::Connect;
 pub use conn::ConnectionError;
 pub use conn::ConnectionProtocol;
 
+/// Client error type.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// Error occured with the underlying connection.
     #[error(transparent)]
     Connection(ConnectionError),
 
+    /// Error occured with the user's request, such as an invalid URI.
     #[error("user error: {0}")]
     User(hyper::Error),
 
+    /// Invalid HTTP Method for the current action.
     #[error("invalid method: {0}")]
     InvalidMethod(http::Method),
 
+    /// Protocol is not supported by this client or transport.
     #[error("unsupported protocol")]
     UnsupportedProtocol,
 }
@@ -59,6 +72,7 @@ impl From<hyper::Error> for Error {
     }
 }
 
+/// Get a default TLS client configuration by loading the platform's native certificates.
 pub fn default_tls_config() -> rustls::ClientConfig {
     let mut roots = rustls::RootCertStore::empty();
     for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs") {
@@ -70,6 +84,7 @@ pub fn default_tls_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
+/// An HTTP client
 #[derive(Debug)]
 pub struct Client<C> {
     connector: C,
@@ -91,10 +106,12 @@ where
 }
 
 impl Client<HttpConnector> {
+    /// A client builder for configuring the client.
     pub fn builder() -> builder::Builder {
         builder::Builder::default()
     }
 
+    /// Create a new client with the default configuration.
     pub fn new() -> Self {
         Self {
             pool: pool::Pool::new(pool::Config {
@@ -140,6 +157,7 @@ where
             .await
     }
 
+    /// Send an http Request, and return a Future of the Response.
     pub async fn request(
         &self,
         mut request: arnold::Request,
@@ -213,6 +231,7 @@ impl<C> Client<C>
 where
     C: Connect + Clone,
 {
+    /// Make a GET request to the given URI.
     pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<Incoming>, Error> {
         let request = http::Request::get(uri.clone())
             .body(arnold::Body::empty())

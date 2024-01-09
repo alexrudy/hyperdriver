@@ -11,9 +11,11 @@ http-body.workspace = true
 http-body-util.workspace = true
 http.workspace = true
 pin-project.workspace = true
+hyper = { workspace = true, optional = true }
 
 [dev-dependencies]
 static-assertions.workspace = true
 
 [features]
 default = []
+docs = ["dep:hyper"]

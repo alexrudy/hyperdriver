@@ -1,3 +1,5 @@
+//! Accept incoming connections for Braid streams.
+
 use std::{
     io,
     net::SocketAddr,
@@ -15,6 +17,7 @@ use super::Stream;
 use crate::tls::server::TlsAcceptor as RawTlsAcceptor;
 use crate::{core::BraidCore, duplex::DuplexIncoming};
 
+/// Accept incoming connections for Braid streams.
 #[derive(Debug)]
 #[pin_project]
 pub struct Acceptor {
@@ -43,10 +46,23 @@ enum AcceptorCore {
 }
 
 impl Acceptor {
+    /// Bind to a TCP socket address, returning the acceptor
+    /// which will product incoming connections as [`Stream`]s.
+    ///
+    /// For other connections, see the `From` impls.
     pub async fn bind(addr: &SocketAddr) -> Result<Self, io::Error> {
         Ok(TcpListener::bind(addr).await?.into())
     }
 
+    /// Convert this acceptor to support TLS on top of the underlying
+    /// transport.
+    ///
+    /// # Panics
+    /// TLS can only be added once. If this is called twice, it will panic.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The TLS server configuration to use.
     pub fn tls(self, config: Arc<ServerConfig>) -> Self {
         let core = match self.inner {
             AcceptorInner::NoTls(core) => core,

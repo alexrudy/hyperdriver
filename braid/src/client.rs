@@ -16,7 +16,10 @@ use crate::duplex::DuplexStream;
 use crate::info::Connection as _;
 use crate::tls::client::TlsStream;
 
-/// Dispatching wrapper for potential stream connection types for clients
+/// A stream which can handle multiple different underlying transports, and TLS
+/// through a unified type.
+///
+/// This is the client side of the Braid stream.
 #[derive(Debug)]
 #[pin_project]
 pub struct Stream {
@@ -25,11 +28,23 @@ pub struct Stream {
 }
 
 impl Stream {
+    /// Connect to a server via TCP at the given address.
+    ///
+    /// For other connection methods/types, use the appropriate `From` impl.
     pub async fn connect(addr: impl Into<SocketAddr>) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr.into()).await?;
         Ok(stream.into())
     }
 
+    /// Add TLS to the underlying stream.
+    ///
+    /// # Panics
+    /// TLS can only be added once. If this is called twice, it will panic.
+    ///
+    /// # Arguments
+    ///
+    /// * `domain` - The domain name to connect to. This is used for SNI.
+    /// * `config` - The TLS client configuration to use.
     pub fn tls(self, domain: &str, config: Arc<rustls::ClientConfig>) -> Self {
         let core = match self.inner {
             Braid::NoTls(core) => core,
@@ -41,6 +56,12 @@ impl Stream {
         }
     }
 
+    /// Finish the TLS handshake.
+    ///
+    /// This is a no-op if TLS is not enabled. When TLS is enabled, this method
+    /// will drive the connection asynchronosly allowing you to wait for the TLS
+    /// handshake to complete. If this method is not called, the TLS handshake
+    /// will be completed the first time the connection is used.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
         match self.inner {
             Braid::Tls(ref mut stream) => stream.finish_handshake().await,
@@ -48,6 +69,10 @@ impl Stream {
         }
     }
 
+    /// Get information about the connection.
+    ///
+    /// This method is async because TLS information isn't available until the handshake
+    /// is complete. This method will not return until the handshake is complete.
     pub async fn info(&self) -> io::Result<crate::info::ConnectionInfo> {
         match self.inner {
             Braid::Tls(ref stream) => stream.info().await,

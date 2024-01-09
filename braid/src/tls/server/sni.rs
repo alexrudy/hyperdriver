@@ -1,32 +1,67 @@
+//! Middleware to validate that SNI matches the HOST header using Braid's connection info
+
 use std::future::ready;
 
-use address::Authority;
-use axum::{body::Full, body::HttpBody};
-use futures::{
-    future::{Either, MapOk},
+use futures_util::{
+    future::{Either, MapErr},
     TryFutureExt,
 };
-use hyper::{header, Request, Response, StatusCode};
+use http::uri::Authority;
+use hyper::{header, Request, Response};
 use thiserror::Error;
 use tower::{Layer, Service};
-use tracing::{dispatcher, field};
 
 use crate::info::ConnectionInfo;
 
-// Clippy is unhappy here, but this is not mutable! It just might be backed by a Bytes,
-// where the type system can't tell that the backing is static.
-#[allow(clippy::declare_interior_mutable_const)]
-const XOUTCOME: http::header::HeaderName = http::header::HeaderName::from_static("x-outcome");
-
+/// Error returned by the SNI Middleware.
 #[derive(Debug, Error)]
-pub enum ValidateSNIError {
-    #[error("TLS SNI \"{sni}\" does not match HOST header \"{host}\"")]
-    InvalidSNI { host: String, sni: String },
+pub enum SNIMiddlewareError<E>
+where
+    E: std::error::Error,
+{
+    /// An error occurred in the inner service.
+    #[error(transparent)]
+    Inner(E),
 
-    #[error("TLS SNI was not provided when requesting \"{host}\"")]
-    MissingSNI { host: String },
+    /// An error occurred while validating the SNI.
+    #[error(transparent)]
+    SNI(#[from] ValidateSNIError),
 }
 
+impl<E> SNIMiddlewareError<E>
+where
+    E: std::error::Error,
+{
+    fn inner(error: E) -> Self {
+        Self::Inner(error)
+    }
+}
+
+/// Error returned when validating the SNI from TLS connection information.
+#[derive(Debug, Error)]
+pub enum ValidateSNIError {
+    /// The SNI did not match the host header.
+    #[error("TLS SNI \"{sni}\" does not match HOST header \"{host}\"")]
+    InvalidSNI {
+        /// The value of the HOST header
+        host: String,
+
+        /// The value of the SNI extension
+        sni: String,
+    },
+
+    /// The SNI was not provided.
+    #[error("TLS SNI was not provided when requesting \"{host}\"")]
+    MissingSNI {
+        /// The value of the Host header
+        host: String,
+    },
+}
+
+/// Middleware layer to validate that SNI matches the HOST header
+///
+/// This helps to prevent a client from connecting to the wrong host by
+/// validating a certificate against the SNI extension of a different host.
 pub struct ValidateSNI;
 
 impl<S> Layer<S> for ValidateSNI {
@@ -37,12 +72,17 @@ impl<S> Layer<S> for ValidateSNI {
     }
 }
 
+/// Middleware service to validate that SNI matches the HOST header
+///
+/// This helps to prevent a client from connecting to the wrong host by
+/// validating a certificate against the SNI extension of a different host.
 #[derive(Debug)]
 pub struct ValidateSNIService<S> {
     inner: S,
 }
 
 impl<S> ValidateSNIService<S> {
+    /// Create a new `ValidateSNIService` wrapping `inner` service.
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
@@ -62,54 +102,26 @@ where
 impl<S, BIn, BOut> Service<Request<BIn>> for ValidateSNIService<S>
 where
     S: Service<Request<BIn>, Response = Response<BOut>>,
-    BOut: HttpBody + Into<arnold::Body> + Send + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Response = Response<arnold::Body>;
-    type Error = S::Error;
+    type Response = Response<BOut>;
+    type Error = SNIMiddlewareError<S::Error>;
     type Future = Either<
         std::future::Ready<Result<Self::Response, Self::Error>>,
-        MapOk<S::Future, fn(Response<BOut>) -> Response<arnold::Body>>,
+        MapErr<S::Future, fn(S::Error) -> Self::Error>,
     >;
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        self.inner.poll_ready(cx).map_err(SNIMiddlewareError::inner)
     }
 
     fn call(&mut self, mut req: Request<BIn>) -> Self::Future {
-        let span =
-            tracing::debug_span!("SNI Verification", host = field::Empty, sni = field::Empty);
-        dispatcher::get_default(|dispatch| {
-            let id = span.id().expect("Missing ID; this is a bug");
-            if let Some(current) = dispatch.current_span().id() {
-                dispatch.record_follows_from(&id, current)
-            }
-        });
-        match span.in_scope(|| handle(&mut req)) {
-            Some(error) => span.in_scope(|| {
-                let body = Full::from(error.to_string());
-                let content_length = body.size_hint().exact();
-                let mut res = Response::new(body.into());
-                *res.status_mut() = StatusCode::BAD_REQUEST;
-                let headers = res.headers_mut();
-                headers.insert(
-                    header::CONTENT_TYPE,
-                    header::HeaderValue::from_static("text/plain"),
-                );
-                if let Some(content_length) = content_length {
-                    headers.insert(
-                        header::CONTENT_LENGTH,
-                        header::HeaderValue::from(content_length),
-                    );
-                }
-                headers.insert(XOUTCOME, header::HeaderValue::from_static("mark"));
-
-                Either::Left(ready(Ok(res)))
-            }),
-
-            None => Either::Right(self.inner.call(req).map_ok(|r| r.map(|b| b.into()))),
+        match handle(&mut req) {
+            Some(error) => Either::Left(ready(Err(SNIMiddlewareError::SNI(error)))),
+            None => Either::Right(self.inner.call(req).map_err(SNIMiddlewareError::inner)),
         }
     }
 }
@@ -130,17 +142,15 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
         .get_mut::<ConnectionInfo>()
         .expect("Missing connection info extension - misconfiguration?");
 
-    let tcp = match info {
-        ConnectionInfo::Tcp(tcp) => tcp,
-        _ => {
-            panic!("SNI verification not supported for non-tcp connections")
-        }
+    let Some(tls) = info.tls.as_mut() else {
+        return None;
     };
 
-    let tls = tcp.tls.as_mut().expect("SNI verification requires TLS");
-    span.record("sni", tls.sni.as_deref().unwrap_or("-"));
-
-    if let Some(sni) = tls.sni.as_ref().and_then(|s| s.parse::<Authority>().ok()) {
+    if let Some(sni) = tls
+        .server_name
+        .as_ref()
+        .and_then(|s| s.parse::<Authority>().ok())
+    {
         if let Some(host) = host {
             span.record("host", host.to_string());
             if host.host() != sni.host() {
@@ -150,7 +160,7 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
                     sni: sni.to_string(),
                 });
             } else {
-                tls.validated_sni();
+                tls.validated();
             }
         }
     } else {

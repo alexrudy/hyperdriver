@@ -40,7 +40,7 @@ async fn braided_tls() {
         .unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let server = braid::server::acceptor::Acceptor::from(incoming).tls(Arc::new(tls_config()));
+    let server = braid::server::Acceptor::from(incoming).tls(Arc::new(tls_config()));
 
     tokio::spawn(async move {
         let mut incoming = server.fuse();

@@ -7,7 +7,7 @@ async fn platter_duplex() {
 
     let (client, incoming) = braid::duplex::DuplexClient::new("test".parse().unwrap());
 
-    let acceptor = braid::server::acceptor::Acceptor::from(incoming);
+    let acceptor = braid::server::Acceptor::from(incoming);
     let server = platter::Server::new(
         acceptor,
         tower::service_fn(|_| async {

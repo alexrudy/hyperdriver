@@ -6,71 +6,20 @@ use std::sync::Arc;
 use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
-use futures_core::future::BoxFuture;
 use futures_core::ready;
-use hyper::Uri;
-use hyper_util::client::legacy::connect::HttpConnector;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
-use tower::Service;
 
 use crate::info::{Connection, ConnectionInfo};
 
 use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
 
-#[derive(Clone, Debug)]
-pub struct TlsConnector {
-    http: HttpConnector,
-    tls: Arc<ClientConfig>,
-}
+#[cfg(feature = "connector")]
+mod connector;
 
-impl TlsConnector {
-    pub fn new(tls: Arc<ClientConfig>) -> Self {
-        Self {
-            http: HttpConnector::new(),
-            tls,
-        }
-    }
-
-    pub fn with_http(self, mut http: HttpConnector) -> Self {
-        http.enforce_http(false);
-        Self { http, ..self }
-    }
-}
-
-impl Service<Uri> for TlsConnector {
-    type Response = TlsStream<TcpStream>;
-
-    type Error = Box<dyn std::error::Error + Send + Sync>;
-
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.http.poll_ready(cx).map_err(|err| err.into())
-    }
-
-    fn call(&mut self, req: Uri) -> Self::Future {
-        let domain = req
-            .host()
-            .ok_or(rustls::pki_types::InvalidDnsNameError)
-            .and_then(|host| host.to_owned().try_into());
-
-        let tls = self.tls.clone();
-        let conn = self.http.call(req);
-
-        let fut = async move {
-            let stream = conn.await?;
-            let connect =
-                tokio_rustls::TlsConnector::from(tls).connect(domain?, stream.into_inner());
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(TlsStream::from(connect))
-        };
-        Box::pin(fut)
-    }
-}
+#[cfg(feature = "connector")]
+pub use connector::TlsConnector;
 
 enum State<IO> {
     Handshake(tokio_rustls::Connect<IO>),
@@ -86,6 +35,12 @@ impl<IO> fmt::Debug for State<IO> {
     }
 }
 
+/// A TLS stream, generic over the underlying IO.
+///
+/// This stream implements a delayed handshake by default, where
+/// the handshake won't be completed until the first read/write
+/// request to the underlying stream. The handshake can be forced
+/// to completion using the [`finish_handshake`](TlsStream::finish_handshake) method.
 #[derive(Debug)]
 pub struct TlsStream<IO> {
     state: State<IO>,
@@ -94,6 +49,7 @@ pub struct TlsStream<IO> {
 }
 
 impl<IO> TlsStream<IO> {
+    /// Get the connection info for this stream.
     pub async fn info(&self) -> io::Result<ConnectionInfo> {
         self.rx.recv().await
     }
@@ -103,6 +59,7 @@ impl<IO> TlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
+    /// Finish the TLS handshake.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
         futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
     }
@@ -112,6 +69,7 @@ impl<IO> TlsStream<IO>
 where
     IO: Connection + AsyncRead + AsyncWrite + Unpin,
 {
+    /// Create a new TLS stream from the given IO, with a domain name and TLS configuration.
     pub fn new(stream: IO, domain: &str, config: Arc<ClientConfig>) -> Self {
         let domain = rustls::pki_types::ServerName::try_from(domain)
             .expect("should be valid dns name")
@@ -123,6 +81,7 @@ where
 }
 
 impl TlsStream<TcpStream> {
+    /// Connect to the given tcp address, using the given domain name and TLS configuration.
     pub async fn connect(
         addr: impl ToSocketAddrs,
         domain: &str,

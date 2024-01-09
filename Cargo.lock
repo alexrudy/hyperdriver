@@ -79,6 +79,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
  "pin-project",
  "static_assertions",
 ]

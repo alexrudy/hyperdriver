@@ -12,11 +12,23 @@ use tokio::net::{TcpStream, UnixStream};
 
 use crate::tls::info::TlsConnectionInfo;
 
+/// The transport protocol used for a connection.
+///
+/// This is for informational purposes only, and can be used
+/// to select the appropriate transport when a transport should
+/// be pre-negotiated (e.g. ALPN or a Duplex socket).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Protocol {
+    /// HTTP transports
     Http(http::Version),
+
+    /// gRPC
     Grpc,
+
+    /// WebSocket
     WebSocket,
+
+    /// Other protocol
     Other(String),
 }
 
@@ -33,19 +45,23 @@ impl std::fmt::Display for Protocol {
 }
 
 impl Protocol {
+    /// Create a new protocol with the given http version.
     pub fn http(version: http::Version) -> Self {
         Self::Http(version)
     }
 
+    /// New gRPC protocol
     pub fn grpc() -> Self {
         Self::Grpc
     }
 
+    /// New WebSocket protocol
     pub fn web_socket() -> Self {
         Self::WebSocket
     }
 }
 
+/// Error returned when a protocol is invalid.
 #[derive(Debug, Error)]
 #[error("invalid protocol")]
 pub struct InvalidProtocol;
@@ -82,11 +98,22 @@ fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
     }
 }
 
+/// A socket address for a Braid stream.
+///
+/// Supports more than just network socket addresses, also support Unix socket addresses (paths)
+/// and unnamed Duplex and Unix socket connections.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SocketAddr {
+    /// A TCP socket address.
     Tcp(std::net::SocketAddr),
+
+    /// Represents a duplex connection which has no address.
     Duplex,
+
+    /// A Unix socket address.
     Unix(Utf8PathBuf),
+
+    /// Represents a Unix socket connection which has no address.
     UnixUnnamed,
 }
 
@@ -102,6 +129,7 @@ impl std::fmt::Display for SocketAddr {
 }
 
 impl SocketAddr {
+    /// Returns the TCP socket address, if this is a TCP socket address.
     pub fn tcp(&self) -> Option<std::net::SocketAddr> {
         match self {
             Self::Tcp(addr) => Some(*addr),
@@ -109,6 +137,7 @@ impl SocketAddr {
         }
     }
 
+    /// Returns the Unix socket address, if this is a Unix socket address.
     pub fn path(&self) -> Option<&Utf8Path> {
         match self {
             Self::Unix(path) => Some(path.as_path()),
@@ -116,6 +145,7 @@ impl SocketAddr {
         }
     }
 
+    /// Returns the canonical TCP address, if this is a TCP socket address.
     pub fn canonical(self) -> Self {
         match self {
             Self::Tcp(addr) => Self::Tcp(make_canonical(addr)),
@@ -181,11 +211,19 @@ impl From<Utf8PathBuf> for SocketAddr {
     }
 }
 
+/// Information about a connection to a Braid stream.
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
+    /// The protocol used for this connection.
     pub protocol: Option<Protocol>,
+
+    /// The authority name for the server.
     pub authority: Option<Authority>,
+
+    /// The local address for this connection.
     pub local_addr: SocketAddr,
+
+    /// The remote address for this connection.
     pub remote_addr: SocketAddr,
 
     /// Transport Layer Security information for this connection.
@@ -210,10 +248,12 @@ impl ConnectionInfo {
         }
     }
 
+    /// The local address for this connection
     pub fn local_addr(&self) -> &SocketAddr {
         &self.local_addr
     }
 
+    /// The remote address for this connection
     pub fn remote_addr(&self) -> &SocketAddr {
         &self.remote_addr
     }
@@ -253,7 +293,9 @@ impl TryFrom<&UnixStream> for ConnectionInfo {
     }
 }
 
+/// Trait for types which can provide connection information.
 pub trait Connection {
+    /// Get the connection information for this stream.
     fn info(&self) -> ConnectionInfo;
 }
 

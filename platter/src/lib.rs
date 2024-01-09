@@ -1,6 +1,9 @@
 //! Platter
 //!
 //! A server framework to interoperate with hyper-v1, tokio, braid and arnold
+#![warn(missing_docs)]
+#![warn(missing_debug_implementations)]
+#![deny(unsafe_code)]
 
 use std::future::Future;
 use std::pin::Pin;
@@ -19,10 +22,20 @@ use tracing::{debug, trace};
 mod connecting;
 use self::connecting::Connecting;
 
+/// A transport protocol for serving connections.
+///
+/// This is not meant to be the "accept" part of a server, but instead the connection
+/// management and serving part.
 pub trait Protocol<S> {
+    /// The error when a connection has a problem.
     type Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>;
+
+    /// The connection future, used to drive a connection IO to completion.
     type Connection: Future<Output = Result<(), Self::Error>> + Send + 'static;
 
+    /// Serve a connection with upgrades.
+    ///
+    /// Implementing this method i
     fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection;
 }
 
@@ -78,13 +91,15 @@ where
     }
 }
 
+/// A server that can accept connections, and run each connection
+/// using a [tower::Service].
 #[pin_project::pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Server<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
-    incoming: braid::server::acceptor::Acceptor,
+    incoming: braid::server::Acceptor,
     make_service: S,
     protocol: P,
 
@@ -109,7 +124,8 @@ impl<S> Server<S, Builder<TokioExecutor>>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
-    pub fn new(incoming: braid::server::acceptor::Acceptor, make_service: S) -> Self {
+    /// Create a new server with the given `MakeService` and `Acceptor`.
+    pub fn new(incoming: braid::server::Acceptor, make_service: S) -> Self {
         Self {
             incoming,
             make_service,
@@ -118,6 +134,7 @@ where
         }
     }
 
+    /// Set the protocol to use for serving connections.
     pub fn with_protocol<P>(self, protocol: P) -> Server<S, P> {
         Server {
             incoming: self.incoming,
@@ -220,11 +237,18 @@ where
     }
 }
 
+/// An error that can occur when serving connections.
+///
+/// This error is only returned at the end of the server. Individual connection's
+/// errors are discarded and not returned. To handle an individual connection's
+/// error, apply a middleware which can process that error in the Service.
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError<E> {
+    /// IO Errors
     #[error(transparent)]
     Io(#[from] io::Error),
 
+    /// Errors from the MakeService part of the server.
     #[error("make service: {0}")]
     MakeService(#[source] E),
 }

@@ -16,6 +16,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::info::{Connection, ConnectionInfo, Protocol};
 use crate::server::Accept;
 
+/// A duplex stream transports data entirely in memory within the tokio runtime.
 #[derive(Debug)]
 #[pin_project]
 pub struct DuplexStream {
@@ -31,6 +32,12 @@ impl Connection for DuplexStream {
 }
 
 impl DuplexStream {
+    /// Create a new duplex stream pair.
+    ///
+    /// The stream will be created with a buffer, and the `name` and `protocol` will be used to
+    /// create the connection info. Normally, this method is not needed, an you should prefer
+    /// using [`DuplexClient`] and [`DuplexIncoming`] together
+    /// to create a client/server pair of duplex streams.
     pub fn new(name: Authority, protocol: Protocol, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
         let info = ConnectionInfo::duplex(name, protocol);
@@ -89,11 +96,18 @@ pub struct DuplexClient {
 }
 
 impl DuplexClient {
+    /// Create a new duplex client and incoming pair.
+    ///
+    /// The client can be cloned and re-used cheaply, and the incoming provides
+    /// a stream of incoming duplex connections.
     pub fn new(name: Authority) -> (DuplexClient, DuplexIncoming) {
         let (sender, receiver) = tokio::sync::mpsc::channel(32);
         (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
     }
 
+    /// Connect to the other half of this duplex stream.
+    ///
+    /// The `max_buf_size` is the maximum size of the buffer used for the stream.
     pub async fn connect(
         &self,
         max_buf_size: usize,

@@ -16,6 +16,7 @@ use tracing::{dispatcher, Instrument};
 
 use super::acceptor::TlsStream;
 
+/// A middleware which adds TLS connection information to the request extensions.
 pub struct TlsConnectLayer;
 
 impl<S> Layer<S> for TlsConnectLayer {
@@ -33,6 +34,7 @@ pub struct TlsConnectionInfoService<S> {
 }
 
 impl<S> TlsConnectionInfoService<S> {
+    /// Create a new `TlsConnectionInfoService` wrapping `inner` service,
     pub fn new(inner: S) -> Self {
         Self { inner }
     }

@@ -5,7 +5,7 @@ async fn braided_duplex() {
 
     let (client, incoming) = braid::duplex::DuplexClient::new("test".parse().unwrap());
 
-    let server = braid::server::acceptor::Acceptor::from(incoming);
+    let server = braid::server::Acceptor::from(incoming);
     tokio::spawn(async move {
         let mut incoming = server.fuse();
         while let Some(Ok(mut stream)) = incoming.next().await {

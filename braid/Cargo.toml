@@ -28,3 +28,8 @@ futures-util.workspace = true
 pem-rfc7468.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["macros"] }
+
+[features]
+default = []
+connector = []
+sni = []
