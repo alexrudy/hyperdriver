@@ -36,7 +36,10 @@ async fn platter_duplex() {
 
     let stream = braid::client::Stream::from(
         client
-            .connect(1024, braid::info::Protocol::Http(http::Version::HTTP_11))
+            .connect(
+                1024,
+                Some(braid::info::Protocol::Http(http::Version::HTTP_11)),
+            )
             .await
             .unwrap(),
     );

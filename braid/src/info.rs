@@ -231,9 +231,9 @@ pub struct ConnectionInfo {
 }
 
 impl ConnectionInfo {
-    pub(crate) fn duplex(name: Authority, protocol: Protocol) -> ConnectionInfo {
+    pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>) -> ConnectionInfo {
         ConnectionInfo {
-            protocol: Some(protocol),
+            protocol,
             authority: Some(name),
             local_addr: SocketAddr::Duplex,
             remote_addr: SocketAddr::Duplex,

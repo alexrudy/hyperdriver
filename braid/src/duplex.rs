@@ -38,7 +38,7 @@ impl DuplexStream {
     /// create the connection info. Normally, this method is not needed, an you should prefer
     /// using [`DuplexClient`] and [`DuplexIncoming`] together
     /// to create a client/server pair of duplex streams.
-    pub fn new(name: Authority, protocol: Protocol, max_buf_size: usize) -> (Self, Self) {
+    pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
         let info = ConnectionInfo::duplex(name, protocol);
         (
@@ -111,7 +111,7 @@ impl DuplexClient {
     pub async fn connect(
         &self,
         max_buf_size: usize,
-        protocol: Protocol,
+        protocol: Option<Protocol>,
     ) -> Result<DuplexStream, io::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let request = DuplexConnectionRequest::new(self.name.clone(), tx, max_buf_size, protocol);
@@ -128,7 +128,7 @@ struct DuplexConnectionRequest {
     name: Authority,
     ack: tokio::sync::oneshot::Sender<DuplexStream>,
     max_buf_size: usize,
-    protocol: Protocol,
+    protocol: Option<Protocol>,
 }
 
 impl DuplexConnectionRequest {
@@ -136,7 +136,7 @@ impl DuplexConnectionRequest {
         name: Authority,
         ack: tokio::sync::oneshot::Sender<DuplexStream>,
         max_buf_size: usize,
-        protocol: Protocol,
+        protocol: Option<Protocol>,
     ) -> Self {
         Self {
             name,
@@ -214,7 +214,7 @@ mod test {
         let mut incoming = incoming.fuse();
 
         let (mut client_stream, mut server_stream) = tokio::try_join!(
-            client.connect(1024, Protocol::Http(Version::HTTP_11)),
+            client.connect(1024, Some(Protocol::Http(Version::HTTP_11))),
             async { incoming.next().await.unwrap() }
         )
         .unwrap();
