@@ -1,6 +1,6 @@
 use http::Uri;
 use http_body_util::BodyExt as _;
-use patron::{Client, Connect, ConnectionProtocol};
+use patron::{Client, ConnectionProtocol};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
@@ -81,10 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn send<C>(mut client: Client<C>, uri: Uri, done: tokio::sync::mpsc::Sender<()>)
-where
-    C: Connect + Clone,
-{
+async fn send(mut client: Client, uri: Uri, done: tokio::sync::mpsc::Sender<()>) {
     let res = match client.get(uri).await {
         Ok(res) => res,
         Err(err) => {

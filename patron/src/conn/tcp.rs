@@ -8,8 +8,9 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use braid::client::Stream;
+use futures_util::FutureExt;
 use http::Uri;
-use rustls::ClientConfig;
+use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
 use tokio::net::TcpSocket;
 use tower::ServiceExt as _;
@@ -21,11 +22,11 @@ use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 pub struct TcpConnector<R = GaiResolver> {
     config: Arc<TcpConnectionConfig>,
     resolver: R,
-    tls: Arc<ClientConfig>,
+    tls: Arc<TlsClientConfig>,
 }
 
 impl TcpConnector {
-    pub fn new(config: TcpConnectionConfig, tls: ClientConfig) -> Self {
+    pub fn new(config: TcpConnectionConfig, tls: TlsClientConfig) -> Self {
         Self {
             config: Arc::new(config),
             resolver: GaiResolver::new(),
@@ -155,21 +156,23 @@ impl<'c> TcpConnecting<'c> {
         };
 
         let mut fallback = std::pin::pin!(fallback_delay);
-        let mut primary = std::pin::pin!(self.prefered.connect(self.config));
+        let mut primary = std::pin::pin!(self.prefered.connect(self.config).fuse());
         let mut primary_error = None;
 
-        tokio::select! {
-            biased;
-            res = &mut primary => match res {
-                Ok(stream) => return Ok(stream),
-                Err(e) => primary_error = Some(e),
-            },
-            Ok(stream) = &mut fallback => return Ok(stream),
-            else => {}
-        };
+        loop {
+            tokio::select! {
+                biased;
+                res = &mut primary => match res {
+                    Ok(stream) => return Ok(stream),
+                    Err(e) => primary_error = Some(e),
+                },
+                Ok(stream) = &mut fallback => return Ok(stream),
+                else => break,
+            };
+        }
 
         // If we got here, both the primary and fallback failed. Return the error from the primary
-        Err(primary_error.expect("primary should have failed"))
+        Err(primary_error.expect("primary connection attempt should have failed"))
     }
 }
 

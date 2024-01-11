@@ -16,6 +16,7 @@ use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures_util::future::BoxFuture;
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -25,7 +26,6 @@ use tracing::trace;
 use tracing::Instrument;
 
 use crate::lazy;
-use crate::lazy::Lazy;
 
 #[cfg(debug_assertions)]
 static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
@@ -104,10 +104,10 @@ impl<T: Poolable> Pool<T> {
         key: Key,
         multiplex: bool,
         connect: F,
-    ) -> Instrumented<Checkout<T, F, R, E>>
+    ) -> Instrumented<Checkout<T, E>>
     where
-        F: FnOnce() -> R,
-        R: Future<Output = Result<T, E>>,
+        F: FnOnce() -> R + Send + 'static,
+        R: Future<Output = Result<T, E>> + Send + 'static,
     {
         if multiplex {
             let mut inner = self.inner.lock().unwrap();
@@ -303,28 +303,28 @@ pub enum Error<E> {
 }
 
 #[pin_project(PinnedDrop)]
-pub(crate) struct Checkout<T: Poolable, F, R, E> {
+pub(crate) struct Checkout<T: Poolable, E> {
     key: Key,
     pool: WeakOpt<Mutex<PoolInner<T>>>,
     waiter: Option<Receiver<T>>,
     #[pin]
-    connect: Lazy<F, R>,
+    connect: BoxFuture<'static, Result<T, E>>,
     connection_error: PhantomData<E>,
     #[cfg(debug_assertions)]
     id: usize,
 }
 
-impl<T: Poolable, F, R, E> Checkout<T, F, R, E>
-where
-    F: FnOnce() -> R,
-    R: Future<Output = Result<T, E>>,
-{
-    fn new(
+impl<T: Poolable, E> Checkout<T, E> {
+    fn new<R, F>(
         key: Key,
         pool: Option<&Arc<Mutex<PoolInner<T>>>>,
         waiter: Option<Receiver<T>>,
         connect: F,
-    ) -> Self {
+    ) -> Self
+    where
+        R: Future<Output = Result<T, E>> + Send + 'static,
+        F: FnOnce() -> R + Send + 'static,
+    {
         #[cfg(debug_assertions)]
         let id = CHECKOUT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
@@ -338,7 +338,7 @@ where
             key,
             pool,
             waiter,
-            connect: lazy::lazy(connect),
+            connect: Box::pin(lazy::lazy(connect)),
             connection_error: PhantomData,
             #[cfg(debug_assertions)]
             id,
@@ -346,11 +346,7 @@ where
     }
 }
 
-impl<T: Poolable, F, R, E> Future for Checkout<T, F, R, E>
-where
-    F: FnOnce() -> R,
-    R: Future<Output = Result<T, E>>,
-{
+impl<T: Poolable, E> Future for Checkout<T, E> {
     type Output = Result<Pooled<T>, Error<E>>;
 
     #[cfg_attr(debug_assertions, tracing::instrument(skip_all, fields(id=%self.id), level="trace"))]
@@ -385,11 +381,7 @@ where
     }
 }
 
-impl<T: Poolable, F, R, E> Checkout<T, F, R, E>
-where
-    F: FnOnce() -> R,
-    R: Future<Output = Result<T, E>>,
-{
+impl<T: Poolable, E> Checkout<T, E> {
     /// Checks the waiter to see if a new connection is ready and can be passed along.
     fn poll_waiter(
         self: Pin<&mut Self>,
@@ -483,7 +475,7 @@ where
 }
 
 #[pinned_drop]
-impl<T: Poolable, F, R, E> PinnedDrop for Checkout<T, F, R, E> {
+impl<T: Poolable, E> PinnedDrop for Checkout<T, E> {
     fn drop(self: Pin<&mut Self>) {
         if let Some(pool) = self.pool.upgrade() {
             if let Ok(mut inner) = pool.lock() {

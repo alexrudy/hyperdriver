@@ -7,7 +7,7 @@ pub struct Builder {
     tcp: crate::conn::TcpConnectionConfig,
     tls: Option<ClientConfig>,
     pool: crate::pool::Config,
-    conn: crate::conn::Builder,
+    conn: crate::conn::http::HttpConnectionBuilder,
 }
 
 impl Builder {
@@ -24,7 +24,7 @@ impl Builder {
         &mut self.pool
     }
 
-    pub fn conn(&mut self) -> &mut crate::conn::Builder {
+    pub fn conn(&mut self) -> &mut crate::conn::http::HttpConnectionBuilder {
         &mut self.conn
     }
 }
@@ -32,12 +32,10 @@ impl Builder {
 impl Builder {
     pub fn build(self) -> Client<HttpConnector> {
         let tls = self.tls.unwrap_or_else(super::default_tls_config);
-        let protocol = self.conn.protocol;
 
         Client {
             connector: HttpConnector::new(crate::conn::TcpConnector::new(self.tcp, tls), self.conn),
             pool: crate::pool::Pool::new(self.pool),
-            protocol,
         }
     }
 }
