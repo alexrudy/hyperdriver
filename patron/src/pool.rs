@@ -488,8 +488,7 @@ where
         // Try to connect while we also wait for a checkout to be ready.
         loop {
             let this = self.as_mut().project();
-            let connection: T;
-            match this.inner {
+            let connection: T = match this.inner {
                 InnerCheckoutConnecting::Waiting => {
                     // We're waiting on a connection to be ready.
                     return Poll::Pending;
@@ -504,20 +503,20 @@ where
                     return Poll::Ready(Ok(self.as_mut().connected(connection)));
                 }
                 InnerCheckoutConnecting::Connecting { connect, .. } => {
-                    connection = ready!(connect.poll_unpin(cx)).map_err(Error::Connecting)?;
+                    ready!(connect.poll_unpin(cx)).map_err(Error::Connecting)?
                 }
                 InnerCheckoutConnecting::Handshaking(handshake) => {
                     let connection =
                         ready!(handshake.poll_unpin(cx)).map_err(Error::Handshaking)?;
                     return Poll::Ready(Ok(self.as_mut().connected(connection)));
                 }
-            }
+            };
 
             if connection.can_share() {
                 tracing::trace!(key=%this.key, "connection can be shared");
                 if let Some(pool) = this.pool.upgrade() {
                     if let Ok(mut inner) = pool.lock() {
-                        inner.connected_in_handshake(&this.key);
+                        inner.connected_in_handshake(this.key);
                     }
                 }
             }
@@ -717,7 +716,7 @@ mod tests {
             .checkout(
                 key.clone(),
                 false,
-                move || MockTransport::single(),
+                MockTransport::single,
                 MockTransport::handshake,
             )
             .await
@@ -731,7 +730,7 @@ mod tests {
             .checkout(
                 key.clone(),
                 false,
-                move || MockTransport::single(),
+                MockTransport::single,
                 MockTransport::handshake,
             )
             .await
@@ -743,12 +742,7 @@ mod tests {
         drop(conn);
 
         let c2 = pool
-            .checkout(
-                key,
-                false,
-                move || MockTransport::single(),
-                MockTransport::handshake,
-            )
+            .checkout(key, false, MockTransport::single, MockTransport::handshake)
             .await
             .unwrap();
 
@@ -775,7 +769,7 @@ mod tests {
             .checkout(
                 key.clone(),
                 true,
-                move || MockTransport::reusable(),
+                MockTransport::reusable,
                 MockTransport::handshake,
             )
             .await
@@ -789,7 +783,7 @@ mod tests {
             .checkout(
                 key.clone(),
                 true,
-                move || MockTransport::reusable(),
+                MockTransport::reusable,
                 MockTransport::handshake,
             )
             .await
@@ -804,7 +798,7 @@ mod tests {
             .checkout(
                 key.clone(),
                 true,
-                move || MockTransport::reusable(),
+                MockTransport::reusable,
                 MockTransport::handshake,
             )
             .await
@@ -842,7 +836,7 @@ mod tests {
         let mut checkout_b = std::pin::pin!(pool.checkout(
             key.clone(),
             true,
-            move || MockTransport::reusable(),
+            MockTransport::reusable,
             MockTransport::handshake
         ));
 

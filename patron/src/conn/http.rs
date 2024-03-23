@@ -122,17 +122,13 @@ mod future {
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let mut this = self.project();
-            loop {
-                match this.state.as_mut().project() {
-                    StateProj::Handshaking { future } => {
-                        return future.as_mut().poll(cx);
-                    }
-                    StateProj::Error(error) => {
-                        if let Some(error) = error.take() {
-                            return Poll::Ready(Err(error));
-                        } else {
-                            panic!("invalid future state");
-                        }
+            match this.state.as_mut().project() {
+                StateProj::Handshaking { future } => future.as_mut().poll(cx),
+                StateProj::Error(error) => {
+                    if let Some(error) = error.take() {
+                        Poll::Ready(Err(error))
+                    } else {
+                        panic!("invalid future state");
                     }
                 }
             }

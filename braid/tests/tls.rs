@@ -52,7 +52,7 @@ async fn braided_tls() {
     });
 
     let mut conn = braid::client::Stream::connect(addr).await.unwrap().tls(
-        "example.com".try_into().unwrap(),
+        "example.com",
         rustls::ClientConfig::builder()
             .with_root_certificates(tls_root_store())
             .with_no_client_auth()

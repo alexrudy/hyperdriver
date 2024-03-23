@@ -26,10 +26,10 @@ async fn platter_duplex() {
 
         tokio::select! {
             rv = &mut server => {
-                return rv;
+                rv
             },
             _ = rx => {
-                return Ok(());
+                Ok(())
             },
         }
     });

@@ -96,7 +96,7 @@ async fn send(mut client: Client, uri: Uri, done: tokio::sync::mpsc::Sender<()>)
     while let Some(Ok(frame)) = body.frame().await {
         if let Some(data) = frame.data_ref() {
             total += data.len();
-            stdout.write_all(&data).await.unwrap();
+            stdout.write_all(data).await.unwrap();
         }
     }
 

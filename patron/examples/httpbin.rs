@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut body = res.into_body();
     while let Some(chunk) = body.frame().await {
         if let Some(chunk) = chunk?.data_ref() {
-            stdout.write_all(&chunk).await?;
+            stdout.write_all(chunk).await?;
         }
     }
 
