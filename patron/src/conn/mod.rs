@@ -1,8 +1,9 @@
-use ::http::Uri;
 use braid::client::Stream;
+use braid::info::ConnectionInfo;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use std::future::Future;
+use std::io;
 
 use hyper::body::Incoming;
 use tower::Service;
@@ -11,7 +12,8 @@ pub mod dns;
 pub mod http;
 pub mod tcp;
 
-use crate::pool::Poolable;
+use crate::pool::PoolableConnection;
+use crate::pool::PoolableTransport;
 
 pub use self::http::ConnectionError;
 pub(crate) use self::http::HttpConnector;
@@ -20,63 +22,105 @@ pub(crate) use self::tcp::TcpConnector;
 
 /// Trait for types which implement a [tower::Service] appropriate for opening a
 /// [Stream] to a [Uri].
-pub trait Transport
-where
-    Self: Service<Uri, Response = Stream>,
-{
+// pub trait Transport
+// where
+//     Self: Service<Uri, Response = Stream>,
+// {
+// }
+
+// impl<T> Transport for T
+// where
+//     T: Service<Uri, Response = Stream>,
+//     T::Error: std::error::Error + Send + Sync + 'static,
+// {
+// }
+
+#[derive(Debug)]
+pub struct Transport {
+    stream: Stream,
+    info: ConnectionInfo,
 }
 
-impl<T> Transport for T
-where
-    T: Service<Uri, Response = Stream>,
-    T::Error: std::error::Error + Send + Sync + 'static,
-{
+impl Transport {
+    /// Create a new transport from a stream.
+    pub async fn new(mut stream: Stream) -> io::Result<Self> {
+        stream.finish_handshake().await?;
+
+        let info = stream.info().await?;
+
+        Ok(Self { stream, info })
+    }
+
+    pub(crate) fn info(&self) -> &ConnectionInfo {
+        &self.info
+    }
+
+    pub(crate) fn host(&self) -> Option<&str> {
+        self.info.authority.as_ref().map(|a| a.as_str())
+    }
+}
+
+impl PoolableTransport for Transport {
+    fn can_share(&self) -> bool {
+        self.info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
+            == Some(&braid::info::Protocol::Http(::http::Version::HTTP_2))
+    }
+}
+
+impl From<Transport> for Stream {
+    fn from(transport: Transport) -> Self {
+        transport.stream
+    }
 }
 
 /// Trait for types which implement a [tower::Service] appropriate for connecting to a
 /// [Uri].
-pub trait Connect
+pub trait Protocol
 where
-    Self: Service<Uri>,
+    Self: Service<Transport>,
 {
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The type of connection returned by this service
-    type Connection: Connection + Poolable;
+    type Connection: Connection + PoolableConnection;
+
+    /// The type of the handshake future
+    type Future: Future<Output = Result<Self::Connection, <Self as Protocol>::Error>>
+        + Send
+        + 'static;
 }
 
-impl<T, C> Connect for T
+impl<T, C> Protocol for T
 where
-    T: Service<Uri, Response = C> + Send + 'static,
+    T: Service<Transport, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
-    C: Connection + Poolable,
+    C: Connection + PoolableConnection,
 {
     type Error = T::Error;
     type Connection = C;
+    type Future = T::Future;
 }
 
 /// The HTTP protocol to use for a connection.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum ConnectionProtocol {
+pub enum HttpProtocol {
     /// Connect using HTTP/1.1
     Http1,
 
     /// Connect using HTTP/2
-    #[allow(dead_code)]
     Http2,
 }
 
-impl ConnectionProtocol {
-    #[allow(dead_code)]
+impl HttpProtocol {
     /// Does this protocol allow multiplexing?
     pub fn multiplex(&self) -> bool {
         matches!(self, Self::Http2)
     }
 }
 
-impl From<::http::Version> for ConnectionProtocol {
+impl From<::http::Version> for HttpProtocol {
     fn from(version: ::http::Version) -> Self {
         match version {
             ::http::Version::HTTP_11 | ::http::Version::HTTP_10 => Self::Http1,

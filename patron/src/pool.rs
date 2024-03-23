@@ -17,6 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures_util::future::BoxFuture;
+use futures_util::FutureExt as _;
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -26,6 +27,11 @@ use tracing::trace;
 use tracing::Instrument;
 
 use crate::lazy;
+
+// TODO: Pool should model transport & protocol stages separately, so that it can intervene
+// and check for re-usability of the protocol before the handshake starts. If the protocol
+// is re-usable, and we start a handshake, we should be able to have additional connections
+// wait on the re-usable protocol handshake.
 
 #[cfg(debug_assertions)]
 static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
@@ -97,33 +103,45 @@ impl<T> Pool<T> {
     }
 }
 
-impl<T: Poolable> Pool<T> {
-    #[tracing::instrument(skip(self, key, multiplex, connect), fields(key = %key), level="debug")]
-    pub(crate) fn checkout<F, R, E>(
+impl<C: PoolableConnection> Pool<C> {
+    #[tracing::instrument(skip_all, fields(key = %key), level="debug")]
+    pub(crate) fn checkout<F, R, H, T, E>(
         &self,
         key: Key,
         multiplex: bool,
         connect: F,
-    ) -> Instrumented<Checkout<T, E>>
+        handshake: H,
+    ) -> Instrumented<Checkout<C, T, E>>
     where
+        T: PoolableTransport,
+        H: FnOnce(T) -> BoxFuture<'static, Result<C, E>> + Send + 'static,
         F: FnOnce() -> R + Send + 'static,
         R: Future<Output = Result<T, E>> + Send + 'static,
     {
-        if multiplex {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.connecting.contains(&key) {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                inner.waiting.entry(key.clone()).or_default().push_back(tx);
-                trace!(%key, "connection in progress, will wait");
-                Checkout::new(key, Some(&self.inner), Some(rx), connect).in_current_span()
-            } else {
-                inner.connecting.insert(key.clone());
-                trace!(%key, "connecting to new host");
-                Checkout::new(key, Some(&self.inner), None, connect).in_current_span()
-            }
+        let mut inner = self.inner.lock().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut connector: Option<(F, H)> = Some((connect, handshake));
+
+        if let Some(connection) = inner.pop(&key) {
+            trace!(%key, "connection found in pool");
+            connector = None;
+            return Checkout::new(key, Some(&self.inner), rx, connector, Some(connection))
+                .in_current_span();
+        }
+
+        inner.waiting.entry(key.clone()).or_default().push_back(tx);
+
+        if inner.connecting.contains(&key) {
+            trace!(%key, "connection in progress, will wait");
+            connector = None;
+            Checkout::new(key, Some(&self.inner), rx, connector, None).in_current_span()
         } else {
+            if multiplex {
+                // Only block new connection attempts if we can multiplex on this one.
+                inner.connecting.insert(key.clone());
+            }
             trace!(%key, "connecting to host");
-            Checkout::new(key, Some(&self.inner), None, connect).in_current_span()
+            Checkout::new(key, Some(&self.inner), rx, connector, None).in_current_span()
         }
     }
 }
@@ -155,17 +173,32 @@ impl<T> PoolInner<T> {
         }
         self.waiting.remove(key);
     }
+
+    /// Mark a connection as connected, but not done with the handshake.
+    ///
+    /// New connection attempts will wait for this connection to complete the
+    /// handshake and re-use it if possible.
+    fn connected_in_handshake(&mut self, key: &Key) {
+        self.connecting.insert(key.clone());
+    }
 }
 
-impl<T: Poolable> PoolInner<T> {
+impl<T: PoolableConnection> PoolInner<T> {
     fn push(&mut self, key: Key, mut connection: T) {
         self.connecting.remove(&key);
-        if let Some(waiters) = self.waiting.remove(&key) {
-            for waiter in waiters.into_iter().filter(|waiter| !waiter.is_closed()) {
+
+        if let Some(waiters) = self.waiting.get_mut(&key) {
+            while let Some(waiter) = waiters.pop_front() {
+                if waiter.is_closed() {
+                    continue;
+                }
+
                 if let Some(conn) = connection.reuse() {
                     let _ = waiter.send(conn);
                 } else {
-                    panic!("waiter waiting on connection which can't be re-used");
+                    tracing::trace!("connection not re-usable, but will be sent to waiter");
+                    let _ = waiter.send(connection);
+                    return;
                 }
             }
         }
@@ -249,26 +282,33 @@ impl<T> Idle<T> {
     }
 }
 
-pub trait Poolable: Unpin + Send + Sized + 'static {
+pub trait PoolableTransport: Unpin + Send + Sized + 'static {
+    /// Returns `true` if the transport can be re-used, usually
+    /// because it has used ALPN to negotiate a protocol that can
+    /// be multiplexed.
+    fn can_share(&self) -> bool;
+}
+
+pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     fn is_open(&self) -> bool;
     fn can_share(&self) -> bool;
     fn reuse(&mut self) -> Option<Self>;
 }
 
-pub(crate) struct Pooled<T: Poolable> {
+pub(crate) struct Pooled<T: PoolableConnection> {
     connection: Option<T>,
     is_reused: bool,
     key: Key,
     pool: WeakOpt<Mutex<PoolInner<T>>>,
 }
 
-impl<T: fmt::Debug + Poolable> fmt::Debug for Pooled<T> {
+impl<T: fmt::Debug + PoolableConnection> fmt::Debug for Pooled<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Pooled").field(&self.connection).finish()
     }
 }
 
-impl<T: Poolable> Deref for Pooled<T> {
+impl<T: PoolableConnection> Deref for Pooled<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -276,13 +316,13 @@ impl<T: Poolable> Deref for Pooled<T> {
     }
 }
 
-impl<T: Poolable> DerefMut for Pooled<T> {
+impl<T: PoolableConnection> DerefMut for Pooled<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.connection.as_mut().unwrap()
     }
 }
 
-impl<T: Poolable> Drop for Pooled<T> {
+impl<T: PoolableConnection> Drop for Pooled<T> {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
             if connection.is_open() && !self.is_reused {
@@ -300,28 +340,74 @@ impl<T: Poolable> Drop for Pooled<T> {
 #[derive(Debug, Error)]
 pub enum Error<E> {
     Connecting(#[source] E),
+    Handshaking(#[source] E),
+}
+
+#[derive(Debug)]
+#[pin_project(project = WaitingProjected)]
+enum Waiting<C> {
+    Idle(#[pin] Receiver<C>),
+    Connecting(#[pin] Receiver<C>),
+}
+
+enum WaitingPoll<C> {
+    Connected(C),
+    Closed,
+    NotReady,
+}
+
+impl<C> Future for Waiting<C> {
+    type Output = WaitingPoll<C>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            WaitingProjected::Idle(rx) => match rx.poll(cx) {
+                Poll::Ready(Ok(connection)) => Poll::Ready(WaitingPoll::Connected(connection)),
+                Poll::Ready(Err(_)) => Poll::Ready(WaitingPoll::Closed),
+                Poll::Pending => Poll::Ready(WaitingPoll::NotReady),
+            },
+            WaitingProjected::Connecting(rx) => match rx.poll(cx) {
+                Poll::Ready(Ok(connection)) => Poll::Ready(WaitingPoll::Connected(connection)),
+                Poll::Ready(Err(_)) => Poll::Ready(WaitingPoll::Closed),
+                Poll::Pending => Poll::Pending,
+            },
+        }
+    }
+}
+
+enum InnerCheckoutConnecting<C: PoolableConnection, T: PoolableTransport, E> {
+    Waiting,
+    Connected,
+    Connecting {
+        connect: BoxFuture<'static, Result<T, E>>,
+        handshake: Box<dyn FnOnce(T) -> BoxFuture<'static, Result<C, E>> + Send>,
+    },
+    Handshaking(BoxFuture<'static, Result<C, E>>),
 }
 
 #[pin_project(PinnedDrop)]
-pub(crate) struct Checkout<T: Poolable, E> {
+pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E> {
     key: Key,
-    pool: WeakOpt<Mutex<PoolInner<T>>>,
-    waiter: Option<Receiver<T>>,
+    pool: WeakOpt<Mutex<PoolInner<C>>>,
     #[pin]
-    connect: BoxFuture<'static, Result<T, E>>,
+    waiter: Waiting<C>,
+    inner: InnerCheckoutConnecting<C, T, E>,
+    connection: Option<C>,
     connection_error: PhantomData<E>,
     #[cfg(debug_assertions)]
     id: usize,
 }
 
-impl<T: Poolable, E> Checkout<T, E> {
-    fn new<R, F>(
+impl<C: PoolableConnection, T: PoolableTransport, E> Checkout<C, T, E> {
+    fn new<R, F, H>(
         key: Key,
-        pool: Option<&Arc<Mutex<PoolInner<T>>>>,
-        waiter: Option<Receiver<T>>,
-        connect: F,
+        pool: Option<&Arc<Mutex<PoolInner<C>>>>,
+        waiter: Receiver<C>,
+        connect: Option<(F, H)>,
+        connection: Option<C>,
     ) -> Self
     where
+        H: FnOnce(T) -> BoxFuture<'static, Result<C, E>> + Send + 'static,
         R: Future<Output = Result<T, E>> + Send + 'static,
         F: FnOnce() -> R + Send + 'static,
     {
@@ -333,116 +419,152 @@ impl<T: Poolable, E> Checkout<T, E> {
         } else {
             WeakOpt::none()
         };
-
-        Self {
-            key,
-            pool,
-            waiter,
-            connect: Box::pin(lazy::lazy(connect)),
-            connection_error: PhantomData,
-            #[cfg(debug_assertions)]
-            id,
+        if connection.is_some() {
+            debug!(key=%key, "connection recieved from pool");
+            Self {
+                key,
+                pool,
+                waiter: Waiting::Idle(waiter),
+                inner: InnerCheckoutConnecting::Connected,
+                connection,
+                connection_error: PhantomData,
+                #[cfg(debug_assertions)]
+                id,
+            }
+        } else if let Some((connect, handshake)) = connect {
+            Self {
+                key,
+                pool,
+                waiter: Waiting::Idle(waiter),
+                inner: InnerCheckoutConnecting::Connecting {
+                    connect: Box::pin(lazy::lazy(connect)),
+                    handshake: Box::new(handshake),
+                },
+                connection,
+                connection_error: PhantomData,
+                #[cfg(debug_assertions)]
+                id,
+            }
+        } else {
+            Self {
+                key,
+                pool,
+                waiter: Waiting::Connecting(waiter),
+                inner: InnerCheckoutConnecting::Waiting,
+                connection,
+                connection_error: PhantomData,
+                #[cfg(debug_assertions)]
+                id,
+            }
         }
     }
 }
 
-impl<T: Poolable, E> Future for Checkout<T, E> {
-    type Output = Result<Pooled<T>, Error<E>>;
+impl<C, T, E> Future for Checkout<C, T, E>
+where
+    C: PoolableConnection,
+    T: PoolableTransport,
+    E: 'static,
+{
+    type Output = Result<Pooled<C>, Error<E>>;
 
     #[cfg_attr(debug_assertions, tracing::instrument(skip_all, fields(id=%self.id), level="trace"))]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(connection) = ready!(self.as_mut().poll_waiter(cx)?) {
+        // Outcomes from .poll_waiter:
+        // - Ready(Some(connection)) => return connection
+        // - Ready(None) => continue to check pool, we don't have a waiter.
+        // - Pending => wait on the waiter to complete, don't bother to check pool.
+
+        // Open questions: Should we check the pool for a different connection when the
+        // waiter is pending? Probably not, ideally our semantics should keep the pool
+        // from containing multiple connections if they can be multiplexed.
+
+        if let WaitingPoll::Connected(connection) = ready!(self.as_mut().poll_waiter(cx)) {
             debug!(key=%self.key, "connection recieved from waiter");
             return Poll::Ready(Ok(connection));
         }
 
-        trace!(key=%self.key, "checking pool for connection");
-        if let Some(connection) = self.as_mut().checkout() {
-            if connection.is_open() {
-                debug!(key=%self.key, "connection recieved from pool");
-                return Poll::Ready(Ok(connection));
-            }
-        }
-
         trace!(key=%self.key, "polling for new connection");
         // Try to connect while we also wait for a checkout to be ready.
-        let this = self.as_mut().project();
-        match this.connect.poll(cx) {
-            Poll::Ready(Ok(connection)) => {
-                debug!(key=%self.key, "connection recieved from connect");
-                Poll::Ready(Ok(self.as_mut().connected(connection)))
+        loop {
+            let this = self.as_mut().project();
+            let connection: T;
+            match this.inner {
+                InnerCheckoutConnecting::Waiting => {
+                    // We're waiting on a connection to be ready.
+                    return Poll::Pending;
+                }
+                InnerCheckoutConnecting::Connected => {
+                    // We've already connected, we can just return the connection.
+                    let connection = this
+                        .connection
+                        .take()
+                        .expect("future was polled after completion");
+
+                    return Poll::Ready(Ok(self.as_mut().connected(connection)));
+                }
+                InnerCheckoutConnecting::Connecting { connect, .. } => {
+                    connection = ready!(connect.poll_unpin(cx)).map_err(Error::Connecting)?;
+                }
+                InnerCheckoutConnecting::Handshaking(handshake) => {
+                    let connection =
+                        ready!(handshake.poll_unpin(cx)).map_err(Error::Handshaking)?;
+                    return Poll::Ready(Ok(self.as_mut().connected(connection)));
+                }
             }
-            Poll::Ready(Err(e)) => {
-                debug!(key=%self.key, "connection error");
-                Poll::Ready(Err(Error::Connecting(e)))
+
+            if connection.can_share() {
+                tracing::trace!(key=%this.key, "connection can be shared");
+                if let Some(pool) = this.pool.upgrade() {
+                    if let Ok(mut inner) = pool.lock() {
+                        inner.connected_in_handshake(&this.key);
+                    }
+                }
             }
-            Poll::Pending => Poll::Pending,
+
+            let InnerCheckoutConnecting::Connecting {
+                connect: _,
+                handshake,
+            } = std::mem::replace(this.inner, InnerCheckoutConnecting::Waiting)
+            else {
+                unreachable!()
+            };
+
+            *this.inner = InnerCheckoutConnecting::Handshaking(Box::pin(handshake(connection)));
         }
     }
 }
 
-impl<T: Poolable, E> Checkout<T, E> {
+impl<C: PoolableConnection, T: PoolableTransport, E> Checkout<C, T, E> {
     /// Checks the waiter to see if a new connection is ready and can be passed along.
-    fn poll_waiter(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Pooled<T>>, Error<E>>> {
+    ///
+    /// If there is no waiter, this function returns `Poll::Ready(Ok(None))`. If there is
+    /// a waiter, then it will poll the waiter and return the result.
+    fn poll_waiter(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<WaitingPoll<Pooled<C>>> {
         let this = self.project();
-        if let Some(mut rx) = this.waiter.take() {
-            trace!(key=%this.key, "polling for waiter");
-            match Pin::new(&mut rx).poll(cx) {
-                Poll::Ready(Ok(connection)) => {
-                    if connection.is_open() {
-                        Poll::Ready(Ok(Some(Pooled {
-                            connection: Some(connection),
-                            is_reused: true,
-                            key: this.key.clone(),
-                            pool: this.pool.clone(),
-                        })))
-                    } else {
-                        Poll::Ready(Ok(None))
-                    }
-                }
-                Poll::Ready(Err(_)) => Poll::Ready(Ok(None)),
-                Poll::Pending => {
-                    *this.waiter = Some(rx);
-                    Poll::Pending
-                }
-            }
-        } else {
-            Poll::Ready(Ok(None))
-        }
-    }
 
-    /// Checks the pool to see if an idle connection is available.
-    fn checkout(self: Pin<&mut Self>) -> Option<Pooled<T>> {
-        if let Some(pool) = self.pool.upgrade() {
-            if let Ok(mut inner) = pool.lock() {
-                if let Some(mut connection) = inner.pop(&self.key) {
-                    if let Some(reuse) = connection.reuse() {
-                        trace!("checking out re-usable connection");
-                        inner.push(self.key.clone(), reuse);
-                        return Some(Pooled {
-                            connection: Some(connection),
-                            is_reused: true,
-                            key: self.key.clone(),
-                            pool: WeakOpt::none(),
-                        });
-                    };
-                    return Some(Pooled {
+        trace!(key=%this.key, "polling for waiter");
+        match this.waiter.poll(cx) {
+            Poll::Ready(WaitingPoll::Connected(connection)) => {
+                if connection.is_open() {
+                    Poll::Ready(WaitingPoll::Connected(Pooled {
                         connection: Some(connection),
-                        is_reused: false,
-                        key: self.key.clone(),
-                        pool: WeakOpt::downgrade(&pool),
-                    });
+                        is_reused: true,
+                        key: this.key.clone(),
+                        pool: this.pool.clone(),
+                    }))
+                } else {
+                    panic!("connection was closed before being returned to the pool");
                 }
             }
+            Poll::Ready(WaitingPoll::Closed) => Poll::Ready(WaitingPoll::Closed),
+            Poll::Ready(WaitingPoll::NotReady) => Poll::Ready(WaitingPoll::NotReady),
+            Poll::Pending => Poll::Pending,
         }
-        None
     }
 
     /// Called to register a new connection with the pool.
-    fn connected(self: Pin<&mut Self>, mut connection: T) -> Pooled<T> {
+    fn connected(self: Pin<&mut Self>, mut connection: C) -> Pooled<C> {
         if let Some(pool) = self.pool.upgrade() {
             if let Ok(mut inner) = pool.lock() {
                 if let Some(reused) = connection.reuse() {
@@ -475,7 +597,7 @@ impl<T: Poolable, E> Checkout<T, E> {
 }
 
 #[pinned_drop]
-impl<T: Poolable, E> PinnedDrop for Checkout<T, E> {
+impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, T, E> {
     fn drop(self: Pin<&mut Self>) {
         if let Some(pool) = self.pool.upgrade() {
             if let Ok(mut inner) = pool.lock() {
@@ -499,6 +621,35 @@ mod tests {
 
     use super::*;
 
+    struct MockTransport {
+        reuse: bool,
+    }
+
+    impl PoolableTransport for MockTransport {
+        fn can_share(&self) -> bool {
+            self.reuse
+        }
+    }
+
+    impl MockTransport {
+        fn new(reuse: bool) -> Self {
+            Self { reuse }
+        }
+
+        async fn single() -> Result<Self, Infallible> {
+            Ok(Self::new(false))
+        }
+
+        async fn reusable() -> Result<Self, Infallible> {
+            Ok(Self::new(true))
+        }
+
+        fn handshake(self) -> BoxFuture<'static, Result<MockConnection, Infallible>> {
+            let reuse = self.reuse;
+            Box::pin(async move { Ok(MockConnection::new(reuse)) })
+        }
+    }
+
     struct MockConnection {
         open: Arc<AtomicBool>,
         reuse: bool,
@@ -520,20 +671,12 @@ mod tests {
             conn
         }
 
-        async fn single() -> Result<Self, Infallible> {
-            Ok(Self::new(false))
-        }
-
-        async fn reusable() -> Result<Self, Infallible> {
-            Ok(Self::new(true))
-        }
-
         fn close(&self) {
             self.open.store(false, Ordering::SeqCst);
         }
     }
 
-    impl Poolable for MockConnection {
+    impl PoolableConnection for MockConnection {
         fn is_open(&self) -> bool {
             self.open.load(Ordering::SeqCst)
         }
@@ -571,7 +714,12 @@ mod tests {
             .into();
 
         let conn = pool
-            .checkout(key.clone(), false, move || MockConnection::single())
+            .checkout(
+                key.clone(),
+                false,
+                move || MockTransport::single(),
+                MockTransport::handshake,
+            )
             .await
             .unwrap();
 
@@ -580,7 +728,12 @@ mod tests {
         drop(conn);
 
         let conn = pool
-            .checkout(key.clone(), false, move || MockConnection::single())
+            .checkout(
+                key.clone(),
+                false,
+                move || MockTransport::single(),
+                MockTransport::handshake,
+            )
             .await
             .unwrap();
 
@@ -590,7 +743,12 @@ mod tests {
         drop(conn);
 
         let c2 = pool
-            .checkout(key, false, move || MockConnection::single())
+            .checkout(
+                key,
+                false,
+                move || MockTransport::single(),
+                MockTransport::handshake,
+            )
             .await
             .unwrap();
 
@@ -614,7 +772,12 @@ mod tests {
             .into();
 
         let conn = pool
-            .checkout(key.clone(), true, move || MockConnection::reusable())
+            .checkout(
+                key.clone(),
+                true,
+                move || MockTransport::reusable(),
+                MockTransport::handshake,
+            )
             .await
             .unwrap();
 
@@ -623,7 +786,12 @@ mod tests {
         drop(conn);
 
         let conn = pool
-            .checkout(key.clone(), true, move || MockConnection::reusable())
+            .checkout(
+                key.clone(),
+                true,
+                move || MockTransport::reusable(),
+                MockTransport::handshake,
+            )
             .await
             .unwrap();
 
@@ -633,7 +801,12 @@ mod tests {
         drop(conn);
 
         let conn = pool
-            .checkout(key.clone(), true, move || MockConnection::reusable())
+            .checkout(
+                key.clone(),
+                true,
+                move || MockTransport::reusable(),
+                MockTransport::handshake,
+            )
             .await
             .unwrap();
         assert!(conn.is_open());
@@ -657,15 +830,24 @@ mod tests {
 
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        let mut checkout_a = std::pin::pin!(pool.checkout(key.clone(), true, move || rx));
+        let mut checkout_a = std::pin::pin!(pool.checkout(
+            key.clone(),
+            true,
+            move || async { Ok(rx.await.expect("rx closed")) },
+            MockTransport::handshake
+        ));
 
         assert!(futures_util::poll!(&mut checkout_a).is_pending());
 
-        let mut checkout_b =
-            std::pin::pin!(pool.checkout(key.clone(), true, move || MockConnection::reusable()));
+        let mut checkout_b = std::pin::pin!(pool.checkout(
+            key.clone(),
+            true,
+            move || MockTransport::reusable(),
+            MockTransport::handshake
+        ));
 
         assert!(futures_util::poll!(&mut checkout_b).is_pending());
-        assert!(tx.send(MockConnection::reusable().await.unwrap()).is_ok());
+        assert!(tx.send(MockTransport::reusable().await.unwrap()).is_ok());
         assert!(futures_util::poll!(&mut checkout_b).is_pending());
 
         let conn_a = checkout_a.await.unwrap();

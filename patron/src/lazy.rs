@@ -36,19 +36,20 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        if let InnerProj::Future(future) = this.inner.as_mut().project() {
-            return future.poll(cx);
-        }
+        loop {
+            if let InnerProj::Future(future) = this.inner.as_mut().project() {
+                return future.poll(cx);
+            }
 
-        if let InnerProjReplace::Init(f) = this.inner.as_mut().project_replace(InnerLazy::Empty) {
-            this.inner.set(InnerLazy::Future(f()));
-        }
+            if let InnerProjReplace::Init(f) = this.inner.as_mut().project_replace(InnerLazy::Empty)
+            {
+                this.inner.set(InnerLazy::Future(f()));
+            }
 
-        if let InnerProj::Future(future) = this.inner.as_mut().project() {
-            return future.poll(cx);
+            if let InnerProj::Empty = this.inner.as_mut().project() {
+                panic!("Lazy future polled after completion");
+            }
         }
-
-        unreachable!("lazy future is empty");
     }
 }
 

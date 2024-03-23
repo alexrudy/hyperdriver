@@ -26,7 +26,6 @@ pub enum RouterError {
 /// A router to multiplex GRPC services
 #[derive(Debug, Clone)]
 pub struct GrpcRouter {
-    registry: crate::ServiceRegistry,
     client: crate::Client,
 }
 
@@ -34,7 +33,7 @@ impl GrpcRouter {
     /// Create a new GRPC Router.
     pub(crate) fn new(registry: crate::ServiceRegistry) -> Self {
         let client = registry.client();
-        Self { registry, client }
+        Self { client }
     }
 }
 
@@ -49,7 +48,7 @@ impl tower::Service<http::Request<Body>> for GrpcRouter {
 
     fn call(&mut self, mut req: http::Request<Body>) -> Self::Future {
         let service = match find_service_name(req.uri()) {
-            Some(service) => service,
+            Some(service) => service.to_owned(),
             None => {
                 tracing::debug!(uri=%req.uri(), "no service found in URI");
 
@@ -57,21 +56,14 @@ impl tower::Service<http::Request<Body>> for GrpcRouter {
             }
         };
 
-        let name = match self.registry.inner.get_name(service) {
-            Some(name) => name,
-            None => {
-                tracing::debug!(uri=%req.uri(), "service {service} not found");
-
-                return Box::pin(futures_util::future::ready(Err(
-                    RouterError::ServiceNotFound(service.into()),
-                )));
-            }
-        };
-
         let uri = req.uri_mut();
         let mut parts = uri.clone().into_parts();
         parts.scheme = Some("svc".parse().unwrap());
-        parts.authority = Some(name.parse().expect("service names are valid authorities"));
+        parts.authority = Some(
+            service
+                .parse()
+                .expect("service names are valid authorities"),
+        );
         *uri = Uri::from_parts(parts).expect("rebuilt a valid URI");
 
         tracing::debug!("Upstream uri: {uri}");

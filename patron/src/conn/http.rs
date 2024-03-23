@@ -1,62 +1,51 @@
+use braid::client::Stream;
 use futures_util::future::BoxFuture;
-use http::Uri;
 use std::fmt;
 use tracing::{instrument::Instrumented, Instrument};
 
 use ::http::{Response, Version};
-use braid::client::Stream;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use thiserror::Error;
 use tracing::trace;
 
-use crate::{conn::tcp::TcpConnectionError, pool::Poolable};
+use crate::pool::PoolableConnection;
 
-use super::{Connection, ConnectionProtocol};
-use super::{TcpConnector, Transport};
+use super::Transport;
+use super::{Connection, HttpProtocol};
 
 /// A connector which links a transport with HTTP connections.
 ///
 /// This connector supports HTTP/2 and HTTP/1.1 connections.
 #[derive(Debug, Clone)]
-pub struct HttpConnector<T = TcpConnector> {
-    transport: T,
+pub struct HttpConnector {
     builder: HttpConnectionBuilder,
 }
 
-impl<T> HttpConnector<T> {
+impl HttpConnector {
     /// Create a new connector with the given transport.
-    pub fn new(transport: T, builder: HttpConnectionBuilder) -> Self {
-        Self { transport, builder }
+    pub fn new(builder: HttpConnectionBuilder) -> Self {
+        Self { builder }
     }
 }
 
-impl<T> tower::Service<Uri> for HttpConnector<T>
-where
-    T: Transport + Clone,
-    <T as tower::Service<Uri>>::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-{
+impl tower::Service<Transport> for HttpConnector {
     type Response = HttpConnection;
 
     type Error = ConnectionError;
 
-    type Future = Instrumented<future::HttpConnectFuture<T>>;
+    type Future = Instrumented<future::HttpConnectFuture>;
 
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.transport
-            .poll_ready(cx)
-            .map_err(|error| ConnectionError::Connecting(error.into()))
+        std::task::Poll::Ready(Ok(()))
     }
 
     #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
-    fn call(&mut self, req: Uri) -> Self::Future {
-        let next = self.transport.clone();
-        let transport = std::mem::replace(&mut self.transport, next);
-
-        future::HttpConnectFuture::new(transport, self.builder.clone(), req).in_current_span()
+    fn call(&mut self, req: Transport) -> Self::Future {
+        future::HttpConnectFuture::new(self.builder.clone(), req).in_current_span()
     }
 }
 
@@ -64,11 +53,11 @@ mod future {
     use std::fmt;
     use std::future::Future;
     use std::pin::Pin;
-    use std::task::{ready, Context, Poll};
+    use std::task::{Context, Poll};
 
-    use braid::client::Stream;
-    use http::Uri;
     use pin_project::pin_project;
+
+    use crate::conn::Transport;
 
     use super::ConnectionError;
     use super::HttpConnection;
@@ -85,38 +74,23 @@ mod future {
     type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
     #[pin_project(project = StateProj, project_replace = StateProjReplace)]
-    enum State<T>
-    where
-        T: tower::Service<Uri>,
-    {
+    enum State {
         Error(Option<ConnectionError>),
-        Connecting {
-            #[pin]
-            oneshot: T::Future,
-            builder: HttpConnectionBuilder,
-        },
         Handshaking {
             future: BoxFuture<'static, HttpConnection, ConnectionError>,
         },
     }
 
     #[pin_project]
-    pub struct HttpConnectFuture<T>
-    where
-        T: tower::Service<Uri>,
-    {
+    pub struct HttpConnectFuture {
         #[pin]
-        state: State<T>,
+        state: State,
     }
 
-    impl<T> fmt::Debug for HttpConnectFuture<T>
-    where
-        T: tower::Service<Uri>,
-    {
+    impl fmt::Debug for HttpConnectFuture {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let field = match &self.state {
                 State::Error(_) => "Error",
-                State::Connecting { .. } => "Connecting",
                 State::Handshaking { .. } => "Handshaking",
             };
 
@@ -126,16 +100,12 @@ mod future {
         }
     }
 
-    impl<T> HttpConnectFuture<T>
-    where
-        T: tower::Service<Uri>,
-    {
-        pub(super) fn new(mut transport: T, builder: HttpConnectionBuilder, uri: Uri) -> Self {
+    impl HttpConnectFuture {
+        pub(super) fn new(builder: HttpConnectionBuilder, stream: Transport) -> HttpConnectFuture {
+            let future = Box::pin(async move { builder.handshake(stream).await });
+
             Self {
-                state: State::Connecting {
-                    oneshot: transport.call(uri),
-                    builder,
-                },
+                state: State::Handshaking { future },
             }
         }
 
@@ -147,25 +117,13 @@ mod future {
         }
     }
 
-    impl<T> Future for HttpConnectFuture<T>
-    where
-        T: tower::Service<Uri, Response = Stream>,
-        T::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-    {
+    impl Future for HttpConnectFuture {
         type Output = Result<HttpConnection, ConnectionError>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let mut this = self.project();
             loop {
                 match this.state.as_mut().project() {
-                    StateProj::Connecting { oneshot, builder } => {
-                        let stream = ready!(oneshot.poll(cx))
-                            .map_err(|error| ConnectionError::Connecting(error.into()))?;
-                        let builder = builder.clone();
-                        let future = Box::pin(async move { builder.handshake(stream).await });
-
-                        this.state.set(State::Handshaking { future });
-                    }
                     StateProj::Handshaking { future } => {
                         return future.as_mut().poll(cx);
                     }
@@ -229,7 +187,7 @@ impl Connection for HttpConnection {
     }
 }
 
-impl Poolable for HttpConnection {
+impl PoolableConnection for HttpConnection {
     fn is_open(&self) -> bool {
         match &self.inner {
             InnerConnection::H2(ref conn) => conn.is_ready(),
@@ -282,11 +240,11 @@ pub enum ConnectionError {
 pub struct HttpConnectionBuilder {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
-    pub(crate) protocol: ConnectionProtocol,
+    pub(crate) protocol: HttpProtocol,
 }
 
 impl HttpConnectionBuilder {
-    pub fn set_protocol(&mut self, protocol: ConnectionProtocol) -> &mut Self {
+    pub fn set_protocol(&mut self, protocol: HttpProtocol) -> &mut Self {
         self.protocol = protocol;
         self
     }
@@ -337,35 +295,23 @@ impl HttpConnectionBuilder {
 
     pub(crate) async fn handshake(
         &self,
-        mut stream: Stream,
+        transport: Transport,
     ) -> Result<HttpConnection, ConnectionError> {
         match self.protocol {
-            ConnectionProtocol::Http2 => self.handshake_h2(stream).await,
-            ConnectionProtocol::Http1 => {
-                stream.finish_handshake().await.map_err(|error| {
-                    ConnectionError::Connecting(
-                        TcpConnectionError::msg("tls handshake error")(error).into(),
-                    )
-                })?;
-
-                let info = stream.info().await.map_err(|error| {
-                    ConnectionError::Connecting(
-                        TcpConnectionError::msg("tls info error")(error).into(),
-                    )
-                })?;
-
-                if info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
+            HttpProtocol::Http2 => self.handshake_h2(transport.into()).await,
+            HttpProtocol::Http1 => {
+                if transport
+                    .info()
+                    .tls
+                    .as_ref()
+                    .and_then(|tls| tls.alpn.as_ref())
                     == Some(&braid::info::Protocol::Http(http::Version::HTTP_2))
                 {
                     trace!("alpn h2 switching");
-                    //TODO: There should be some way to multiplex at this point.
-                    // One strategy: separate the transport and protocol pieces,
-                    // and allow the pool to introspect the transport to see if we
-                    // are doing ALPN.
-                    return self.handshake_h2(stream).await;
+                    return self.handshake_h2(transport.into()).await;
                 }
 
-                self.handshake_h1(stream).await
+                self.handshake_h1(transport.into()).await
             }
         }
     }
@@ -376,7 +322,7 @@ impl Default for HttpConnectionBuilder {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
             http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
-            protocol: ConnectionProtocol::Http1,
+            protocol: HttpProtocol::Http1,
         }
     }
 }

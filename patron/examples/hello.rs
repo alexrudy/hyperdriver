@@ -1,6 +1,6 @@
 use http::Uri;
 use http_body_util::BodyExt as _;
-use patron::{Client, ConnectionProtocol};
+use patron::{Client, HttpProtocol};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
@@ -48,9 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.with_tls(config);
 
         if args.get_flag("protocol") {
-            client.conn().set_protocol(ConnectionProtocol::Http1);
+            client.conn().set_protocol(HttpProtocol::Http1);
         } else {
-            client.conn().set_protocol(ConnectionProtocol::Http2);
+            client.conn().set_protocol(HttpProtocol::Http2);
         }
     }
 

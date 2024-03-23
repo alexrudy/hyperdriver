@@ -17,6 +17,7 @@ use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
+use super::Transport;
 
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
@@ -46,7 +47,7 @@ where
         + 'static,
     R::Future: Send,
 {
-    type Response = Stream;
+    type Response = Transport;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -62,19 +63,38 @@ where
             Err(e) => panic!("uri error: {e}"),
         };
 
-        let transport = self.clone();
-        let transport = std::mem::replace(self, transport);
+        let connector = std::mem::replace(self, self.clone());
 
         let span = tracing::trace_span!("tcp", host = %host, port = %port);
 
         Box::pin(
             async move {
-                let stream = transport.connect(host.clone(), port).await?;
+                let mut stream = connector.connect(host.clone(), port).await?;
                 if req.scheme_str() == Some("https") {
-                    let stream = stream.tls(host.as_ref(), transport.tls.clone());
-                    Ok(stream)
+                    let mut stream = stream.tls(host.as_ref(), connector.tls.clone());
+                    stream
+                        .finish_handshake()
+                        .await
+                        .map_err(TcpConnectionError::msg("TLS handshake"))?;
+
+                    let info = stream
+                        .info()
+                        .await
+                        .map_err(TcpConnectionError::msg("TLS connection info"))?;
+
+                    Ok(Transport { stream, info })
                 } else {
-                    Ok(stream)
+                    stream
+                        .finish_handshake()
+                        .await
+                        .map_err(TcpConnectionError::msg("TCP handshake (noop)"))?;
+
+                    let info = stream
+                        .info()
+                        .await
+                        .map_err(TcpConnectionError::msg("TCP connection info"))?;
+
+                    Ok(Transport { stream, info })
                 }
             }
             .instrument(span),

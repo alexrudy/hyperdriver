@@ -15,15 +15,14 @@ use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
 use futures_util::{future::BoxFuture, FutureExt};
 use hyper::Uri;
-use patron::HttpConnector;
+use patron::{HttpConnector, Transport};
 use pidfile::PidFile;
-use tokio::sync::Mutex;
 
 mod server;
 pub use server::GrpcRouter;
 
 /// Service Registry client which will connect to internal services.
-pub type Client = patron::Client<HttpConnector<RegistryTransport>>;
+pub type Client = patron::Client<HttpConnector, RegistryTransport>;
 
 const GRPC_PROXY_NAME: &str = "grpc-proxy";
 
@@ -243,7 +242,8 @@ impl ServiceRegistry {
     /// Create a client which will connect to internal services.
     pub fn client(&self) -> Client {
         Client::new(
-            HttpConnector::new(self.transport(), Default::default()),
+            HttpConnector::new(Default::default()),
+            self.transport(),
             Default::default(),
         )
     }
@@ -278,7 +278,7 @@ impl Default for RegistryTransport {
 }
 
 impl tower::Service<Uri> for RegistryTransport {
-    type Response = ClientStream;
+    type Response = Transport;
 
     type Error = ConnectionError;
 
@@ -300,7 +300,10 @@ impl tower::Service<Uri> for RegistryTransport {
                 let config = self.registry.config.clone();
                 (async move {
                     let service = req.host().unwrap_or_default();
-                    inner.connect(&config, service.into()).await
+                    let stream = inner.connect(&config, service.into()).await?;
+                    Ok(Transport::new(stream)
+                        .await
+                        .expect("transport failed to handshake"))
                 })
                 .boxed()
             }
@@ -311,8 +314,11 @@ impl tower::Service<Uri> for RegistryTransport {
                 let inner = self.registry.inner.clone();
                 let config = self.registry.config.clone();
                 (async move {
-                    let proxy = inner.proxy.lock().await;
-                    connect_to_handle(&config, &proxy, GRPC_PROXY_NAME.into()).await
+                    let stream =
+                        connect_to_handle(&config, &inner.proxy, GRPC_PROXY_NAME.into()).await?;
+                    Ok(Transport::new(stream)
+                        .await
+                        .expect("transport failed to handshake"))
                 })
                 .boxed()
             }
@@ -325,25 +331,19 @@ impl tower::Service<Uri> for RegistryTransport {
 #[derive(Debug)]
 struct InnerRegistry {
     services: DashMap<String, ServiceHandle>,
-    names: DashMap<String, String>,
-    proxy: Mutex<ServiceHandle>,
+    proxy: ServiceHandle,
 }
 
 impl Default for InnerRegistry {
     fn default() -> Self {
         Self {
             services: DashMap::new(),
-            names: DashMap::new(),
-            proxy: Mutex::new(ServiceHandle::duplex(GRPC_PROXY_NAME)),
+            proxy: ServiceHandle::duplex(GRPC_PROXY_NAME),
         }
     }
 }
 
 impl InnerRegistry {
-    fn get_name(&self, name: &str) -> Option<String> {
-        self.names.get(name).map(|s| s.value().clone())
-    }
-
     fn get_mut(&self, config: &RegistryConfig, service: &str) -> RefMut<'_, String, ServiceHandle> {
         self.services
             .entry(service.to_owned())
