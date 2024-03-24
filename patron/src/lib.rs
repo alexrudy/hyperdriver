@@ -19,7 +19,7 @@ pub use conn::http::HttpConnector;
 pub use conn::ConnectionError;
 pub use conn::HttpProtocol;
 pub use conn::Protocol;
-pub use conn::Transport;
+pub use conn::TransportStream;
 
 /// Client error type.
 #[derive(Debug, Error)]
@@ -50,6 +50,9 @@ impl From<pool::Error<ConnectionError>> for Error {
         match error {
             pool::Error::Connecting(error) => Error::Connection(error.into()),
             pool::Error::Handshaking(error) => Error::Transport(error.into()),
+            pool::Error::Unavailable => {
+                Error::Connection("pool closed, no connection can be made".into())
+            }
         }
     }
 }

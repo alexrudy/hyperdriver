@@ -1,3 +1,4 @@
+use ::http::Uri;
 use braid::client::Stream;
 use braid::info::ConnectionInfo;
 use futures_util::future::BoxFuture;
@@ -20,29 +21,56 @@ pub(crate) use self::http::HttpConnector;
 pub(crate) use self::tcp::TcpConnectionConfig;
 pub(crate) use self::tcp::TcpConnector;
 
-/// Trait for types which implement a [tower::Service] appropriate for opening a
-/// [Stream] to a [Uri].
-// pub trait Transport
-// where
-//     Self: Service<Uri, Response = Stream>,
-// {
-// }
+pub trait Transport: Clone + Send
+where
+    Self: Service<Uri, Response = TransportStream>,
+{
+    type Error: std::error::Error + Send + Sync + 'static;
+    type Future: Future<Output = Result<TransportStream, <Self as Transport>::Error>>
+        + Send
+        + 'static;
 
-// impl<T> Transport for T
-// where
-//     T: Service<Uri, Response = Stream>,
-//     T::Error: std::error::Error + Send + Sync + 'static,
-// {
-// }
+    fn connect(&mut self, uri: Uri) -> <Self as Transport>::Future;
 
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), <Self as Transport>::Error>>;
+}
+
+impl<T> Transport for T
+where
+    T: Service<Uri, Response = TransportStream>,
+    T: Clone + Send + Sync + 'static,
+    T::Error: std::error::Error + Send + Sync + 'static,
+    T::Future: Send + 'static,
+{
+    type Error = T::Error;
+    type Future = T::Future;
+
+    fn connect(&mut self, uri: Uri) -> <Self as Service<Uri>>::Future {
+        self.call(uri)
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), <Self as Transport>::Error>> {
+        Service::poll_ready(self, cx)
+    }
+}
+
+/// A transport provides data transmission between two endpoints.
+///
+/// This transport uses braid to power the underlying
 #[derive(Debug)]
-pub struct Transport {
+pub struct TransportStream {
     stream: Stream,
     info: ConnectionInfo,
 }
 
-impl Transport {
-    /// Create a new transport from a stream.
+impl TransportStream {
+    /// Create a new transport from a `braid::client::Stream`.
     pub async fn new(mut stream: Stream) -> io::Result<Self> {
         stream.finish_handshake().await?;
 
@@ -60,24 +88,23 @@ impl Transport {
     }
 }
 
-impl PoolableTransport for Transport {
+impl PoolableTransport for TransportStream {
     fn can_share(&self) -> bool {
         self.info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
             == Some(&braid::info::Protocol::Http(::http::Version::HTTP_2))
     }
 }
 
-impl From<Transport> for Stream {
-    fn from(transport: Transport) -> Self {
+impl From<TransportStream> for Stream {
+    fn from(transport: TransportStream) -> Self {
         transport.stream
     }
 }
 
-/// Trait for types which implement a [tower::Service] appropriate for connecting to a
-/// [Uri].
+/// Protocols (like HTTP) define how data is sent and received over a connection.
 pub trait Protocol
 where
-    Self: Service<Transport>,
+    Self: Service<TransportStream, Response = Self::Connection>,
 {
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
@@ -89,11 +116,20 @@ where
     type Future: Future<Output = Result<Self::Connection, <Self as Protocol>::Error>>
         + Send
         + 'static;
+
+    /// Connect to a remote server and return a connection.
+    fn connect(&mut self, transport: TransportStream) -> <Self as Protocol>::Future;
+
+    /// Poll the protocol to see if it is ready to accept a new connection.
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), <Self as Protocol>::Error>>;
 }
 
 impl<T, C> Protocol for T
 where
-    T: Service<Transport, Response = C> + Send + 'static,
+    T: Service<TransportStream, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
     C: Connection + PoolableConnection,
@@ -101,6 +137,17 @@ where
     type Error = T::Error;
     type Connection = C;
     type Future = T::Future;
+
+    fn connect(&mut self, transport: TransportStream) -> <Self as Protocol>::Future {
+        self.call(transport)
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), <Self as Protocol>::Error>> {
+        Service::poll_ready(self, cx)
+    }
 }
 
 /// The HTTP protocol to use for a connection.

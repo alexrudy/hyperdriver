@@ -57,6 +57,8 @@ where
 mod tests {
     use std::sync::atomic::AtomicUsize;
 
+    use futures_util::poll;
+
     use super::*;
 
     #[tokio::test]
@@ -67,7 +69,21 @@ mod tests {
         }));
 
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
-        (&mut future).await;
+        assert_eq!(poll!(future.as_mut()), Poll::Ready(()));
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn lazy_future_panic() {
+        let count = AtomicUsize::new(0);
+        let mut future = std::pin::pin!(lazy(|| async {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(poll!(future.as_mut()).is_ready());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = poll!(future.as_mut());
     }
 }

@@ -1,10 +1,12 @@
 use std::fmt;
+use std::future::poll_fn;
 use std::future::Future;
 use std::task::Poll;
 
 use crate::conn::Connection;
-use crate::conn::Transport;
+use crate::conn::TransportStream;
 use crate::pool::Checkout;
+use crate::pool::Connector;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use http::uri::Port;
@@ -13,8 +15,6 @@ use http::HeaderValue;
 use http::Uri;
 use http::Version;
 use hyper::body::Incoming;
-use tower::ServiceExt;
-use tracing::instrument::Instrumented;
 use tracing::warn;
 
 mod builder;
@@ -27,42 +27,43 @@ use crate::pool::{self, PoolableConnection, Pooled};
 use crate::conn::ConnectionError;
 use crate::conn::HttpProtocol;
 use crate::conn::Protocol;
+use crate::conn::Transport;
 use crate::default_tls_config;
 use crate::Error;
 
 /// An HTTP client
 #[derive(Debug)]
-pub struct Client<C = HttpConnector, T = TcpConnector>
+pub struct Client<P = HttpConnector, T = TcpConnector>
 where
-    C: Protocol,
+    P: Protocol,
 {
-    connector: C,
+    protocol: P,
     transport: T,
-    pool: pool::Pool<C::Connection>,
+    pool: Option<pool::Pool<P::Connection>>,
 }
 
-impl<C, T> Client<C, T>
+impl<P, T> Client<P, T>
 where
-    C: Protocol,
+    P: Protocol,
 {
     /// Create a new client with the given connector and pool configuration.
-    pub fn new(connector: C, transport: T, pool: pool::Config) -> Self {
+    pub fn new(connector: P, transport: T, pool: pool::Config) -> Self {
         Self {
-            connector,
+            protocol: connector,
             transport,
-            pool: pool::Pool::new(pool),
+            pool: Some(pool::Pool::new(pool)),
         }
     }
 }
 
-impl<C, T> Clone for Client<C, T>
+impl<P, T> Clone for Client<P, T>
 where
-    C: Protocol + Clone,
+    P: Protocol + Clone,
     T: Clone,
 {
     fn clone(&self) -> Self {
         Self {
-            connector: self.connector.clone(),
+            protocol: self.protocol.clone(),
             transport: self.transport.clone(),
             pool: self.pool.clone(),
         }
@@ -78,15 +79,15 @@ impl Client<HttpConnector, TcpConnector> {
     /// Create a new client with the default configuration.
     pub fn new_tcp_http() -> Self {
         Self {
-            pool: pool::Pool::new(pool::Config {
+            pool: Some(pool::Pool::new(pool::Config {
                 idle_timeout: Some(std::time::Duration::from_secs(90)),
                 max_idle_per_host: 32,
-            }),
+            })),
             transport: TcpConnector::new(
                 crate::conn::TcpConnectionConfig::default(),
                 default_tls_config(),
             ),
-            connector: conn::HttpConnector::new(conn::http::HttpConnectionBuilder::default()),
+            protocol: conn::HttpConnector::new(conn::http::HttpConnectionBuilder::default()),
         }
     }
 }
@@ -97,42 +98,57 @@ impl Default for Client<HttpConnector> {
     }
 }
 
-impl<C, CC, T> Client<C, T>
+impl<P, C, T> Client<P, T>
 where
-    C: Protocol<Connection = CC, Error = ConnectionError> + Clone + Send + Sync + 'static,
-    C: tower::Service<Transport, Response = CC, Error = ConnectionError>,
-    <C as tower::Service<Transport>>::Future: Send + 'static,
-    CC: Connection + PoolableConnection,
-    T: tower::Service<Uri, Response = Transport> + Clone + Sync + Send + 'static,
-    <T as tower::Service<Uri>>::Error: std::error::Error + Send + Sync + 'static,
-    <T as tower::Service<Uri>>::Future: Send + 'static,
+    C: Connection + PoolableConnection,
+    P: Protocol<Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    T: Transport + 'static,
 {
     fn connect_to(
         &self,
         uri: http::Uri,
-        protocol: &HttpProtocol,
-    ) -> Instrumented<Checkout<C::Connection, Transport, ConnectionError>> {
+        http_protocol: &HttpProtocol,
+    ) -> Checkout<P::Connection, TransportStream, ConnectionError> {
         let key: pool::Key = uri.clone().into();
 
-        let mut connecting = self.connector.clone();
-        let transport = self.transport.clone();
+        let mut protocol = self.protocol.clone();
+        let mut transport = self.transport.clone();
 
-        //TODO: How do we handle potential multiplexing here? Really, the connector should decide?
-        self.pool.checkout(
-            key,
-            protocol.multiplex(),
+        let connector = Connector::new(
             move || async move {
+                poll_fn(|cx| Transport::poll_ready(&mut transport, cx))
+                    .await
+                    .map_err(|error| ConnectionError::Connecting(error.into()))?;
                 transport
-                    .oneshot(uri)
+                    .connect(uri)
                     .await
                     .map_err(|error| ConnectionError::Connecting(error.into()))
             },
-            Box::new(move |transport| Box::pin(connecting.call(transport)) as _),
-        )
+            Box::new(move |transport| {
+                Box::pin(async move {
+                    poll_fn(|cx| Protocol::poll_ready(&mut protocol, cx))
+                        .await
+                        .map_err(|error| ConnectionError::Handshake(error.into()))?;
+                    protocol
+                        .connect(transport)
+                        .await
+                        .map_err(|error| ConnectionError::Handshake(error.into()))
+                }) as _
+            }),
+        );
+
+        if let Some(pool) = self.pool.as_ref() {
+            pool.checkout(key, http_protocol.multiplex(), connector)
+        } else {
+            Checkout::detached(key, connector)
+        }
     }
 
     /// Send an http Request, and return a Future of the Response.
-    pub fn request(&self, request: arnold::Request) -> ResponseFuture<C::Connection, Transport> {
+    pub fn request(
+        &self,
+        request: arnold::Request,
+    ) -> ResponseFuture<P::Connection, TransportStream> {
         let uri = request.uri().clone();
 
         let protocol: HttpProtocol = request.version().into();
@@ -152,19 +168,15 @@ where
     }
 }
 
-impl<C, CC, T> tower::Service<http::Request<arnold::Body>> for Client<C, T>
+impl<P, C, T> tower::Service<http::Request<arnold::Body>> for Client<P, T>
 where
-    C: Protocol<Connection = CC, Error = ConnectionError> + Clone + Send + Sync + 'static,
-    C: tower::Service<Transport, Response = CC, Error = ConnectionError>,
-    <C as tower::Service<Transport>>::Future: Send + 'static,
-    CC: Connection + PoolableConnection,
-    T: tower::Service<Uri, Response = Transport> + Clone + Sync + Send + 'static,
-    <T as tower::Service<Uri>>::Error: std::error::Error + Send + Sync + 'static,
-    <T as tower::Service<Uri>>::Future: Send + 'static,
+    C: Connection + PoolableConnection,
+    P: Protocol<Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    T: Transport + 'static,
 {
     type Response = http::Response<Incoming>;
     type Error = Error;
-    type Future = ResponseFuture<C::Connection, Transport>;
+    type Future = ResponseFuture<P::Connection, TransportStream>;
 
     fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -195,10 +207,7 @@ where
     C: pool::PoolableConnection,
     T: pool::PoolableTransport,
 {
-    fn new(
-        checkout: Instrumented<Checkout<C, T, ConnectionError>>,
-        request: arnold::Request,
-    ) -> Self {
+    fn new(checkout: Checkout<C, T, ConnectionError>, request: arnold::Request) -> Self {
         Self {
             inner: ResponseFutureState::Checkout { checkout, request },
         }
@@ -254,7 +263,7 @@ where
 enum ResponseFutureState<C: pool::PoolableConnection, T: pool::PoolableTransport> {
     Empty,
     Checkout {
-        checkout: Instrumented<Checkout<C, T, ConnectionError>>,
+        checkout: Checkout<C, T, ConnectionError>,
         request: arnold::Request,
     },
     Request(BoxFuture<'static, Result<http::Response<Incoming>, Error>>),

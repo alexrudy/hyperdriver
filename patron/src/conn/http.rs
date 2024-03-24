@@ -11,7 +11,7 @@ use tracing::trace;
 
 use crate::pool::PoolableConnection;
 
-use super::Transport;
+use super::TransportStream;
 use super::{Connection, HttpProtocol};
 
 /// A connector which links a transport with HTTP connections.
@@ -29,7 +29,7 @@ impl HttpConnector {
     }
 }
 
-impl tower::Service<Transport> for HttpConnector {
+impl tower::Service<TransportStream> for HttpConnector {
     type Response = HttpConnection;
 
     type Error = ConnectionError;
@@ -44,7 +44,7 @@ impl tower::Service<Transport> for HttpConnector {
     }
 
     #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
-    fn call(&mut self, req: Transport) -> Self::Future {
+    fn call(&mut self, req: TransportStream) -> Self::Future {
         future::HttpConnectFuture::new(self.builder.clone(), req).in_current_span()
     }
 }
@@ -57,7 +57,7 @@ mod future {
 
     use pin_project::pin_project;
 
-    use crate::conn::Transport;
+    use crate::conn::TransportStream;
 
     use super::ConnectionError;
     use super::HttpConnection;
@@ -101,7 +101,10 @@ mod future {
     }
 
     impl HttpConnectFuture {
-        pub(super) fn new(builder: HttpConnectionBuilder, stream: Transport) -> HttpConnectFuture {
+        pub(super) fn new(
+            builder: HttpConnectionBuilder,
+            stream: TransportStream,
+        ) -> HttpConnectFuture {
             let future = Box::pin(async move { builder.handshake(stream).await });
 
             Self {
@@ -291,7 +294,7 @@ impl HttpConnectionBuilder {
 
     pub(crate) async fn handshake(
         &self,
-        transport: Transport,
+        transport: TransportStream,
     ) -> Result<HttpConnection, ConnectionError> {
         match self.protocol {
             HttpProtocol::Http2 => self.handshake_h2(transport.into()).await,

@@ -17,7 +17,7 @@ use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
-use super::Transport;
+use super::TransportStream;
 
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
@@ -47,7 +47,7 @@ where
         + 'static,
     R::Future: Send,
 {
-    type Response = Transport;
+    type Response = TransportStream;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -82,7 +82,7 @@ where
                         .await
                         .map_err(TcpConnectionError::msg("TLS connection info"))?;
 
-                    Ok(Transport { stream, info })
+                    Ok(TransportStream { stream, info })
                 } else {
                     stream
                         .finish_handshake()
@@ -94,7 +94,7 @@ where
                         .await
                         .map_err(TcpConnectionError::msg("TCP connection info"))?;
 
-                    Ok(Transport { stream, info })
+                    Ok(TransportStream { stream, info })
                 }
             }
             .instrument(span),

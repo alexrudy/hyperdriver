@@ -15,7 +15,7 @@ use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
 use futures_util::{future::BoxFuture, FutureExt};
 use hyper::Uri;
-use patron::{HttpConnector, Transport};
+use patron::{HttpConnector, TransportStream};
 use pidfile::PidFile;
 
 mod server;
@@ -278,7 +278,7 @@ impl Default for RegistryTransport {
 }
 
 impl tower::Service<Uri> for RegistryTransport {
-    type Response = Transport;
+    type Response = TransportStream;
 
     type Error = ConnectionError;
 
@@ -301,7 +301,7 @@ impl tower::Service<Uri> for RegistryTransport {
                 (async move {
                     let service = req.host().unwrap_or_default();
                     let stream = inner.connect(&config, service.into()).await?;
-                    Ok(Transport::new(stream)
+                    Ok(TransportStream::new(stream)
                         .await
                         .expect("transport failed to handshake"))
                 })
@@ -316,7 +316,7 @@ impl tower::Service<Uri> for RegistryTransport {
                 (async move {
                     let stream =
                         connect_to_handle(&config, &inner.proxy, GRPC_PROXY_NAME.into()).await?;
-                    Ok(Transport::new(stream)
+                    Ok(TransportStream::new(stream)
                         .await
                         .expect("transport failed to handshake"))
                 })
