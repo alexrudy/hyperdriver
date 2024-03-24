@@ -38,7 +38,7 @@ impl DuplexStream {
     /// create the connection info. Normally, this method is not needed, an you should prefer
     /// using [`DuplexClient`] and [`DuplexIncoming`] together
     /// to create a client/server pair of duplex streams.
-    pub fn new(name: Authority, protocol: Protocol, max_buf_size: usize) -> (Self, Self) {
+    pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
         let info = ConnectionInfo::duplex(name, protocol);
         (
@@ -96,22 +96,13 @@ pub struct DuplexClient {
 }
 
 impl DuplexClient {
-    /// Create a new duplex client and incoming pair.
-    ///
-    /// The client can be cloned and re-used cheaply, and the incoming provides
-    /// a stream of incoming duplex connections.
-    pub fn new(name: Authority) -> (DuplexClient, DuplexIncoming) {
-        let (sender, receiver) = tokio::sync::mpsc::channel(32);
-        (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
-    }
-
     /// Connect to the other half of this duplex stream.
     ///
     /// The `max_buf_size` is the maximum size of the buffer used for the stream.
     pub async fn connect(
         &self,
         max_buf_size: usize,
-        protocol: Protocol,
+        protocol: Option<Protocol>,
     ) -> Result<DuplexStream, io::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let request = DuplexConnectionRequest::new(self.name.clone(), tx, max_buf_size, protocol);
@@ -128,7 +119,7 @@ struct DuplexConnectionRequest {
     name: Authority,
     ack: tokio::sync::oneshot::Sender<DuplexStream>,
     max_buf_size: usize,
-    protocol: Protocol,
+    protocol: Option<Protocol>,
 }
 
 impl DuplexConnectionRequest {
@@ -136,7 +127,7 @@ impl DuplexConnectionRequest {
         name: Authority,
         ack: tokio::sync::oneshot::Sender<DuplexStream>,
         max_buf_size: usize,
-        protocol: Protocol,
+        protocol: Option<Protocol>,
     ) -> Self {
         Self {
             name,
@@ -198,6 +189,15 @@ impl futures_core::Stream for DuplexIncoming {
     }
 }
 
+/// Create a new duplex client and incoming pair.
+///
+/// The client can be cloned and re-used cheaply, and the incoming provides
+/// a stream of incoming duplex connections.
+pub fn pair(name: Authority) -> (DuplexClient, DuplexIncoming) {
+    let (sender, receiver) = tokio::sync::mpsc::channel(32);
+    (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
+}
+
 #[cfg(test)]
 mod test {
     use http::Version;
@@ -210,11 +210,11 @@ mod test {
 
         let name: Authority = "test".parse().unwrap();
 
-        let (client, incoming) = DuplexClient::new(name.clone());
+        let (client, incoming) = pair(name.clone());
         let mut incoming = incoming.fuse();
 
         let (mut client_stream, mut server_stream) = tokio::try_join!(
-            client.connect(1024, Protocol::Http(Version::HTTP_11)),
+            client.connect(1024, Some(Protocol::Http(Version::HTTP_11))),
             async { incoming.next().await.unwrap() }
         )
         .unwrap();

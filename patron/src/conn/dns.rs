@@ -1,3 +1,5 @@
+//! DNS resolution utilities.
+
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
@@ -8,6 +10,7 @@ use futures_util::Future;
 use pin_project::{pin_project, pinned_drop};
 use tokio::task::JoinHandle;
 
+/// A collection of socket addresses.
 #[derive(Debug, Clone, Default)]
 pub struct SocketAddrs(Vec<SocketAddr>);
 
@@ -75,13 +78,19 @@ impl<'a> IntoIterator for &'a SocketAddrs {
     }
 }
 
+/// Extension trait for `IpAddr` and `SocketAddr` to get the IP version.
 pub trait IpVersionExt {
+    /// Get the IP version of this address.
     fn version(&self) -> IpVersion;
 }
 
+/// IP version.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum IpVersion {
+    /// IPv4
     V4,
+
+    /// IPv6
     V6,
 }
 
@@ -98,11 +107,13 @@ impl IpVersion {
         }
     }
 
+    /// Is this IP version IPv4?
     #[allow(dead_code)]
     pub fn is_v4(&self) -> bool {
         matches!(self, Self::V4)
     }
 
+    /// Is this IP version IPv6?
     #[allow(dead_code)]
     pub fn is_v6(&self) -> bool {
         matches!(self, Self::V6)
@@ -127,12 +138,17 @@ impl IpVersionExt for IpAddr {
     }
 }
 
+/// GetAddrInfo based resolver.
+///
+/// This resolver uses the `getaddrinfo` system call to resolve
+/// hostnames to IP addresses via the operating system.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GaiResolver {
     _priv: (),
 }
 
 impl GaiResolver {
+    /// Create a new `GaiResolver`.
     pub fn new() -> Self {
         Self { _priv: () }
     }

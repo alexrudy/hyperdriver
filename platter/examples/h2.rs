@@ -57,10 +57,10 @@ async fn main() {
 
         tokio::select! {
             rv = &mut server => {
-                return rv;
+                rv
             },
             _ = rx => {
-                return Ok(());
+                Ok(())
             },
         }
     });

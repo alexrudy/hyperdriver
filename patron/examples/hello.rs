@@ -1,6 +1,6 @@
 use http::Uri;
 use http_body_util::BodyExt as _;
-use patron::{Client, Connect, ConnectionProtocol};
+use patron::{Client, HttpProtocol};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
@@ -48,9 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.with_tls(config);
 
         if args.get_flag("protocol") {
-            client.conn().set_protocol(ConnectionProtocol::Http1);
+            client.conn().set_protocol(HttpProtocol::Http1);
         } else {
-            client.conn().set_protocol(ConnectionProtocol::Http2);
+            client.conn().set_protocol(HttpProtocol::Http2);
         }
     }
 
@@ -81,10 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn send<C>(mut client: Client<C>, uri: Uri, done: tokio::sync::mpsc::Sender<()>)
-where
-    C: Connect + Clone,
-{
+async fn send(mut client: Client, uri: Uri, done: tokio::sync::mpsc::Sender<()>) {
     let res = match client.get(uri).await {
         Ok(res) => res,
         Err(err) => {
@@ -99,7 +96,7 @@ where
     while let Some(Ok(frame)) = body.frame().await {
         if let Some(data) = frame.data_ref() {
             total += data.len();
-            stdout.write_all(&data).await.unwrap();
+            stdout.write_all(data).await.unwrap();
         }
     }
 

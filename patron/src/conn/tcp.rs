@@ -1,3 +1,5 @@
+//! TCP transport implementation for client connections.
+
 use std::fmt;
 use std::future::Future;
 use std::io;
@@ -8,24 +10,28 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use braid::client::Stream;
+use futures_util::FutureExt;
 use http::Uri;
-use rustls::ClientConfig;
+use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
 use tokio::net::TcpSocket;
 use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
+use super::TransportStream;
 
+/// A TCP connector for client connections.
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
     config: Arc<TcpConnectionConfig>,
     resolver: R,
-    tls: Arc<ClientConfig>,
+    tls: Arc<TlsClientConfig>,
 }
 
 impl TcpConnector {
-    pub fn new(config: TcpConnectionConfig, tls: ClientConfig) -> Self {
+    /// Create a new `TcpConnector` with the given configuration.
+    pub fn new(config: TcpConnectionConfig, tls: TlsClientConfig) -> Self {
         Self {
             config: Arc::new(config),
             resolver: GaiResolver::new(),
@@ -45,7 +51,7 @@ where
         + 'static,
     R::Future: Send,
 {
-    type Response = Stream;
+    type Response = TransportStream;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -61,19 +67,38 @@ where
             Err(e) => panic!("uri error: {e}"),
         };
 
-        let transport = self.clone();
-        let transport = std::mem::replace(self, transport);
+        let connector = std::mem::replace(self, self.clone());
 
         let span = tracing::trace_span!("tcp", host = %host, port = %port);
 
         Box::pin(
             async move {
-                let stream = transport.connect(host.clone(), port).await?;
+                let mut stream = connector.connect(host.clone(), port).await?;
                 if req.scheme_str() == Some("https") {
-                    let stream = stream.tls(host.as_ref(), transport.tls.clone());
-                    Ok(stream)
+                    let mut stream = stream.tls(host.as_ref(), connector.tls.clone());
+                    stream
+                        .finish_handshake()
+                        .await
+                        .map_err(TcpConnectionError::msg("TLS handshake"))?;
+
+                    let info = stream
+                        .info()
+                        .await
+                        .map_err(TcpConnectionError::msg("TLS connection info"))?;
+
+                    Ok(TransportStream { stream, info })
                 } else {
-                    Ok(stream)
+                    stream
+                        .finish_handshake()
+                        .await
+                        .map_err(TcpConnectionError::msg("TCP handshake (noop)"))?;
+
+                    let info = stream
+                        .info()
+                        .await
+                        .map_err(TcpConnectionError::msg("TCP connection info"))?;
+
+                    Ok(TransportStream { stream, info })
                 }
             }
             .instrument(span),
@@ -155,21 +180,23 @@ impl<'c> TcpConnecting<'c> {
         };
 
         let mut fallback = std::pin::pin!(fallback_delay);
-        let mut primary = std::pin::pin!(self.prefered.connect(self.config));
+        let mut primary = std::pin::pin!(self.prefered.connect(self.config).fuse());
         let mut primary_error = None;
 
-        tokio::select! {
-            biased;
-            res = &mut primary => match res {
-                Ok(stream) => return Ok(stream),
-                Err(e) => primary_error = Some(e),
-            },
-            Ok(stream) = &mut fallback => return Ok(stream),
-            else => {}
-        };
+        loop {
+            tokio::select! {
+                biased;
+                res = &mut primary => match res {
+                    Ok(stream) => return Ok(stream),
+                    Err(e) => primary_error = Some(e),
+                },
+                Ok(stream) = &mut fallback => return Ok(stream),
+                else => break,
+            };
+        }
 
         // If we got here, both the primary and fallback failed. Return the error from the primary
-        Err(primary_error.expect("primary should have failed"))
+        Err(primary_error.expect("primary connection attempt should have failed"))
     }
 }
 
@@ -214,6 +241,7 @@ impl TcpConnectingSet {
     }
 }
 
+/// Error type for TCP connections.
 #[derive(Debug, Error)]
 pub struct TcpConnectionError {
     message: String,
@@ -254,16 +282,34 @@ impl fmt::Display for TcpConnectionError {
     }
 }
 
+/// Configuration for TCP connections.
 #[derive(Debug)]
 pub struct TcpConnectionConfig {
+    /// The timeout for connecting to a remote address.
     pub connect_timeout: Option<Duration>,
+
+    /// The timeout for keep-alive connections.
     pub keep_alive_timeout: Option<Duration>,
+
+    /// The timeout for happy eyeballs algorithm.
     pub happy_eyeballs_timeout: Option<Duration>,
+
+    /// The local IPv4 address to bind to.
     pub local_address_ipv4: Option<Ipv4Addr>,
+
+    /// The local IPv6 address to bind to.
     pub local_address_ipv6: Option<Ipv6Addr>,
+
+    /// Whether to disable Nagle's algorithm.
     pub nodelay: bool,
+
+    /// Whether to reuse the local address.
     pub reuse_address: bool,
+
+    /// The size of the send buffer.
     pub send_buffer_size: Option<usize>,
+
+    /// The size of the receive buffer.
     pub recv_buffer_size: Option<usize>,
 }
 

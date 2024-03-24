@@ -36,25 +36,28 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        if let InnerProj::Future(future) = this.inner.as_mut().project() {
-            return future.poll(cx);
-        }
+        loop {
+            if let InnerProj::Future(future) = this.inner.as_mut().project() {
+                return future.poll(cx);
+            }
 
-        if let InnerProjReplace::Init(f) = this.inner.as_mut().project_replace(InnerLazy::Empty) {
-            this.inner.set(InnerLazy::Future(f()));
-        }
+            if let InnerProjReplace::Init(f) = this.inner.as_mut().project_replace(InnerLazy::Empty)
+            {
+                this.inner.set(InnerLazy::Future(f()));
+            }
 
-        if let InnerProj::Future(future) = this.inner.as_mut().project() {
-            return future.poll(cx);
+            if let InnerProj::Empty = this.inner.as_mut().project() {
+                panic!("Lazy future polled after completion");
+            }
         }
-
-        unreachable!("lazy future is empty");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicUsize;
+
+    use futures_util::poll;
 
     use super::*;
 
@@ -66,7 +69,21 @@ mod tests {
         }));
 
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
-        (&mut future).await;
+        assert_eq!(poll!(future.as_mut()), Poll::Ready(()));
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn lazy_future_panic() {
+        let count = AtomicUsize::new(0);
+        let mut future = std::pin::pin!(lazy(|| async {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(poll!(future.as_mut()).is_ready());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = poll!(future.as_mut());
     }
 }
