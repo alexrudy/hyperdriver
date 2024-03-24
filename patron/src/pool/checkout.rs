@@ -241,7 +241,7 @@ where
             };
 
             if connection.can_share() {
-                tracing::trace!(key=%this.key, "connection can be shared");
+                trace!(key=%this.key, "connection can be shared");
                 if let Some(pool) = this.pool.upgrade() {
                     if let Ok(mut inner) = pool.lock() {
                         inner.connected_in_handshake(this.key);
@@ -315,5 +315,24 @@ impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, 
                 inner.cancel_connection(&self.key);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::mock::MockTransport;
+    use super::*;
+
+    #[tokio::test]
+    async fn detatched_checkout() {
+        let key: Key = "http://localhost:8080".parse().unwrap();
+
+        let checkout = Checkout::detached(
+            key,
+            Connector::new(MockTransport::single, MockTransport::handshake),
+        );
+
+        let connection = checkout.await.unwrap();
+        assert!(connection.is_open());
     }
 }

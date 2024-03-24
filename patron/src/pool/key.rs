@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct Key(http::uri::Scheme, http::uri::Authority);
@@ -20,6 +20,15 @@ impl From<http::Uri> for Key {
         let parts = value.into_parts();
 
         Self(parts.scheme.unwrap(), parts.authority.unwrap())
+    }
+}
+
+impl FromStr for Key {
+    type Err = http::uri::InvalidUri;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uri = http::Uri::from_str(s)?;
+        Ok(uri.into())
     }
 }
 

@@ -32,6 +32,10 @@ pub enum Error {
     #[error("transport: {0}")]
     Transport(Box<dyn std::error::Error + Send + Sync + 'static>),
 
+    /// Error occured with the underlying protocol.
+    #[error("protocol: {0}")]
+    Protocol(Box<dyn std::error::Error + Send + Sync + 'static>),
+
     /// Error occured with the user's request, such as an invalid URI.
     #[error("user error: {0}")]
     User(hyper::Error),

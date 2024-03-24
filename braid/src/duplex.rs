@@ -101,8 +101,7 @@ impl DuplexClient {
     /// The client can be cloned and re-used cheaply, and the incoming provides
     /// a stream of incoming duplex connections.
     pub fn new(name: Authority) -> (DuplexClient, DuplexIncoming) {
-        let (sender, receiver) = tokio::sync::mpsc::channel(32);
-        (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
+        pair(name)
     }
 
     /// Connect to the other half of this duplex stream.
@@ -196,6 +195,12 @@ impl futures_core::Stream for DuplexIncoming {
             Poll::Ready(None)
         }
     }
+}
+
+/// Create a new duplex client and incoming pair.
+pub fn pair(name: Authority) -> (DuplexClient, DuplexIncoming) {
+    let (sender, receiver) = tokio::sync::mpsc::channel(32);
+    (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
 }
 
 #[cfg(test)]

@@ -1,11 +1,9 @@
+use ::http::{Response, Version};
 use braid::client::Stream;
 use futures_util::future::BoxFuture;
-use std::fmt;
-use tracing::{instrument::Instrumented, Instrument};
-
-use ::http::{Response, Version};
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use std::fmt;
 use thiserror::Error;
 use tracing::trace;
 
@@ -34,7 +32,7 @@ impl tower::Service<TransportStream> for HttpConnector {
 
     type Error = ConnectionError;
 
-    type Future = Instrumented<future::HttpConnectFuture>;
+    type Future = future::HttpConnectFuture;
 
     fn poll_ready(
         &mut self,
@@ -45,7 +43,7 @@ impl tower::Service<TransportStream> for HttpConnector {
 
     #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
     fn call(&mut self, req: TransportStream) -> Self::Future {
-        future::HttpConnectFuture::new(self.builder.clone(), req).in_current_span()
+        future::HttpConnectFuture::new(self.builder.clone(), req)
     }
 }
 
@@ -259,7 +257,7 @@ impl HttpConnectionBuilder {
 
 impl HttpConnectionBuilder {
     async fn handshake_h2(&self, stream: Stream) -> Result<HttpConnection, ConnectionError> {
-        trace!("handshake http2");
+        trace!("handshake");
         let (sender, conn) = self
             .http2
             .handshake(TokioIo::new(stream))
@@ -267,16 +265,17 @@ impl HttpConnectionBuilder {
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
         tokio::spawn(async {
             if let Err(err) = conn.await {
-                tracing::error!(%err, "h2 connection error");
+                tracing::error!(%err, "h2 connection driver error");
             }
         });
+        trace!("handshake complete");
         Ok(HttpConnection {
             inner: InnerConnection::H2(sender),
         })
     }
 
     async fn handshake_h1(&self, stream: Stream) -> Result<HttpConnection, ConnectionError> {
-        trace!("handshake http1");
+        trace!("handshake");
         let (sender, conn) = self
             .http1
             .handshake(TokioIo::new(stream))
@@ -284,14 +283,16 @@ impl HttpConnectionBuilder {
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
         tokio::spawn(async {
             if let Err(err) = conn.await {
-                tracing::error!(%err, "h1 connection error");
+                tracing::error!(%err, "h1 connection driver error");
             }
         });
+        trace!("handshake complete");
         Ok(HttpConnection {
             inner: InnerConnection::H1(sender),
         })
     }
 
+    #[tracing::instrument(skip_all, fields(protocol = ?self.protocol))]
     pub(crate) async fn handshake(
         &self,
         transport: TransportStream,
@@ -323,5 +324,129 @@ impl Default for HttpConnectionBuilder {
             http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
             protocol: HttpProtocol::Http1,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::poll_fn;
+
+    use super::*;
+
+    use crate::Error;
+
+    use futures_util::{stream::StreamExt as _, FutureExt, TryFutureExt};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tower::Service;
+
+    type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+    async fn transport() -> Result<(TransportStream, Stream), BoxError> {
+        let (client, mut incoming) = braid::duplex::pair("test".parse()?);
+
+        let (tx, rx) = tokio::try_join!(
+            async {
+                let stream = client.connect(1024, None).await?;
+                Ok::<_, BoxError>(TransportStream::new(stream.into()).await?)
+            },
+            async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }
+        )?;
+
+        Ok((tx, rx.into()))
+    }
+
+    #[tokio::test]
+    async fn http_connector_always_ready() {
+        let builder = HttpConnectionBuilder::default();
+        let mut connector = HttpConnector::new(builder);
+
+        poll_fn(|cx| connector.poll_ready(cx))
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn http_connector_request_h1() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let builder = HttpConnectionBuilder::default();
+        let mut connector = HttpConnector::new(builder);
+
+        let (stream, rx) = transport().await.unwrap();
+
+        let mut conn = connector.call(stream).await.unwrap();
+        conn.when_ready().await.unwrap();
+        assert!(conn.is_open());
+        assert!(!conn.can_share());
+        assert_eq!(conn.version(), Version::HTTP_11);
+
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri("http://localhost/")
+            .body(arnold::Body::empty())
+            .unwrap();
+
+        let request_future = conn
+            .send_request(request)
+            .map_err(|err| Error::Transport(err.into()));
+
+        let server_future = async move {
+            let mut buf = String::new();
+            let _ = BufReader::new(rx)
+                .read_line(&mut buf)
+                .await
+                .map_err(|err| Error::Transport(err.into()))?;
+            trace!(?buf, "received request");
+            assert_eq!(buf, "GET http://localhost/ HTTP/1.1\r\n");
+            Ok::<_, Error>(())
+        };
+
+        let (_rtx, rrx) = tokio::join!(request_future, server_future);
+
+        assert!(rrx.is_ok());
+    }
+
+    #[tokio::test]
+    async fn http_connector_request_h2() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut builder = HttpConnectionBuilder::default();
+        builder.set_protocol(HttpProtocol::Http2);
+        let mut connector = HttpConnector::new(builder);
+
+        let (stream, rx) = transport().await.unwrap();
+
+        let mut conn = connector.call(stream).await.unwrap();
+        conn.when_ready().await.unwrap();
+        assert!(conn.is_open());
+        assert!(conn.can_share());
+        assert_eq!(conn.version(), Version::HTTP_2);
+
+        let request = http::Request::builder()
+            .version(::http::Version::HTTP_2)
+            .method(http::Method::GET)
+            .uri("http://localhost/")
+            .body(arnold::Body::empty())
+            .unwrap();
+
+        let request_future = conn
+            .send_request(request)
+            .map_err(|err| Error::Transport(err.into()));
+
+        let server_future = async move {
+            let mut buf = String::new();
+            let _ = BufReader::new(rx)
+                .read_line(&mut buf)
+                .await
+                .map_err(|err| Error::Transport(err.into()))?;
+            trace!(?buf, "received request");
+            assert_eq!(buf, "PRI * HTTP/2.0\r\n");
+            Ok::<_, Error>(())
+        };
+
+        let (_rtx, rrx) = tokio::join!(request_future, server_future);
+
+        assert!(rrx.is_ok());
     }
 }

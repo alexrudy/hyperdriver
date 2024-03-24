@@ -7,18 +7,22 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use std::time::Instant;
 
 use tokio::sync::oneshot::Sender;
 use tracing::trace;
 
 mod checkout;
+mod idle;
 mod key;
 mod weakopt;
+
+#[cfg(test)]
+mod mock;
 
 pub(crate) use self::checkout::Checkout;
 pub(crate) use self::checkout::Connector;
 pub(crate) use self::checkout::Error;
+use self::idle::IdleConnections;
 pub(crate) use self::key::Key;
 use self::weakopt::WeakOpt;
 
@@ -91,7 +95,7 @@ struct PoolInner<T: PoolableConnection> {
     connecting: HashSet<key::Key>,
     waiting: HashMap<key::Key, VecDeque<Sender<Pooled<T>>>>,
 
-    idle: HashMap<key::Key, Vec<Idle<T>>>,
+    idle: HashMap<key::Key, IdleConnections<T>>,
 }
 
 impl<T: PoolableConnection> PoolInner<T> {
@@ -157,8 +161,7 @@ impl<T: PoolableConnection> PoolInner<T> {
             }
         }
 
-        let idle = Idle::new(connection);
-        self.idle.entry(key).or_default().push(idle);
+        self.idle.entry(key).or_default().push(connection);
     }
 
     fn pop(&mut self, key: &key::Key) -> Option<T> {
@@ -168,36 +171,8 @@ impl<T: PoolableConnection> PoolInner<T> {
         tracing::trace!(%key, "pop");
 
         if let Some(idle) = self.idle.get_mut(key) {
-            if !idle.is_empty() {
-                let exipred = self
-                    .config
-                    .idle_timeout
-                    .filter(|timeout| timeout.as_secs_f64() > 0.0)
-                    .and_then(|timeout| {
-                        let now: Instant = Instant::now();
-                        now.checked_sub(timeout)
-                    });
-
-                trace!(%key, "checking {} idle connections", idle.len());
-
-                while let Some(entry) = idle.pop() {
-                    if exipred.map(|expired| entry.at < expired).unwrap_or(false) {
-                        trace!(%key, "found expired connection");
-                        empty = true;
-                        break;
-                    }
-
-                    if entry.inner.is_open() {
-                        trace!(%key, "found idle connection");
-                        idle_entry = Some(entry.inner);
-                        break;
-                    } else {
-                        trace!(%key, "found closed connection");
-                    }
-                }
-
-                empty |= idle.is_empty();
-            }
+            idle_entry = idle.pop(self.config.idle_timeout);
+            empty = idle.is_empty();
         }
 
         if empty && !idle_entry.as_ref().map(|i| i.can_share()).unwrap_or(false) {
@@ -220,21 +195,6 @@ impl Default for Config {
         Self {
             idle_timeout: Some(Duration::from_secs(90)),
             max_idle_per_host: 32,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Idle<T> {
-    at: Instant,
-    inner: T,
-}
-
-impl<T> Idle<T> {
-    fn new(inner: T) -> Self {
-        Self {
-            at: Instant::now(),
-            inner,
         }
     }
 }
@@ -296,105 +256,10 @@ impl<T: PoolableConnection> Drop for Pooled<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        convert::Infallible,
-        sync::{
-            atomic::{AtomicBool, AtomicU16, Ordering},
-            Arc,
-        },
-    };
+    use futures_util::FutureExt as _;
 
-    static IDENT: AtomicU16 = AtomicU16::new(1);
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    struct ConnectionId(u16);
-
-    impl fmt::Display for ConnectionId {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "conn-{}", self.0)
-        }
-    }
-
-    use futures_util::{future::BoxFuture, FutureExt as _};
-
+    use super::mock::{MockConnection, MockTransport};
     use super::*;
-
-    struct MockTransport {
-        reuse: bool,
-    }
-
-    impl PoolableTransport for MockTransport {
-        fn can_share(&self) -> bool {
-            self.reuse
-        }
-    }
-
-    impl MockTransport {
-        fn new(reuse: bool) -> Self {
-            Self { reuse }
-        }
-
-        async fn single() -> Result<Self, Infallible> {
-            Ok(Self::new(false))
-        }
-
-        async fn reusable() -> Result<Self, Infallible> {
-            Ok(Self::new(true))
-        }
-
-        fn handshake(self) -> BoxFuture<'static, Result<MockConnection, Infallible>> {
-            let reuse = self.reuse;
-            Box::pin(async move { Ok(MockConnection::new(reuse)) })
-        }
-    }
-
-    struct MockConnection {
-        open: Arc<AtomicBool>,
-        reuse: bool,
-        ident: ConnectionId,
-    }
-
-    impl MockConnection {
-        fn id(&self) -> ConnectionId {
-            self.ident
-        }
-
-        fn new(reuse: bool) -> Self {
-            let conn = Self {
-                open: Arc::new(AtomicBool::new(true)),
-                reuse,
-                ident: ConnectionId(IDENT.fetch_add(1, Ordering::SeqCst)),
-            };
-            trace!(id=%conn.id(), "creating connection");
-            conn
-        }
-
-        fn close(&self) {
-            self.open.store(false, Ordering::SeqCst);
-        }
-    }
-
-    impl PoolableConnection for MockConnection {
-        fn is_open(&self) -> bool {
-            self.open.load(Ordering::SeqCst)
-        }
-
-        fn can_share(&self) -> bool {
-            self.reuse
-        }
-
-        fn reuse(&mut self) -> Option<Self> {
-            if self.reuse && self.is_open() {
-                Some(Self {
-                    open: self.open.clone(),
-                    reuse: true,
-                    ident: self.ident,
-                })
-            } else {
-                None
-            }
-        }
-    }
 
     #[tokio::test]
     async fn checkout_simple() {
@@ -566,12 +431,7 @@ mod tests {
         )
             .into();
 
-        let conn = MockTransport::single()
-            .await
-            .unwrap()
-            .handshake()
-            .await
-            .unwrap();
+        let conn = MockConnection::single();
 
         let first_id = conn.id();
 
@@ -608,12 +468,7 @@ mod tests {
         )
             .into();
 
-        let conn_first = MockTransport::single()
-            .await
-            .unwrap()
-            .handshake()
-            .await
-            .unwrap();
+        let conn_first = MockConnection::single();
 
         let first_id = conn_first.id();
 
@@ -655,7 +510,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn checkout_drop_pool() {
+    async fn checkout_drop_pool_err() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let pool = Pool::new(Config {
@@ -685,5 +540,31 @@ mod tests {
         drop(pool);
 
         assert!(checkout.now_or_never().unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn checkout_drop_pool() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+        });
+
+        let key: key::Key = (
+            http::uri::Scheme::HTTPS,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let checkout = pool.checkout(
+            key.clone(),
+            true,
+            Connector::new(MockTransport::reusable, MockTransport::handshake),
+        );
+
+        drop(pool);
+
+        assert!(checkout.now_or_never().unwrap().is_ok());
     }
 }
