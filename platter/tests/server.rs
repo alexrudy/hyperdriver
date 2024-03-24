@@ -5,7 +5,7 @@ use hyper_util::rt::TokioIo;
 async fn platter_duplex() {
     use http_body_util::BodyExt;
 
-    let (client, incoming) = braid::duplex::DuplexClient::new("test".parse().unwrap());
+    let (client, incoming) = braid::duplex::pair("test".parse().unwrap());
 
     let acceptor = braid::server::Acceptor::from(incoming);
     let server = platter::Server::new(

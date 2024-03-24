@@ -3,7 +3,7 @@ async fn braided_duplex() {
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let (client, incoming) = braid::duplex::DuplexClient::new("test".parse().unwrap());
+    let (client, incoming) = braid::duplex::pair("test".parse().unwrap());
 
     let server = braid::server::Acceptor::from(incoming);
     tokio::spawn(async move {

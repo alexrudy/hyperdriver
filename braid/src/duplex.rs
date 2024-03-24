@@ -96,14 +96,6 @@ pub struct DuplexClient {
 }
 
 impl DuplexClient {
-    /// Create a new duplex client and incoming pair.
-    ///
-    /// The client can be cloned and re-used cheaply, and the incoming provides
-    /// a stream of incoming duplex connections.
-    pub fn new(name: Authority) -> (DuplexClient, DuplexIncoming) {
-        pair(name)
-    }
-
     /// Connect to the other half of this duplex stream.
     ///
     /// The `max_buf_size` is the maximum size of the buffer used for the stream.
@@ -198,6 +190,9 @@ impl futures_core::Stream for DuplexIncoming {
 }
 
 /// Create a new duplex client and incoming pair.
+///
+/// The client can be cloned and re-used cheaply, and the incoming provides
+/// a stream of incoming duplex connections.
 pub fn pair(name: Authority) -> (DuplexClient, DuplexIncoming) {
     let (sender, receiver) = tokio::sync::mpsc::channel(32);
     (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
@@ -215,7 +210,7 @@ mod test {
 
         let name: Authority = "test".parse().unwrap();
 
-        let (client, incoming) = DuplexClient::new(name.clone());
+        let (client, incoming) = pair(name.clone());
         let mut incoming = incoming.fuse();
 
         let (mut client_stream, mut server_stream) = tokio::try_join!(

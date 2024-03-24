@@ -423,7 +423,7 @@ pub(crate) enum ServiceHandle {
 
 impl ServiceHandle {
     fn duplex(service: &str) -> Self {
-        let (connector, acceptor) = braid::duplex::DuplexClient::new(service.parse().unwrap());
+        let (connector, acceptor) = braid::duplex::pair(service.parse().unwrap());
         Self::Duplex {
             acceptor: Some(acceptor.into()),
             connector,
