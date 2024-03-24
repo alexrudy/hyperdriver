@@ -1,3 +1,5 @@
+//! TCP transport implementation for client connections.
+
 use std::fmt;
 use std::future::Future;
 use std::io;
@@ -19,6 +21,7 @@ use tracing::{trace, warn, Instrument};
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
 
+/// A TCP connector for client connections.
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
     config: Arc<TcpConnectionConfig>,
@@ -27,6 +30,7 @@ pub struct TcpConnector<R = GaiResolver> {
 }
 
 impl TcpConnector {
+    /// Create a new `TcpConnector` with the given configuration.
     pub fn new(config: TcpConnectionConfig, tls: TlsClientConfig) -> Self {
         Self {
             config: Arc::new(config),
@@ -237,6 +241,7 @@ impl TcpConnectingSet {
     }
 }
 
+/// Error type for TCP connections.
 #[derive(Debug, Error)]
 pub struct TcpConnectionError {
     message: String,
@@ -277,16 +282,34 @@ impl fmt::Display for TcpConnectionError {
     }
 }
 
+/// Configuration for TCP connections.
 #[derive(Debug)]
 pub struct TcpConnectionConfig {
+    /// The timeout for connecting to a remote address.
     pub connect_timeout: Option<Duration>,
+
+    /// The timeout for keep-alive connections.
     pub keep_alive_timeout: Option<Duration>,
+
+    /// The timeout for happy eyeballs algorithm.
     pub happy_eyeballs_timeout: Option<Duration>,
+
+    /// The local IPv4 address to bind to.
     pub local_address_ipv4: Option<Ipv4Addr>,
+
+    /// The local IPv6 address to bind to.
     pub local_address_ipv6: Option<Ipv6Addr>,
+
+    /// Whether to disable Nagle's algorithm.
     pub nodelay: bool,
+
+    /// Whether to reuse the local address.
     pub reuse_address: bool,
+
+    /// The size of the send buffer.
     pub send_buffer_size: Option<usize>,
+
+    /// The size of the receive buffer.
     pub recv_buffer_size: Option<usize>,
 }
 

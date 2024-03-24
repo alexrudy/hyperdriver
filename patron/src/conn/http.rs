@@ -1,3 +1,5 @@
+//! HTTP connection handling.
+
 use ::http::{Response, Version};
 use braid::client::Stream;
 use futures_util::future::BoxFuture;
@@ -15,7 +17,7 @@ use super::{Connection, HttpProtocol};
 /// A connector which links a transport with HTTP connections.
 ///
 /// This connector supports HTTP/2 and HTTP/1.1 connections.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct HttpConnector {
     builder: HttpConnectionBuilder,
 }
@@ -96,6 +98,7 @@ mod future {
     }
 }
 
+/// An HTTP connection.
 pub struct HttpConnection {
     inner: InnerConnection,
 }
@@ -192,6 +195,7 @@ pub enum ConnectionError {
     Timeout,
 }
 
+/// A builder for configuring and starting HTTP connections.
 #[derive(Debug, Clone)]
 pub struct HttpConnectionBuilder {
     http1: hyper::client::conn::http1::Builder,
@@ -200,15 +204,18 @@ pub struct HttpConnectionBuilder {
 }
 
 impl HttpConnectionBuilder {
+    /// Set the default protocol for the connection.
     pub fn set_protocol(&mut self, protocol: HttpProtocol) -> &mut Self {
         self.protocol = protocol;
         self
     }
 
+    /// Get the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
         &mut self.http1
     }
 
+    /// Get the HTTP/2 configuration.
     pub fn http2(&mut self) -> &mut hyper::client::conn::http2::Builder<TokioExecutor> {
         &mut self.http2
     }

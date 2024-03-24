@@ -184,9 +184,13 @@ impl<T: PoolableConnection> PoolInner<T> {
     }
 }
 
+/// Configuration for a connection pool.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The maximum idle duration of a connection.
     pub idle_timeout: Option<Duration>,
+
+    /// The maximum number of idle connections per host.
     pub max_idle_per_host: usize,
 }
 

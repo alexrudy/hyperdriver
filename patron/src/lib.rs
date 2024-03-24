@@ -12,7 +12,9 @@ use thiserror::Error;
 use tracing::warn;
 
 mod client;
-mod conn;
+
+/// Connection utilities.
+pub mod conn;
 mod lazy;
 mod pool;
 
@@ -22,6 +24,7 @@ pub use conn::ConnectionError;
 pub use conn::HttpProtocol;
 pub use conn::Protocol;
 pub use conn::TransportStream;
+pub use pool::Config as PoolConfig;
 
 /// Client error type.
 #[derive(Debug, Error)]

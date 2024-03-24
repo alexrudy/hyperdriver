@@ -10,6 +10,7 @@ use hyper::body::Incoming;
 use tower::Service;
 
 pub mod dns;
+pub mod duplex;
 pub mod http;
 pub mod tcp;
 
@@ -21,17 +22,23 @@ pub(crate) use self::http::HttpConnector;
 pub(crate) use self::tcp::TcpConnectionConfig;
 pub(crate) use self::tcp::TcpConnector;
 
+/// A transport provides data transmission between two endpoints.
 pub trait Transport: Clone + Send
 where
     Self: Service<Uri, Response = TransportStream>,
 {
+    /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
+
+    /// The future type returned by this service
     type Future: Future<Output = Result<TransportStream, <Self as Transport>::Error>>
         + Send
         + 'static;
 
+    /// Connect to a remote server and return a stream.
     fn connect(&mut self, uri: Uri) -> <Self as Transport>::Future;
 
+    /// Poll the transport to see if it is ready to accept a new connection.
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
@@ -182,16 +189,22 @@ impl From<::http::Version> for HttpProtocol {
 /// Underneath, it may not use HTTP as the connection protocol, and it may use any appropriate
 /// transport protocol to connect to the server.
 pub trait Connection {
+    /// The error type for this connection
     type Error: std::error::Error + Send + Sync + 'static;
+
+    /// The future type returned by this service
     type Future: Future<Output = Result<::http::Response<Incoming>, Self::Error>> + Send + 'static;
 
+    /// Send a request to the remote server and return the response.
     fn send_request(&mut self, request: arnold::Request) -> Self::Future;
 
+    /// Poll the connection to see if it is ready to accept a new request.
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>>;
 
+    /// Future which resolves when the connection is ready to accept a new request.
     fn when_ready(&mut self) -> BoxFuture<'_, Result<(), Self::Error>>
     where
         Self: Send,
