@@ -257,9 +257,24 @@ impl<T: PoolableConnection> Drop for Pooled<T> {
 #[cfg(test)]
 mod tests {
     use futures_util::FutureExt as _;
+    use static_assertions::assert_impl_all;
 
     use super::mock::{MockConnection, MockTransport};
     use super::*;
+
+    #[test]
+    fn sensible_config() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let config = Config::default();
+        let pool: Pool<MockConnection> = Pool::new(config);
+
+        assert!(pool.inner.lock().unwrap().config.idle_timeout.unwrap() > Duration::from_secs(1));
+        assert!(pool.inner.lock().unwrap().config.max_idle_per_host > 0);
+        assert!(pool.inner.lock().unwrap().config.max_idle_per_host < 2048);
+    }
+
+    assert_impl_all!(Pool<MockConnection>: Clone);
 
     #[tokio::test]
     async fn checkout_simple() {

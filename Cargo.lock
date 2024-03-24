@@ -699,6 +699,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "socket2",
+ "static_assertions",
  "thiserror",
  "tokio",
  "tower",

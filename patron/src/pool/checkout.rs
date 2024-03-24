@@ -28,7 +28,7 @@ use super::WeakOpt;
 static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
 #[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CheckoutId(usize);
 
 #[cfg(debug_assertions)]
@@ -52,12 +52,21 @@ pub enum Error<E> {
     Unavailable,
 }
 
-#[derive(Debug)]
 #[pin_project(project = WaitingProjected)]
 pub(crate) enum Waiting<C: PoolableConnection> {
     Idle(#[pin] Receiver<Pooled<C>>),
     Connecting(#[pin] Receiver<Pooled<C>>),
     NoPool,
+}
+
+impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Waiting::Idle(_) => f.debug_tuple("Idle").finish(),
+            Waiting::Connecting(_) => f.debug_tuple("Connecting").finish(),
+            Waiting::NoPool => f.debug_tuple("NoPool").finish(),
+        }
+    }
 }
 
 pub(crate) enum WaitingPoll<C: PoolableConnection> {
@@ -91,6 +100,12 @@ pub(crate) struct Connector<C: PoolableConnection, T: PoolableTransport, E> {
     handshake: Box<dyn FnOnce(T) -> BoxFuture<'static, Result<C, E>> + Send>,
 }
 
+impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug for Connector<C, T, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Connector").finish()
+    }
+}
+
 impl<C: PoolableConnection, T: PoolableTransport, E> Connector<C, T, E> {
     pub(crate) fn new<R, F, H>(transport: F, handshake: H) -> Self
     where
@@ -104,12 +119,24 @@ impl<C: PoolableConnection, T: PoolableTransport, E> Connector<C, T, E> {
         }
     }
 }
-
 pub(crate) enum InnerCheckoutConnecting<C: PoolableConnection, T: PoolableTransport, E> {
     Waiting,
     Connected,
     Connecting(Connector<C, T, E>),
     Handshaking(BoxFuture<'static, Result<C, E>>),
+}
+
+impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug
+    for InnerCheckoutConnecting<C, T, E>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InnerCheckoutConnecting::Waiting => f.debug_tuple("Waiting").finish(),
+            InnerCheckoutConnecting::Connected => f.debug_tuple("Connected").finish(),
+            InnerCheckoutConnecting::Connecting(_) => f.debug_tuple("Connecting").finish(),
+            InnerCheckoutConnecting::Handshaking(_) => f.debug_tuple("Handshaking").finish(),
+        }
+    }
 }
 
 #[pin_project(PinnedDrop)]
@@ -123,6 +150,17 @@ pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E> {
     connection_error: PhantomData<E>,
     #[cfg(debug_assertions)]
     id: CheckoutId,
+}
+
+impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug for Checkout<C, T, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Checkout")
+            .field("key", &self.key)
+            .field("pool", &self.pool)
+            .field("waiter", &self.waiter)
+            .field("inner", &self.inner)
+            .finish()
+    }
 }
 
 impl<C: PoolableConnection, T: PoolableTransport, E> Checkout<C, T, E> {
@@ -323,6 +361,15 @@ mod test {
     use super::super::mock::MockTransport;
     use super::*;
 
+    #[test]
+    fn verify_checkout_id() {
+        let id = CheckoutId(0);
+        assert_eq!(id.to_string(), "checkout-0");
+        assert_eq!(id, CheckoutId(0));
+        assert_eq!(format!("{:?}", id), "CheckoutId(0)");
+        assert_eq!(id.clone(), CheckoutId(0));
+    }
+
     #[tokio::test]
     async fn detatched_checkout() {
         let key: Key = "http://localhost:8080".parse().unwrap();
@@ -330,6 +377,12 @@ mod test {
         let checkout = Checkout::detached(
             key,
             Connector::new(MockTransport::single, MockTransport::handshake),
+        );
+
+        let dbg = format!("{:?}", checkout);
+        assert_eq!(
+            dbg,
+            "Checkout { key: Key(\"http\", localhost:8080), pool: WeakOpt(None), waiter: NoPool, inner: Connecting }"
         );
 
         let connection = checkout.await.unwrap();

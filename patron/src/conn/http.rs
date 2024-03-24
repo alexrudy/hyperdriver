@@ -53,47 +53,25 @@ mod future {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    use pin_project::pin_project;
+    use futures_util::FutureExt;
 
     use crate::conn::TransportStream;
+    use crate::DebugLiteral;
 
     use super::ConnectionError;
     use super::HttpConnection;
     use super::HttpConnectionBuilder;
 
-    struct DebugLiteral<T: fmt::Display>(T);
-
-    impl<T: fmt::Display> fmt::Debug for DebugLiteral<T> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "{}", self.0)
-        }
-    }
-
     type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
-    #[pin_project(project = StateProj, project_replace = StateProjReplace)]
-    enum State {
-        Error(Option<ConnectionError>),
-        Handshaking {
-            future: BoxFuture<'static, HttpConnection, ConnectionError>,
-        },
-    }
-
-    #[pin_project]
     pub struct HttpConnectFuture {
-        #[pin]
-        state: State,
+        future: BoxFuture<'static, HttpConnection, ConnectionError>,
     }
 
     impl fmt::Debug for HttpConnectFuture {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            let field = match &self.state {
-                State::Error(_) => "Error",
-                State::Handshaking { .. } => "Handshaking",
-            };
-
             f.debug_struct("HttpConnectFuture")
-                .field("state", &DebugLiteral(field))
+                .field("state", &DebugLiteral("Handshaking"))
                 .finish()
         }
     }
@@ -105,34 +83,15 @@ mod future {
         ) -> HttpConnectFuture {
             let future = Box::pin(async move { builder.handshake(stream).await });
 
-            Self {
-                state: State::Handshaking { future },
-            }
-        }
-
-        #[allow(dead_code)]
-        pub(super) fn error(err: ConnectionError) -> Self {
-            Self {
-                state: State::Error(Some(err)),
-            }
+            Self { future }
         }
     }
 
     impl Future for HttpConnectFuture {
         type Output = Result<HttpConnection, ConnectionError>;
 
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            let mut this = self.project();
-            match this.state.as_mut().project() {
-                StateProj::Handshaking { future } => future.as_mut().poll(cx),
-                StateProj::Error(error) => {
-                    if let Some(error) = error.take() {
-                        Poll::Ready(Err(error))
-                    } else {
-                        panic!("invalid future state");
-                    }
-                }
-            }
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            self.future.poll_unpin(cx)
         }
     }
 }
@@ -143,7 +102,7 @@ pub struct HttpConnection {
 
 impl fmt::Debug for HttpConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ClientConnection")
+        f.debug_struct("HttpConnection")
             .field("version", &self.version())
             .finish()
     }
@@ -329,17 +288,23 @@ impl Default for HttpConnectionBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
     use std::future::poll_fn;
+    use std::future::Future;
 
     use super::*;
 
     use crate::Error;
 
     use futures_util::{stream::StreamExt as _, FutureExt, TryFutureExt};
+    use static_assertions::assert_impl_all;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tower::Service;
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+    assert_impl_all!(HttpConnector: Service<TransportStream, Response = HttpConnection, Error = ConnectionError, Future = future::HttpConnectFuture>, Debug, Clone);
+    assert_impl_all!(future::HttpConnectFuture: Future<Output = Result<HttpConnection, ConnectionError>>, Debug, Send);
 
     async fn transport() -> Result<(TransportStream, Stream), BoxError> {
         let (client, mut incoming) = braid::duplex::pair("test".parse()?);
@@ -380,6 +345,11 @@ mod tests {
         assert!(conn.is_open());
         assert!(!conn.can_share());
         assert_eq!(conn.version(), Version::HTTP_11);
+        assert!(conn.reuse().is_none());
+        assert_eq!(
+            format!("{:?}", conn),
+            "HttpConnection { version: HTTP/1.1 }"
+        );
 
         let request = http::Request::builder()
             .method(http::Method::GET)
@@ -422,6 +392,11 @@ mod tests {
         assert!(conn.is_open());
         assert!(conn.can_share());
         assert_eq!(conn.version(), Version::HTTP_2);
+        assert!(conn.reuse().is_some());
+        assert_eq!(
+            format!("{:?}", conn),
+            "HttpConnection { version: HTTP/2.0 }"
+        );
 
         let request = http::Request::builder()
             .version(::http::Version::HTTP_2)

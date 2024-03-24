@@ -27,3 +27,4 @@ tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = "*"
 clap = "*"
 pem-rfc7468.workspace = true
+static-assertions.workspace = true

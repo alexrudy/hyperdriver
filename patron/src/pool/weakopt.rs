@@ -1,6 +1,9 @@
+use std::fmt;
 use std::sync::Arc;
 
 use std::sync::Weak;
+
+use crate::DebugLiteral;
 
 pub(crate) struct WeakOpt<T>(Option<Weak<T>>);
 
@@ -21,6 +24,21 @@ impl<T> WeakOpt<T> {
 impl<T> Clone for WeakOpt<T> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl<T> fmt::Debug for WeakOpt<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(_) => f
+                .debug_tuple("WeakOpt")
+                .field(&DebugLiteral("Some(...)"))
+                .finish(),
+            None => f
+                .debug_tuple("WeakOpt")
+                .field(&DebugLiteral("None"))
+                .finish(),
+        }
     }
 }
 
