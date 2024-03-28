@@ -9,7 +9,7 @@ edition = "2021"
 libc = "0.2"
 camino.workspace = true
 tracing.workspace = true
-tracing-test.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tracing-test.workspace = true
