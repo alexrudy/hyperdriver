@@ -19,9 +19,6 @@ tokio-rustls.workspace = true
 tower.workspace = true
 tracing.workspace = true
 
-[dependencies.hyper-util]
-workspace = true
-features = ["client", "client-legacy", "tokio"]
 
 [dev-dependencies]
 futures-util.workspace = true

@@ -196,7 +196,6 @@ dependencies = [
  "futures-util",
  "http",
  "hyper",
- "hyper-util",
  "pem-rfc7468",
  "pin-project",
  "rustls",
