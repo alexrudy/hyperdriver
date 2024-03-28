@@ -8,9 +8,9 @@ edition = "2021"
 [dependencies]
 arnold.workspace = true
 braid.workspace = true
+bridge.workspace = true
 futures-util.workspace = true
 http.workspace = true
-hyper-util.workspace = true
 hyper.workspace = true
 pin-project.workspace = true
 rustls-native-certs.workspace = true

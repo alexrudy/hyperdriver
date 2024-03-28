@@ -1,17 +1,26 @@
 [workspace]
-members = ["arnold", "braid", "hyperdrive", "patron", "pidfile", "platter", "roomservice"]
+members = [
+    "arnold",
+    "braid",
+    "bridge",
+    "hyperdrive",
+    "patron",
+    "pidfile",
+    "platter",
+    "roomservice",
+]
 resolver = "2"
 
 [workspace.dependencies]
 arnold = { path = "./arnold" }
 braid = { path = "./braid" }
+bridge = { path = "./bridge" }
 patron = { path = "./patron" }
 pidfile = { path = "./pidfile" }
 
 bytes = "1"
 camino = { version = "1" }
 dashmap = "5"
-futures = "0.3"
 futures-core = "0.3"
 futures-util = "0.3"
 http = { version = "1" }
@@ -23,7 +32,7 @@ hyper-util = { version = "0.1", features = ["client"] }
 ouroboros = "0.18"
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pin-project = { version = "1" }
-rustls = "^0.22"
+rustls = "^0.23"
 rustls-native-certs = "0.7.0"
 serde = { version = "1" }
 socket2 = "0.5"
@@ -31,7 +40,7 @@ static-assertions = { version = "1", package = "static_assertions" }
 tempfile = "3"
 thiserror = { version = "1" }
 tokio = { version = "1" }
-tokio-rustls = "0.25"
+tokio-rustls = "0.26"
 tower = { version = "0.4" }
 tracing = { version = "^0.1" }
 tracing-test = { version = "*" }
