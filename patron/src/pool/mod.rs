@@ -26,7 +26,27 @@ use self::idle::IdleConnections;
 pub(crate) use self::key::Key;
 use self::weakopt::WeakOpt;
 
-/// A pool of connections to a database.
+/// A pool of connections to remote hosts.
+///
+/// This connection pool is specifically designed with HTTP connections in mind. It separates the treatment of the
+/// connection (e.g. HTTP/1.1, HTTP/2, etc) from the transport (e.g. TCP, TLS, etc). This allows the pool to be used
+/// with any type of connection, as long as it implements the `PoolableConnection` trait, and any type of transport,
+/// as long as it implements the `PoolableTransport` trait. This also allows the pool to be used with upgradeable
+/// connections, such as HTTP/1.1 connections that can be upgraded to HTTP/2, where the pool will have new HTTP/2
+/// connections wait for in-progress upgrades from HTTP/1.1 connections to complete and use those, rather than creating
+/// new connections.
+///
+/// The pool makes use of a `Checkout` to represent a connection that is being checked out of the pool. The `Checkout`
+/// type requires a `Connector` to be provided, which provides a future that will create a new connection to the remote
+/// host, and a future that will perform the handshake for the connection. The `Checkout` ensures that in-progress
+/// connection state is correctly managed, and that duplicate connections are not made unnecessarily.
+///
+/// The pool also provides a `Pooled` type, which is a wrapper around a connection that will return the connection to
+/// the pool when dropped, if the connection is still open and has not been marked as reusable (reusable connections
+/// are always kept in the pool - there is no need to return dropped copies).
+///
+/// Pool configuration happens in the `Config` type, which allows for setting the maximum idle duration of a connection,
+/// and the maximum number of idle connections per host.
 #[derive(Debug)]
 pub(crate) struct Pool<T: PoolableConnection> {
     inner: Arc<Mutex<PoolInner<T>>>,

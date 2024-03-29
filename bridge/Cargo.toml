@@ -1,15 +1,11 @@
 [package]
-name = "pidfile"
+name = "bridge"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libc = "0.2"
-camino.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
-tracing-test.workspace = true
+pin-project.workspace = true
+hyper.workspace = true
+tokio.workspace = true

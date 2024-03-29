@@ -2,9 +2,10 @@
 
 use ::http::{Response, Version};
 use braid::client::Stream;
+use bridge::io::TokioIo;
+use bridge::rt::TokioExecutor;
 use futures_util::future::BoxFuture;
 use hyper::body::Incoming;
-use hyper_util::rt::{TokioExecutor, TokioIo};
 use std::fmt;
 use thiserror::Error;
 use tracing::trace;

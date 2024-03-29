@@ -1,6 +1,6 @@
+use bridge::io::TokioIo;
 use futures_util::StreamExt;
 use http::StatusCode;
-use hyper_util::rt::TokioIo;
 use std::pin::pin;
 
 use patron::conn::duplex::DuplexTransport;
