@@ -94,6 +94,15 @@ impl From<Empty<Bytes>> for Body {
     }
 }
 
+#[cfg(feature = "incoming")]
+impl From<hyper::body::Incoming> for Body {
+    fn from(body: hyper::body::Incoming) -> Self {
+        Self {
+            inner: InnerBody::Incoming(body),
+        }
+    }
+}
+
 impl<E> From<UnsyncBoxBody<Bytes, E>> for Body
 where
     E: Into<BoxError> + 'static,
@@ -110,6 +119,9 @@ enum InnerBody {
     Empty,
     Full(#[pin] Full<Bytes>),
     Boxed(#[pin] Pin<Box<dyn http_body::Body<Data = Bytes, Error = BoxError> + Send + 'static>>),
+
+    #[cfg(feature = "incoming")]
+    Incoming(#[pin] hyper::body::Incoming),
 }
 
 impl From<String> for InnerBody {
@@ -139,6 +151,10 @@ impl http_body::Body for Body {
             InnerBodyProj::Boxed(body) => body
                 .poll_frame(cx)
                 .map(|opt| opt.map(|res| res.map_err(Into::into))),
+            #[cfg(feature = "incoming")]
+            InnerBodyProj::Incoming(body) => body
+                .poll_frame(cx)
+                .map(|opt| opt.map(|res| res.map_err(Into::into))),
         }
     }
 
@@ -147,6 +163,8 @@ impl http_body::Body for Body {
             InnerBody::Empty => true,
             InnerBody::Full(ref body) => body.is_end_stream(),
             InnerBody::Boxed(ref body) => body.is_end_stream(),
+            #[cfg(feature = "incoming")]
+            InnerBody::Incoming(ref body) => body.is_end_stream(),
         }
     }
 
@@ -155,6 +173,8 @@ impl http_body::Body for Body {
             InnerBody::Empty => http_body::SizeHint::with_exact(0),
             InnerBody::Full(ref body) => body.size_hint(),
             InnerBody::Boxed(ref body) => body.size_hint(),
+            #[cfg(feature = "incoming")]
+            InnerBody::Incoming(ref body) => body.size_hint(),
         }
     }
 }
@@ -165,6 +185,8 @@ impl fmt::Debug for InnerBody {
             InnerBody::Empty => f.debug_struct("Empty").finish(),
             InnerBody::Full(_) => f.debug_struct("Full").finish(),
             InnerBody::Boxed(_) => f.debug_struct("Boxed").finish(),
+            #[cfg(feature = "incoming")]
+            InnerBody::Incoming(_) => f.debug_struct("Incoming").finish(),
         }
     }
 }

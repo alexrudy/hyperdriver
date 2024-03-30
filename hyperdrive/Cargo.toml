@@ -11,3 +11,7 @@ braid = { path = "../braid" }
 patron = { path = "../patron" }
 platter = { path = "../platter" }
 roomservice = { path = "../roomservice" }
+
+[features]
+default = []
+incoming = ["arnold/incoming"]

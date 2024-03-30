@@ -19,3 +19,4 @@ static-assertions.workspace = true
 [features]
 default = []
 docs = ["dep:hyper"]
+incoming = ["dep:hyper"]
