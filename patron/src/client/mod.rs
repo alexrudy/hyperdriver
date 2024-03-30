@@ -36,6 +36,7 @@ use crate::Error;
 pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>
 where
     P: Protocol,
+    P::Connection: PoolableConnection,
 {
     protocol: P,
     transport: T,
@@ -45,6 +46,7 @@ where
 impl<P, T> Client<P, T>
 where
     P: Protocol,
+    P::Connection: PoolableConnection,
 {
     /// Create a new client with the given connector and pool configuration.
     pub fn new(connector: P, transport: T, pool: pool::Config) -> Self {
@@ -59,6 +61,7 @@ where
 impl<P, T> Clone for Client<P, T>
 where
     P: Protocol + Clone,
+    P::Connection: PoolableConnection,
     T: Clone,
 {
     fn clone(&self) -> Self {

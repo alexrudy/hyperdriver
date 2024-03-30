@@ -16,7 +16,8 @@ mod client;
 /// Connection utilities.
 pub mod conn;
 mod lazy;
-mod pool;
+/// Connection pooling
+pub mod pool;
 
 pub use client::Client;
 pub use conn::http::HttpConnectionBuilder;
