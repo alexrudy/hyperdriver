@@ -127,7 +127,8 @@ where
     state: ConnectionState<'b, I, S, E>,
 }
 
-impl<'b, I, S, E, B> Connection for UpgradableConnection<'b, I, S, E>
+impl<'b, I, S, E, B> Connection<Box<dyn std::error::Error + Send + Sync + 'static>>
+    for UpgradableConnection<'b, I, S, E>
 where
     S: hyper::service::HttpService<body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,

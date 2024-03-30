@@ -917,6 +917,7 @@ dependencies = [
  "braid",
  "bridge",
  "bytes",
+ "futures-util",
  "http",
  "http-body-util",
  "hyper",
