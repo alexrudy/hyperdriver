@@ -1,11 +1,10 @@
-//! Platter
-//!
 //! A server framework to interoperate with hyper-v1, tokio, braid and arnold
-// #![warn(missing_docs)]
+
+#![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![deny(unsafe_code)]
 
-use std::future::Future;
+use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
@@ -39,8 +38,6 @@ pub trait Protocol<S> {
 
 /// A server that can accept connections, and run each connection
 /// using a [tower::Service].
-#[pin_project::pin_project]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Server<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
@@ -48,9 +45,6 @@ where
     incoming: braid::server::Acceptor,
     make_service: S,
     protocol: P,
-
-    #[pin]
-    future: State<S::Service, S::Future>,
 }
 
 impl<S, P> Server<S, P>
@@ -59,18 +53,17 @@ where
 {
     /// Set the protocol to use for serving connections.
     pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2> {
-        assert!(
-            matches!(self.future, State::Preparing),
-            "server must not be started"
-        );
         Server {
             incoming: self.incoming,
             make_service: self.make_service,
             protocol,
-            future: State::Preparing,
         }
     }
 
+    /// Create a new server with the given `MakeService` and `Acceptor`, and a custom [Protocol].
+    ///
+    /// The default protocol is [AutoBuilder], which can serve both HTTP/1 and HTTP/2 connections,
+    /// and will automatically detect the protocol used by the client.
     pub fn new_with_protocol(
         incoming: braid::server::Acceptor,
         make_service: S,
@@ -80,9 +73,56 @@ where
             incoming,
             make_service,
             protocol,
-            future: State::Preparing,
         }
     }
+}
+
+impl<S> Server<S, AutoBuilder<TokioExecutor>>
+where
+    S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
+{
+    /// Create a new server with the given `MakeService` and `Acceptor`.
+    pub fn new(incoming: braid::server::Acceptor, make_service: S) -> Self {
+        Self {
+            incoming,
+            make_service,
+            protocol: AutoBuilder::new(TokioExecutor::new()),
+        }
+    }
+}
+
+impl<S, P> IntoFuture for Server<S, P>
+where
+    S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = arnold::Response>,
+    S::Service: Clone + Send + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
+    S::MakeError: std::error::Error + Send + Sync + 'static,
+    <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
+    P: Protocol<S::Service>,
+{
+    type IntoFuture = Serving<S, P>;
+    type Output = Result<(), ServerError<S::MakeError>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Serving {
+            server: self,
+            state: State::Preparing,
+        }
+    }
+}
+
+/// A future that drives the server to accept connections.
+#[derive(Debug)]
+#[pin_project::pin_project]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub struct Serving<S, P>
+where
+    S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
+{
+    server: Server<S, P>,
+
+    #[pin]
+    state: State<S::Service, S::Future>,
 }
 
 #[derive(Debug)]
@@ -98,22 +138,7 @@ enum State<S, F> {
     },
 }
 
-impl<S> Server<S, AutoBuilder<TokioExecutor>>
-where
-    S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
-{
-    /// Create a new server with the given `MakeService` and `Acceptor`.
-    pub fn new(incoming: braid::server::Acceptor, make_service: S) -> Self {
-        Self {
-            incoming,
-            make_service,
-            protocol: AutoBuilder::new(TokioExecutor::new()),
-            future: State::Preparing,
-        }
-    }
-}
-
-impl<S, P> Server<S, P>
+impl<S, P> Serving<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = arnold::Response>,
     S::Service: Clone + Send + 'static,
@@ -132,36 +157,41 @@ where
     ) -> Poll<Result<Option<P::Connection>, ServerError<S::MakeError>>> {
         let mut me = self.as_mut().project();
 
-        match me.future.as_mut().project() {
+        match me.state.as_mut().project() {
             StateProj::Preparing => {
-                ready!(me.make_service.poll_ready(cx)).map_err(ServerError::ready)?;
-                let future = me.make_service.make_service(());
-                me.future.set(State::Making { future });
+                ready!(me.server.make_service.poll_ready(cx)).map_err(ServerError::ready)?;
+                let future = me.server.make_service.make_service(());
+                me.state.set(State::Making { future });
             }
             StateProj::Making { future, .. } => {
                 let service = ready!(future.poll(cx)).map_err(ServerError::make)?;
                 trace!("Server is ready to accept");
-                me.future.set(State::Accepting { service });
+                me.state.set(State::Accepting { service });
             }
-            StateProj::Accepting { .. } => match ready!(Pin::new(me.incoming).poll_accept(cx)) {
-                Ok(stream) => {
-                    trace!("accepted connection from {}", stream.remote_addr());
+            StateProj::Accepting { .. } => {
+                match ready!(Pin::new(&mut me.server.incoming).poll_accept(cx)) {
+                    Ok(stream) => {
+                        trace!("accepted connection from {}", stream.remote_addr());
 
-                    if let StateProjOwn::Accepting { service } =
-                        me.future.project_replace(State::Preparing)
-                    {
-                        let conn = me.protocol.serve_connection_with_upgrades(stream, service);
+                        if let StateProjOwn::Accepting { service } =
+                            me.state.project_replace(State::Preparing)
+                        {
+                            let conn = me
+                                .server
+                                .protocol
+                                .serve_connection_with_upgrades(stream, service);
 
-                        return Poll::Ready(Ok(Some(conn)));
-                    } else {
-                        unreachable!("state must still be accepting");
+                            return Poll::Ready(Ok(Some(conn)));
+                        } else {
+                            unreachable!("state must still be accepting");
+                        }
+                    }
+                    Err(e) => {
+                        debug!("accept error: {}", e);
+                        return Poll::Ready(Err(e.into()));
                     }
                 }
-                Err(e) => {
-                    debug!("accept error: {}", e);
-                    return Poll::Ready(Err(e.into()));
-                }
-            },
+            }
         };
         Poll::Ready(Ok(None))
     }
@@ -176,7 +206,7 @@ where
     }
 }
 
-impl<S, P> Future for Server<S, P>
+impl<S, P> Future for Serving<S, P>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = arnold::Response>,
     S::Service: Clone + Send + 'static,
@@ -235,7 +265,7 @@ impl<E: std::error::Error> ServerError<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::future::Future;
+    use std::future::{Future, IntoFuture};
     use std::pin::pin;
 
     use bridge::rt::TokioExecutor;
@@ -272,14 +302,15 @@ mod tests {
             .unwrap()
     }
 
-    fn serve_gracefully<S, E>(server: S) -> impl Future<Output = Result<(), E>>
+    fn serve_gracefully<S, F, E>(server: S) -> impl Future<Output = Result<(), E>>
     where
-        S: Future<Output = Result<(), E>> + Send + 'static,
+        S: IntoFuture<IntoFuture = F, Output = Result<(), E>> + Send + 'static,
+        F: Future<Output = Result<(), E>> + Send + 'static,
         E: std::error::Error + Send + 'static,
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
-            let mut server = pin!(server);
+            let mut server = pin!(server.into_future());
 
             tokio::select! {
                 rv = &mut server => {

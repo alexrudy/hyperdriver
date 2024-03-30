@@ -1,3 +1,5 @@
+use std::{future::IntoFuture as _, pin::pin};
+
 use bridge::io::TokioIo;
 use hyper::body::Incoming;
 
@@ -22,7 +24,7 @@ async fn platter_duplex() {
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     let handle = tokio::spawn(async move {
-        tokio::pin!(server);
+        let mut server = pin!(server.into_future());
 
         tokio::select! {
             rv = &mut server => {

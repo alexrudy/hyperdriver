@@ -40,7 +40,7 @@ impl DuplexStream {
     /// to create a client/server pair of duplex streams.
     pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info = ConnectionInfo::duplex(name, protocol);
+        let info = ConnectionInfo::duplex(name, protocol, max_buf_size);
         (
             DuplexStream {
                 inner: a,
@@ -138,8 +138,13 @@ impl DuplexConnectionRequest {
     }
 
     /// Tell waiting clients that the connection has been established
-    fn ack(self) -> Result<DuplexStream, io::Error> {
-        let (tx, rx) = DuplexStream::new(self.name, self.protocol, self.max_buf_size);
+    fn ack(self, max_buf_size: Option<usize>) -> Result<DuplexStream, io::Error> {
+        let max_buf_size = match max_buf_size {
+            Some(size) => std::cmp::min(size, self.max_buf_size),
+            None => self.max_buf_size,
+        };
+
+        let (tx, rx) = DuplexStream::new(self.name, self.protocol, max_buf_size);
         self.ack
             .send(tx)
             .map_err(|_| io::ErrorKind::ConnectionReset)?;
@@ -151,11 +156,21 @@ impl DuplexConnectionRequest {
 #[derive(Debug)]
 pub struct DuplexIncoming {
     receiver: tokio::sync::mpsc::Receiver<DuplexConnectionRequest>,
+    max_buf_size: Option<usize>,
 }
 
 impl DuplexIncoming {
     fn new(receiver: tokio::sync::mpsc::Receiver<DuplexConnectionRequest>) -> Self {
-        Self { receiver }
+        Self {
+            receiver,
+            max_buf_size: None,
+        }
+    }
+
+    /// Set the maximum buffer size for incoming connections
+    pub fn with_max_buf_size(mut self, max_buf_size: usize) -> Self {
+        self.max_buf_size = Some(max_buf_size);
+        self
     }
 }
 
@@ -168,7 +183,7 @@ impl Accept for DuplexIncoming {
         cx: &mut Context<'_>,
     ) -> Poll<Result<Self::Conn, Self::Error>> {
         if let Some(request) = ready!(self.receiver.poll_recv(cx)) {
-            let stream = request.ack()?;
+            let stream = request.ack(self.max_buf_size)?;
             Poll::Ready(Ok(stream))
         } else {
             Poll::Ready(Err(io::ErrorKind::ConnectionReset.into()))
@@ -181,7 +196,7 @@ impl futures_core::Stream for DuplexIncoming {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(request) = ready!(self.receiver.poll_recv(cx)) {
-            let stream = request.ack()?;
+            let stream = request.ack(self.max_buf_size)?;
             Poll::Ready(Some(Ok(stream)))
         } else {
             Poll::Ready(None)

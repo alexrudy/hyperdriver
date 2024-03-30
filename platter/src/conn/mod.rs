@@ -11,12 +11,16 @@ pub use hyper::server::conn::http1;
 pub use hyper::server::conn::http2;
 
 use crate::Protocol;
+
+/// HTTP connection builder with automatic protocol detection.
 pub mod auto;
 mod connecting;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
+/// A connection that can be gracefully shutdown.
 pub trait Connection: Future<Output = Result<(), Error>> {
+    /// Gracefully shutdown the connection.
     fn graceful_shutdown(self: Pin<&mut Self>);
 }
 

@@ -35,6 +35,9 @@ enum HttpProtocol {
     Http2,
 }
 
+/// A builder for creating connections which automatically detect the HTTP protocol version.
+///
+/// This builder also requires that the server support upgrades from HTTP/1 to HTTP/2.
 #[derive(Debug, Clone)]
 pub struct Builder<E = TokioExecutor> {
     http1: http1::Builder,
@@ -48,6 +51,7 @@ impl Default for Builder {
 }
 
 impl<E> Builder<E> {
+    /// Create a new `Builder` with the given executor.
     pub fn new(executor: E) -> Self {
         Self {
             http1: http1::Builder::new(),
@@ -55,14 +59,17 @@ impl<E> Builder<E> {
         }
     }
 
+    /// Get a reference to the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut http1::Builder {
         &mut self.http1
     }
 
+    /// Get a reference to the HTTP/2 configuration.
     pub fn http2(&mut self) -> &mut http2::Builder<E> {
         &mut self.http2
     }
 
+    /// Serve a connection with automatic protocol detection.
     pub fn serve_connection_with_upgrades<I, S, B>(
         &self,
         io: I,
@@ -109,6 +116,7 @@ where
     }
 }
 
+/// A combination HTTP/1 and HTTP/2 connection that can upgrade from HTTP/1 to HTTP/2.
 #[pin_project]
 #[derive(Debug)]
 pub struct UpgradableConnection<'b, I, S, E>
