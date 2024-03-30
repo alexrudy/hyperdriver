@@ -1,9 +1,11 @@
+use std::future::IntoFuture as _;
 use std::net::{SocketAddr, SocketAddrV4};
+use std::pin::pin;
 use std::sync::Arc;
 
+use bridge::rt::TokioExecutor;
 use hyper::body::Incoming;
 use hyper::server::conn::http2;
-use hyper_util::rt::TokioExecutor;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
     let cert_data = std::fs::read(format!("minica/{domain}/cert.pem")).unwrap();
@@ -53,7 +55,7 @@ async fn main() {
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     let handle = tokio::spawn(async move {
-        tokio::pin!(server);
+        let mut server = pin!(server.into_future());
 
         tokio::select! {
             rv = &mut server => {

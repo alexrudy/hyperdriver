@@ -223,6 +223,7 @@ impl Default for Config {
     }
 }
 
+/// A [`crate::conn::Transport`] that can be pooled.
 pub trait PoolableTransport: Unpin + Send + Sized + 'static {
     /// Returns `true` if the transport can be re-used, usually
     /// because it has used ALPN to negotiate a protocol that can
@@ -230,9 +231,20 @@ pub trait PoolableTransport: Unpin + Send + Sized + 'static {
     fn can_share(&self) -> bool;
 }
 
+/// A [`crate::Protocol`] that can be pooled.
+
 pub trait PoolableConnection: Unpin + Send + Sized + 'static {
+    /// Returns `true` if the connection is open.
     fn is_open(&self) -> bool;
+
+    /// Returns `true` if the connection can be shared / multiplexed.
+    ///
+    /// If this returns `true`, then [`PoolableConnection::reuse`] will be called to get
+    /// a new connection to return to the pool.
     fn can_share(&self) -> bool;
+
+    /// Returns a new connection to return to the pool, which will multiplex
+    /// against this one if possible.
     fn reuse(&mut self) -> Option<Self>;
 }
 

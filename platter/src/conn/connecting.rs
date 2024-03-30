@@ -1,17 +1,18 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use super::auto::Builder;
+use super::auto::UpgradableConnection;
 use braid::server::Stream;
+use bridge::io::TokioIo;
+use bridge::rt::TokioExecutor;
+use bridge::service::TowerHyperService;
 use hyper::body::Incoming;
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto::{Builder, UpgradeableConnection},
-    service::TowerToHyperService,
-};
 use ouroboros::self_referencing;
+use tower::BoxError;
 
 type Connection<'a, S> =
-    UpgradeableConnection<'a, TokioIo<Stream>, TowerToHyperService<S>, TokioExecutor>;
+    UpgradableConnection<'a, TokioIo<Stream>, TowerHyperService<S>, TokioExecutor>;
 
 #[self_referencing]
 pub struct Connecting<S>
@@ -43,9 +44,23 @@ where
         Self::new(protocol, move |protocol| {
             Box::pin(protocol.serve_connection_with_upgrades(
                 TokioIo::new(stream),
-                TowerToHyperService::new(service),
+                TowerHyperService::new(service),
             ))
         })
+    }
+}
+
+impl<S> crate::Connection<BoxError> for Connecting<S>
+where
+    S: tower::Service<http::Request<Incoming>, Response = arnold::Response>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
+{
+    fn graceful_shutdown(mut self: Pin<&mut Self>) {
+        self.with_conn_mut(|conn| conn.as_mut().graceful_shutdown())
     }
 }
 
@@ -58,7 +73,7 @@ where
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Output = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>;
+    type Output = Result<(), BoxError>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,

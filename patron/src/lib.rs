@@ -1,6 +1,4 @@
-//! # Patron
-//!
-//! Patron is a HTTP client library for Rust, built on top of [hyper] and [braid].
+//! HTTP client library for Rust, built on top of [hyper] and [braid].
 
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
@@ -16,10 +14,11 @@ mod client;
 /// Connection utilities.
 pub mod conn;
 mod lazy;
-mod pool;
+/// Connection pooling
+pub mod pool;
 
 pub use client::Client;
-pub use conn::http::HttpConnector;
+pub use conn::http::HttpConnectionBuilder;
 pub use conn::ConnectionError;
 pub use conn::HttpProtocol;
 pub use conn::Protocol;

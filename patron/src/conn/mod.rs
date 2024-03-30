@@ -3,8 +3,11 @@ use braid::client::Stream;
 use braid::info::ConnectionInfo;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
+use pin_project::pin_project;
 use std::future::Future;
 use std::io;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 
 use hyper::body::Incoming;
 use tower::Service;
@@ -14,11 +17,9 @@ pub mod duplex;
 pub mod http;
 pub mod tcp;
 
-use crate::pool::PoolableConnection;
 use crate::pool::PoolableTransport;
 
 pub use self::http::ConnectionError;
-pub(crate) use self::http::HttpConnector;
 pub(crate) use self::tcp::TcpConnectionConfig;
 pub(crate) use self::tcp::TcpConnector;
 
@@ -71,7 +72,9 @@ where
 ///
 /// This transport uses braid to power the underlying
 #[derive(Debug)]
+#[pin_project]
 pub struct TransportStream {
+    #[pin]
     stream: Stream,
     info: ConnectionInfo,
 }
@@ -108,6 +111,52 @@ impl From<TransportStream> for Stream {
     }
 }
 
+impl AsyncRead for TransportStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        self.project().stream.poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for TransportStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, io::Error>> {
+        self.project().stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), io::Error>> {
+        self.project().stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), io::Error>> {
+        self.project().stream.poll_shutdown(cx)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
+    }
+
+    fn poll_write_vectored(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> std::task::Poll<Result<usize, io::Error>> {
+        self.project().stream.poll_write_vectored(cx, bufs)
+    }
+}
+
 /// Protocols (like HTTP) define how data is sent and received over a connection.
 pub trait Protocol
 where
@@ -117,7 +166,7 @@ where
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The type of connection returned by this service
-    type Connection: Connection + PoolableConnection;
+    type Connection: Connection;
 
     /// The type of the handshake future
     type Future: Future<Output = Result<Self::Connection, <Self as Protocol>::Error>>
@@ -139,7 +188,7 @@ where
     T: Service<TransportStream, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
-    C: Connection + PoolableConnection,
+    C: Connection,
 {
     type Error = T::Error;
     type Connection = C;

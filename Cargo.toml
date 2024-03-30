@@ -28,7 +28,6 @@ http-body = { version = "1" }
 http-body-util = { version = "0.1" }
 humantime-serde = "1.1.1"
 hyper = { version = "1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["client"] }
 ouroboros = "0.18"
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pin-project = { version = "1" }

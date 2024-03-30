@@ -15,22 +15,109 @@ use crate::pool::PoolableConnection;
 use super::TransportStream;
 use super::{Connection, HttpProtocol};
 
-/// A connector which links a transport with HTTP connections.
-///
-/// This connector supports HTTP/2 and HTTP/1.1 connections.
-#[derive(Debug, Default, Clone)]
-pub struct HttpConnector {
-    builder: HttpConnectionBuilder,
+/// A builder for configuring and starting HTTP connections.
+#[derive(Debug, Clone)]
+pub struct HttpConnectionBuilder {
+    http1: hyper::client::conn::http1::Builder,
+    http2: hyper::client::conn::http2::Builder<TokioExecutor>,
+    pub(crate) protocol: HttpProtocol,
 }
 
-impl HttpConnector {
-    /// Create a new connector with the given transport.
-    pub fn new(builder: HttpConnectionBuilder) -> Self {
-        Self { builder }
+impl HttpConnectionBuilder {
+    /// Set the default protocol for the connection.
+    pub fn set_protocol(&mut self, protocol: HttpProtocol) -> &mut Self {
+        self.protocol = protocol;
+        self
+    }
+
+    /// Get the HTTP/1.1 configuration.
+    pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
+        &mut self.http1
+    }
+
+    /// Get the HTTP/2 configuration.
+    pub fn http2(&mut self) -> &mut hyper::client::conn::http2::Builder<TokioExecutor> {
+        &mut self.http2
     }
 }
 
-impl tower::Service<TransportStream> for HttpConnector {
+impl HttpConnectionBuilder {
+    async fn handshake_h2(&self, stream: Stream) -> Result<HttpConnection, ConnectionError> {
+        trace!("handshake");
+        let (sender, conn) = self
+            .http2
+            .handshake(TokioIo::new(stream))
+            .await
+            .map_err(|error| ConnectionError::Handshake(error.into()))?;
+        tokio::spawn(async {
+            if let Err(err) = conn.await {
+                if err.is_user() {
+                    tracing::error!(%err, "h2 connection driver error");
+                } else {
+                    tracing::debug!(%err, "h2 connection driver error");
+                }
+            }
+        });
+        trace!("handshake complete");
+        Ok(HttpConnection {
+            inner: InnerConnection::H2(sender),
+        })
+    }
+
+    async fn handshake_h1(&self, stream: Stream) -> Result<HttpConnection, ConnectionError> {
+        trace!("handshake h1");
+        let (sender, conn) = self
+            .http1
+            .handshake(TokioIo::new(stream))
+            .await
+            .map_err(|error| ConnectionError::Handshake(error.into()))?;
+        tokio::spawn(async {
+            if let Err(err) = conn.await {
+                tracing::error!(%err, "h1 connection driver error");
+            }
+        });
+        trace!("handshake complete");
+        Ok(HttpConnection {
+            inner: InnerConnection::H1(sender),
+        })
+    }
+
+    #[tracing::instrument(skip_all, fields(protocol = ?self.protocol))]
+    pub(crate) async fn handshake(
+        &self,
+        transport: TransportStream,
+    ) -> Result<HttpConnection, ConnectionError> {
+        match self.protocol {
+            HttpProtocol::Http2 => self.handshake_h2(transport.into()).await,
+            HttpProtocol::Http1 => {
+                if transport
+                    .info()
+                    .tls
+                    .as_ref()
+                    .and_then(|tls| tls.alpn.as_ref())
+                    == Some(&braid::info::Protocol::Http(http::Version::HTTP_2))
+                {
+                    trace!("alpn h2 switching");
+                    return self.handshake_h2(transport.into()).await;
+                }
+
+                self.handshake_h1(transport.into()).await
+            }
+        }
+    }
+}
+
+impl Default for HttpConnectionBuilder {
+    fn default() -> Self {
+        Self {
+            http1: hyper::client::conn::http1::Builder::new(),
+            http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
+            protocol: HttpProtocol::Http1,
+        }
+    }
+}
+
+impl tower::Service<TransportStream> for HttpConnectionBuilder {
     type Response = HttpConnection;
 
     type Error = ConnectionError;
@@ -46,7 +133,91 @@ impl tower::Service<TransportStream> for HttpConnector {
 
     #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
     fn call(&mut self, req: TransportStream) -> Self::Future {
-        future::HttpConnectFuture::new(self.builder.clone(), req)
+        future::HttpConnectFuture::new(self.clone(), req)
+    }
+}
+
+impl tower::Service<TransportStream> for hyper::client::conn::http1::Builder {
+    type Response = HttpConnection;
+
+    type Error = ConnectionError;
+    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: TransportStream) -> Self::Future {
+        let builder = self.clone();
+        let stream: braid::client::Stream = req.into();
+
+        Box::pin(async move {
+            let (sender, conn) = builder
+                .handshake(TokioIo::new(stream))
+                .await
+                .map_err(|err| ConnectionError::Handshake(err.into()))?;
+            tokio::spawn(async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(%err, "h1 connection driver error");
+                    } else {
+                        tracing::debug!(%err, "h1 connection driver error");
+                    }
+                }
+            });
+            Ok(HttpConnection {
+                inner: InnerConnection::H1(sender),
+            })
+        })
+    }
+}
+
+impl<E> tower::Service<TransportStream> for hyper::client::conn::http2::Builder<E>
+where
+    E: hyper::rt::bounds::Http2ClientConnExec<arnold::Body, TokioIo<braid::client::Stream>>
+        + Unpin
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+{
+    type Response = HttpConnection;
+
+    type Error = ConnectionError;
+    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: TransportStream) -> Self::Future {
+        let builder = self.clone();
+        let stream: braid::client::Stream = req.into();
+
+        Box::pin(async move {
+            let (sender, conn) = builder
+                .handshake(TokioIo::new(stream))
+                .await
+                .map_err(|err| ConnectionError::Handshake(err.into()))?;
+            tokio::spawn(async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(%err, "h2 connection driver error");
+                    } else {
+                        tracing::debug!(%err, "h2 connection driver error");
+                    }
+                }
+            });
+            Ok(HttpConnection {
+                inner: InnerConnection::H2(sender),
+            })
+        })
     }
 }
 
@@ -196,104 +367,6 @@ pub enum ConnectionError {
     Timeout,
 }
 
-/// A builder for configuring and starting HTTP connections.
-#[derive(Debug, Clone)]
-pub struct HttpConnectionBuilder {
-    http1: hyper::client::conn::http1::Builder,
-    http2: hyper::client::conn::http2::Builder<TokioExecutor>,
-    pub(crate) protocol: HttpProtocol,
-}
-
-impl HttpConnectionBuilder {
-    /// Set the default protocol for the connection.
-    pub fn set_protocol(&mut self, protocol: HttpProtocol) -> &mut Self {
-        self.protocol = protocol;
-        self
-    }
-
-    /// Get the HTTP/1.1 configuration.
-    pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
-        &mut self.http1
-    }
-
-    /// Get the HTTP/2 configuration.
-    pub fn http2(&mut self) -> &mut hyper::client::conn::http2::Builder<TokioExecutor> {
-        &mut self.http2
-    }
-}
-
-impl HttpConnectionBuilder {
-    async fn handshake_h2(&self, stream: Stream) -> Result<HttpConnection, ConnectionError> {
-        trace!("handshake");
-        let (sender, conn) = self
-            .http2
-            .handshake(TokioIo::new(stream))
-            .await
-            .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(async {
-            if let Err(err) = conn.await {
-                tracing::error!(%err, "h2 connection driver error");
-            }
-        });
-        trace!("handshake complete");
-        Ok(HttpConnection {
-            inner: InnerConnection::H2(sender),
-        })
-    }
-
-    async fn handshake_h1(&self, stream: Stream) -> Result<HttpConnection, ConnectionError> {
-        trace!("handshake");
-        let (sender, conn) = self
-            .http1
-            .handshake(TokioIo::new(stream))
-            .await
-            .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(async {
-            if let Err(err) = conn.await {
-                tracing::error!(%err, "h1 connection driver error");
-            }
-        });
-        trace!("handshake complete");
-        Ok(HttpConnection {
-            inner: InnerConnection::H1(sender),
-        })
-    }
-
-    #[tracing::instrument(skip_all, fields(protocol = ?self.protocol))]
-    pub(crate) async fn handshake(
-        &self,
-        transport: TransportStream,
-    ) -> Result<HttpConnection, ConnectionError> {
-        match self.protocol {
-            HttpProtocol::Http2 => self.handshake_h2(transport.into()).await,
-            HttpProtocol::Http1 => {
-                if transport
-                    .info()
-                    .tls
-                    .as_ref()
-                    .and_then(|tls| tls.alpn.as_ref())
-                    == Some(&braid::info::Protocol::Http(http::Version::HTTP_2))
-                {
-                    trace!("alpn h2 switching");
-                    return self.handshake_h2(transport.into()).await;
-                }
-
-                self.handshake_h1(transport.into()).await
-            }
-        }
-    }
-}
-
-impl Default for HttpConnectionBuilder {
-    fn default() -> Self {
-        Self {
-            http1: hyper::client::conn::http1::Builder::new(),
-            http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
-            protocol: HttpProtocol::Http1,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -311,7 +384,7 @@ mod tests {
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-    assert_impl_all!(HttpConnector: Service<TransportStream, Response = HttpConnection, Error = ConnectionError, Future = future::HttpConnectFuture>, Debug, Clone);
+    assert_impl_all!(HttpConnectionBuilder: Service<TransportStream, Response = HttpConnection, Error = ConnectionError, Future = future::HttpConnectFuture>, Debug, Clone);
     assert_impl_all!(future::HttpConnectFuture: Future<Output = Result<HttpConnection, ConnectionError>>, Debug, Send);
 
     async fn transport() -> Result<(TransportStream, Stream), BoxError> {
@@ -330,10 +403,9 @@ mod tests {
 
     #[tokio::test]
     async fn http_connector_always_ready() {
-        let builder = HttpConnectionBuilder::default();
-        let mut connector = HttpConnector::new(builder);
+        let mut builder = HttpConnectionBuilder::default();
 
-        poll_fn(|cx| connector.poll_ready(cx))
+        poll_fn(|cx| builder.poll_ready(cx))
             .now_or_never()
             .unwrap()
             .unwrap();
@@ -343,12 +415,11 @@ mod tests {
     async fn http_connector_request_h1() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let builder = HttpConnectionBuilder::default();
-        let mut connector = HttpConnector::new(builder);
+        let mut builder = HttpConnectionBuilder::default();
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = connector.call(stream).await.unwrap();
+        let mut conn = builder.call(stream).await.unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(!conn.can_share());
@@ -391,11 +462,10 @@ mod tests {
 
         let mut builder = HttpConnectionBuilder::default();
         builder.set_protocol(HttpProtocol::Http2);
-        let mut connector = HttpConnector::new(builder);
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = connector.call(stream).await.unwrap();
+        let mut conn = builder.call(stream).await.unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(conn.can_share());

@@ -226,17 +226,25 @@ pub struct ConnectionInfo {
     /// The remote address for this connection.
     pub remote_addr: SocketAddr,
 
+    /// Buffer size
+    pub buffer_size: Option<usize>,
+
     /// Transport Layer Security information for this connection.
     pub tls: Option<TlsConnectionInfo>,
 }
 
 impl ConnectionInfo {
-    pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>) -> ConnectionInfo {
+    pub(crate) fn duplex(
+        name: Authority,
+        protocol: Option<Protocol>,
+        buffer_size: usize,
+    ) -> ConnectionInfo {
         ConnectionInfo {
             protocol,
             authority: Some(name),
             local_addr: SocketAddr::Duplex,
             remote_addr: SocketAddr::Duplex,
+            buffer_size: Some(buffer_size),
             tls: None,
         }
     }
@@ -271,6 +279,7 @@ impl TryFrom<&TcpStream> for ConnectionInfo {
             authority: None,
             local_addr: local_addr.into(),
             remote_addr: remote_addr.into(),
+            buffer_size: None,
             tls: None,
         })
     }
@@ -288,6 +297,7 @@ impl TryFrom<&UnixStream> for ConnectionInfo {
             authority: None,
             local_addr: local_addr.try_into()?,
             remote_addr: remote_addr.try_into()?,
+            buffer_size: None,
             tls: None,
         })
     }

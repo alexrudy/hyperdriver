@@ -9,3 +9,4 @@ edition = "2021"
 pin-project.workspace = true
 hyper.workspace = true
 tokio.workspace = true
+tower.workspace = true

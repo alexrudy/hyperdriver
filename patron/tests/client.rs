@@ -4,7 +4,7 @@ use http::StatusCode;
 use std::pin::pin;
 
 use patron::conn::duplex::DuplexTransport;
-use patron::{HttpConnector, PoolConfig};
+use patron::{HttpConnectionBuilder, PoolConfig};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
@@ -16,7 +16,7 @@ async fn client() -> Result<(), BoxError> {
     tokio::spawn(serve_one_h1(acceptor));
 
     let mut client = patron::Client::new(
-        HttpConnector::default(),
+        HttpConnectionBuilder::default(),
         DuplexTransport::new(1024, None, client),
         PoolConfig::default(),
     );
