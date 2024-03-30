@@ -1,5 +1,5 @@
+use bridge::io::TokioIo;
 use hyper::body::Incoming;
-use hyper_util::rt::TokioIo;
 
 #[tokio::test]
 async fn platter_duplex() {

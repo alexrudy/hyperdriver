@@ -8,21 +8,15 @@ edition = "2021"
 [dependencies]
 arnold.workspace = true
 braid.workspace = true
+bridge.workspace = true
+bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-hyper-util = { workspace = true, features = [
-    "server",
-    "server-auto",
-    "tokio",
-    "service",
-    "http1",
-    "http2",
-] }
 hyper.workspace = true
 ouroboros.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tower.workspace = true
+tower = { workspace = true, features = ["util", "make"] }
 tracing.workspace = true
 thiserror.workspace = true
 

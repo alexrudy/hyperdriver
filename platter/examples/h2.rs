@@ -1,9 +1,9 @@
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
+use bridge::rt::TokioExecutor;
 use hyper::body::Incoming;
 use hyper::server::conn::http2;
-use hyper_util::rt::TokioExecutor;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
     let cert_data = std::fs::read(format!("minica/{domain}/cert.pem")).unwrap();

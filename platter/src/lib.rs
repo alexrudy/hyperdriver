@@ -1,7 +1,7 @@
 //! Platter
 //!
 //! A server framework to interoperate with hyper-v1, tokio, braid and arnold
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![deny(unsafe_code)]
 
@@ -10,17 +10,15 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
+use self::conn::auto::Builder;
 use braid::server::{Accept, Stream};
-use hyper::server::conn::http1;
-use hyper::server::conn::http2;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder;
-use hyper_util::service::TowerToHyperService;
+use bridge::rt::TokioExecutor;
 use tower::make::MakeService;
 use tracing::{debug, trace};
 
-mod connecting;
-use self::connecting::Connecting;
+pub mod conn;
+mod rewind;
+// use self::connecting::Connecting;
 
 /// A transport protocol for serving connections.
 ///
@@ -39,58 +37,6 @@ pub trait Protocol<S> {
     fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection;
 }
 
-impl<S> Protocol<S> for Builder<TokioExecutor>
-where
-    S: tower::Service<http::Request<hyper::body::Incoming>, Response = arnold::Response>
-        + Clone
-        + Send
-        + 'static,
-    S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-{
-    type Connection = Connecting<S>;
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
-        Connecting::build(self.clone(), service, stream)
-    }
-}
-
-impl<S> Protocol<S> for http1::Builder
-where
-    S: tower::Service<http::Request<hyper::body::Incoming>, Response = arnold::Response>
-        + Clone
-        + Send
-        + 'static,
-    S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-{
-    type Connection = http1::UpgradeableConnection<TokioIo<Stream>, TowerToHyperService<S>>;
-    type Error = hyper::Error;
-
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
-        let conn = self.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service));
-        conn.with_upgrades()
-    }
-}
-
-impl<S> Protocol<S> for http2::Builder<TokioExecutor>
-where
-    S: tower::Service<http::Request<hyper::body::Incoming>, Response = arnold::Response>
-        + Clone
-        + Send
-        + 'static,
-    S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-{
-    type Connection = http2::Connection<TokioIo<Stream>, TowerToHyperService<S>, TokioExecutor>;
-    type Error = hyper::Error;
-
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
-        self.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service))
-    }
-}
-
 /// A server that can accept connections, and run each connection
 /// using a [tower::Service].
 #[pin_project::pin_project]
@@ -105,6 +51,21 @@ where
 
     #[pin]
     future: State<S::Service, S::Future>,
+}
+
+impl<S, P> Server<S, P>
+where
+    S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
+{
+    /// Set the protocol to use for serving connections.
+    pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2> {
+        Server {
+            incoming: self.incoming,
+            make_service: self.make_service,
+            protocol,
+            future: State::Preparing,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -130,16 +91,6 @@ where
             incoming,
             make_service,
             protocol: Builder::new(TokioExecutor::new()),
-            future: State::Preparing,
-        }
-    }
-
-    /// Set the protocol to use for serving connections.
-    pub fn with_protocol<P>(self, protocol: P) -> Server<S, P> {
-        Server {
-            incoming: self.incoming,
-            make_service: self.make_service,
-            protocol,
             future: State::Preparing,
         }
     }

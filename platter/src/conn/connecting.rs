@@ -1,17 +1,17 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use super::auto::Builder;
+use super::auto::UpgradableConnection;
 use braid::server::Stream;
+use bridge::io::TokioIo;
+use bridge::rt::TokioExecutor;
+use bridge::service::TowerHyperService;
 use hyper::body::Incoming;
-use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
-    server::conn::auto::{Builder, UpgradeableConnection},
-    service::TowerToHyperService,
-};
 use ouroboros::self_referencing;
 
 type Connection<'a, S> =
-    UpgradeableConnection<'a, TokioIo<Stream>, TowerToHyperService<S>, TokioExecutor>;
+    UpgradableConnection<'a, TokioIo<Stream>, TowerHyperService<S>, TokioExecutor>;
 
 #[self_referencing]
 pub struct Connecting<S>
@@ -43,7 +43,7 @@ where
         Self::new(protocol, move |protocol| {
             Box::pin(protocol.serve_connection_with_upgrades(
                 TokioIo::new(stream),
-                TowerToHyperService::new(service),
+                TowerHyperService::new(service),
             ))
         })
     }
