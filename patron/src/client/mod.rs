@@ -7,6 +7,7 @@ use crate::conn::Connection;
 use crate::conn::TransportStream;
 use crate::pool::Checkout;
 use crate::pool::Connector;
+use crate::HttpConnectionBuilder;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use http::uri::Port;
@@ -20,7 +21,6 @@ use tracing::warn;
 mod builder;
 
 use crate::conn;
-use crate::conn::http::HttpConnector;
 use crate::conn::tcp::TcpConnector;
 use crate::pool::{self, PoolableConnection, Pooled};
 
@@ -33,7 +33,7 @@ use crate::Error;
 
 /// An HTTP client
 #[derive(Debug)]
-pub struct Client<P = HttpConnector, T = TcpConnector>
+pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>
 where
     P: Protocol,
 {
@@ -70,7 +70,7 @@ where
     }
 }
 
-impl Client<HttpConnector, TcpConnector> {
+impl Client<HttpConnectionBuilder, TcpConnector> {
     /// A client builder for configuring the client.
     pub fn builder() -> builder::Builder {
         builder::Builder::default()
@@ -87,12 +87,12 @@ impl Client<HttpConnector, TcpConnector> {
                 crate::conn::TcpConnectionConfig::default(),
                 default_tls_config(),
             ),
-            protocol: conn::HttpConnector::new(conn::http::HttpConnectionBuilder::default()),
+            protocol: conn::http::HttpConnectionBuilder::default(),
         }
     }
 }
 
-impl Default for Client<HttpConnector> {
+impl Default for Client<HttpConnectionBuilder> {
     fn default() -> Self {
         Self::new_tcp_http()
     }

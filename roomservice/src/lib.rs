@@ -15,14 +15,14 @@ use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
 use futures_util::{future::BoxFuture, FutureExt};
 use hyper::Uri;
-use patron::{HttpConnector, TransportStream};
+use patron::{HttpConnectionBuilder, TransportStream};
 use pidfile::PidFile;
 
 mod server;
 pub use server::GrpcRouter;
 
 /// Service Registry client which will connect to internal services.
-pub type Client = patron::Client<HttpConnector, RegistryTransport>;
+pub type Client = patron::Client<HttpConnectionBuilder, RegistryTransport>;
 
 const GRPC_PROXY_NAME: &str = "grpc-proxy";
 
@@ -241,11 +241,7 @@ impl ServiceRegistry {
 
     /// Create a client which will connect to internal services.
     pub fn client(&self) -> Client {
-        Client::new(
-            HttpConnector::new(Default::default()),
-            self.transport(),
-            Default::default(),
-        )
+        Client::new(Default::default(), self.transport(), Default::default())
     }
 
     /// Create a router which will multiplex GRPC services.

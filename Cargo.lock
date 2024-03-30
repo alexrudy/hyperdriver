@@ -921,6 +921,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "ouroboros",
+ "patron",
  "pem-rfc7468",
  "pin-project",
  "rustls",
@@ -929,6 +930,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "tracing-test",
 ]
 
 [[package]]

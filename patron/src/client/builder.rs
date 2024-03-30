@@ -1,9 +1,6 @@
 use rustls::ClientConfig;
 
-use crate::{
-    conn::{http::HttpConnectionBuilder, HttpConnector},
-    default_tls_config, Client,
-};
+use crate::{conn::http::HttpConnectionBuilder, default_tls_config, Client};
 
 #[derive(Debug)]
 pub struct Builder {
@@ -44,12 +41,12 @@ impl Builder {
 }
 
 impl Builder {
-    pub fn build(self) -> Client<HttpConnector> {
+    pub fn build(self) -> Client<HttpConnectionBuilder> {
         let tls = self.tls.unwrap_or_else(super::default_tls_config);
 
         Client {
             transport: crate::conn::TcpConnector::new(self.tcp, tls),
-            protocol: HttpConnector::new(HttpConnectionBuilder::default()),
+            protocol: HttpConnectionBuilder::default(),
             pool: self.pool.map(crate::pool::Pool::new),
         }
     }

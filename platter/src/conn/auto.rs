@@ -36,9 +36,15 @@ enum HttpProtocol {
 }
 
 #[derive(Debug, Clone)]
-pub struct Builder<E> {
+pub struct Builder<E = TokioExecutor> {
     http1: http1::Builder,
     http2: http2::Builder<E>,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self::new(TokioExecutor::new())
+    }
 }
 
 impl<E> Builder<E> {

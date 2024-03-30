@@ -18,7 +18,6 @@ use crate::pool::PoolableConnection;
 use crate::pool::PoolableTransport;
 
 pub use self::http::ConnectionError;
-pub(crate) use self::http::HttpConnector;
 pub(crate) use self::tcp::TcpConnectionConfig;
 pub(crate) use self::tcp::TcpConnector;
 

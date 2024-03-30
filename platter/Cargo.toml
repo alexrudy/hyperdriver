@@ -24,3 +24,5 @@ thiserror.workspace = true
 rustls.workspace = true
 pem-rfc7468.workspace = true
 tracing-subscriber = "*"
+patron.workspace = true
+tracing-test.workspace = true

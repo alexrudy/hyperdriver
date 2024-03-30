@@ -19,7 +19,7 @@ mod lazy;
 mod pool;
 
 pub use client::Client;
-pub use conn::http::HttpConnector;
+pub use conn::http::HttpConnectionBuilder;
 pub use conn::ConnectionError;
 pub use conn::HttpProtocol;
 pub use conn::Protocol;
