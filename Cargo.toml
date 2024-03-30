@@ -18,6 +18,7 @@ bridge = { path = "./bridge" }
 patron = { path = "./patron" }
 pidfile = { path = "./pidfile" }
 
+axum = "0.7"
 bytes = "1"
 camino = { version = "1", default-features = false }
 dashmap = "5"

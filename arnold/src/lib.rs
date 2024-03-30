@@ -103,6 +103,15 @@ impl From<hyper::body::Incoming> for Body {
     }
 }
 
+#[cfg(feature = "axum")]
+impl From<axum::body::Body> for Body {
+    fn from(body: axum::body::Body) -> Self {
+        Self {
+            inner: InnerBody::AxumBody(body),
+        }
+    }
+}
+
 impl<E> From<UnsyncBoxBody<Bytes, E>> for Body
 where
     E: Into<BoxError> + 'static,
@@ -122,6 +131,9 @@ enum InnerBody {
 
     #[cfg(feature = "incoming")]
     Incoming(#[pin] hyper::body::Incoming),
+
+    #[cfg(feature = "axum")]
+    AxumBody(#[pin] axum::body::Body),
 }
 
 impl From<String> for InnerBody {
@@ -155,6 +167,11 @@ impl http_body::Body for Body {
             InnerBodyProj::Incoming(body) => body
                 .poll_frame(cx)
                 .map(|opt| opt.map(|res| res.map_err(Into::into))),
+
+            #[cfg(feature = "axum")]
+            InnerBodyProj::AxumBody(body) => body
+                .poll_frame(cx)
+                .map(|opt| opt.map(|res| res.map_err(Into::into))),
         }
     }
 
@@ -165,6 +182,8 @@ impl http_body::Body for Body {
             InnerBody::Boxed(ref body) => body.is_end_stream(),
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(ref body) => body.is_end_stream(),
+            #[cfg(feature = "axum")]
+            InnerBody::AxumBody(ref body) => body.is_end_stream(),
         }
     }
 
@@ -175,6 +194,8 @@ impl http_body::Body for Body {
             InnerBody::Boxed(ref body) => body.size_hint(),
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(ref body) => body.size_hint(),
+            #[cfg(feature = "axum")]
+            InnerBody::AxumBody(ref body) => body.size_hint(),
         }
     }
 }
@@ -187,6 +208,8 @@ impl fmt::Debug for InnerBody {
             InnerBody::Boxed(_) => f.debug_struct("Boxed").finish(),
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(_) => f.debug_struct("Incoming").finish(),
+            #[cfg(feature = "axum")]
+            InnerBody::AxumBody(_) => f.debug_struct("AxumBody").finish(),
         }
     }
 }
