@@ -43,20 +43,20 @@ impl<IO> fmt::Debug for State<IO> {
 /// request to the underlying stream. The handshake can be forced
 /// to completion using the [`finish_handshake`](TlsStream::finish_handshake) method.
 #[derive(Debug)]
-pub struct TlsStream<IO> {
+pub struct ClientTlsStream<IO> {
     state: State<IO>,
     tx: TlsConnectionInfoSender,
     rx: TlsConnectionInfoReciever,
 }
 
-impl<IO> TlsStream<IO> {
+impl<IO> ClientTlsStream<IO> {
     /// Get the connection info for this stream.
     pub async fn info(&self) -> io::Result<ConnectionInfo> {
         self.rx.recv().await
     }
 }
 
-impl<IO> TlsHandshakeStream for TlsStream<IO>
+impl<IO> TlsHandshakeStream for ClientTlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
@@ -65,7 +65,7 @@ where
     }
 }
 
-impl<IO> TlsStream<IO>
+impl<IO> ClientTlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
@@ -75,7 +75,7 @@ where
     }
 }
 
-impl<IO> TlsStream<IO>
+impl<IO> ClientTlsStream<IO>
 where
     IO: Connection + AsyncRead + AsyncWrite + Unpin,
 {
@@ -90,7 +90,7 @@ where
     }
 }
 
-impl TlsStream<TcpStream> {
+impl ClientTlsStream<TcpStream> {
     /// Connect to the given tcp address, using the given domain name and TLS configuration.
     pub async fn connect(
         addr: impl ToSocketAddrs,
@@ -102,7 +102,7 @@ impl TlsStream<TcpStream> {
     }
 }
 
-impl<IO> TlsStream<IO>
+impl<IO> ClientTlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
@@ -130,7 +130,7 @@ where
     }
 }
 
-impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO>
+impl<IO> From<tokio_rustls::Connect<IO>> for ClientTlsStream<IO>
 where
     IO: Connection,
 {
@@ -149,7 +149,7 @@ where
     }
 }
 
-impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<IO> {
+impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncRead for ClientTlsStream<IO> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -160,7 +160,7 @@ impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<IO> {
     }
 }
 
-impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsStream<IO> {
+impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ClientTlsStream<IO> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

@@ -15,7 +15,7 @@ use tokio::net::{TcpStream, UnixStream};
 use crate::stream::core::{Braid, TlsBraid};
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::Connection;
-use crate::stream::tls::client::TlsStream;
+use crate::stream::tls::client::ClientTlsStream;
 use crate::stream::tls::TlsHandshakeStream as _;
 
 /// A stream which can handle multiple different underlying transports, and TLS
@@ -26,7 +26,7 @@ use crate::stream::tls::TlsHandshakeStream as _;
 #[pin_project]
 pub struct Stream<IO = Braid> {
     #[pin]
-    inner: TlsBraid<TlsStream<IO>, IO>,
+    inner: TlsBraid<ClientTlsStream<IO>, IO>,
 }
 
 impl Stream {
@@ -66,7 +66,7 @@ where
         };
 
         Stream {
-            inner: crate::stream::core::TlsBraid::Tls(TlsStream::new(core, domain, config)),
+            inner: crate::stream::core::TlsBraid::Tls(ClientTlsStream::new(core, domain, config)),
         }
     }
 
