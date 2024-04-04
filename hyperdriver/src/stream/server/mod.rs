@@ -54,7 +54,7 @@ pub trait Accept {
     ) -> Poll<Result<Self::Conn, Self::Error>>;
 }
 
-/// Dispatching wrapper for potential stream connection types for clients
+/// Dispatching wrapper for potential stream connection types for servers
 #[derive(Debug)]
 #[pin_project]
 pub struct Stream<IO = Braid> {

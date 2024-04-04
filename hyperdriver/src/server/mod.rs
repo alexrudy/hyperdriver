@@ -14,14 +14,13 @@ pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
 use crate::stream::info::Connection as HasConnectionInfo;
-use crate::stream::server::Accept;
+pub use crate::stream::server::Accept;
 use futures_util::future::FutureExt as _;
 use tower::make::MakeService;
 use tracing::instrument::Instrumented;
 use tracing::{debug, trace, Instrument};
 
 pub mod conn;
-// use self::connecting::Connecting;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 

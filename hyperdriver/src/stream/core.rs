@@ -22,8 +22,13 @@ use super::tls::TlsHandshakeStream;
 #[derive(Debug)]
 #[pin_project(project = BraidCoreProjection)]
 pub enum Braid {
+    /// A TCP stream
     Tcp(#[pin] TcpStream),
+
+    /// A duplex stream
     Duplex(#[pin] DuplexStream),
+
+    /// A Unix stream
     Unix(#[pin] UnixStream),
 }
 
@@ -100,10 +105,14 @@ impl From<UnixStream> for Braid {
     }
 }
 
+/// Dispatching wrapper for optionally supporting TLS
 #[derive(Debug)]
 #[pin_project(project=BraidProjection)]
 pub enum TlsBraid<Tls, NoTls> {
+    /// A stream without TLS
     NoTls(#[pin] NoTls),
+
+    /// A stream with TLS
     Tls(#[pin] Tls),
 }
 

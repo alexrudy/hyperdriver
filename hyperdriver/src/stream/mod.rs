@@ -11,3 +11,5 @@ pub mod duplex;
 pub mod info;
 pub mod server;
 pub mod tls;
+
+pub use core::{Braid, TlsBraid};
