@@ -21,7 +21,7 @@ use super::tls::TlsHandshakeStream;
 /// generic over the TLS stream type (which is different for client and server).
 #[derive(Debug)]
 #[pin_project(project = BraidCoreProjection)]
-pub(crate) enum BraidCore {
+pub enum BraidCore {
     Tcp(#[pin] TcpStream),
     Duplex(#[pin] DuplexStream),
     Unix(#[pin] UnixStream),
@@ -102,14 +102,15 @@ impl From<UnixStream> for BraidCore {
 
 #[derive(Debug)]
 #[pin_project(project=BraidProjection)]
-pub(crate) enum Braid<Tls> {
-    NoTls(#[pin] BraidCore),
+pub(crate) enum Braid<Tls, NoTls> {
+    NoTls(#[pin] NoTls),
     Tls(#[pin] Tls),
 }
 
-impl<Tls> TlsHandshakeStream for Braid<Tls>
+impl<Tls, NoTls> TlsHandshakeStream for Braid<Tls, NoTls>
 where
     Tls: TlsHandshakeStream + Unpin,
+    NoTls: AsyncRead + AsyncWrite + Unpin,
 {
     fn poll_handshake(
         &mut self,
@@ -132,9 +133,10 @@ macro_rules! dispatch {
     };
 }
 
-impl<Tls> AsyncRead for Braid<Tls>
+impl<Tls, NoTls> AsyncRead for Braid<Tls, NoTls>
 where
     Tls: AsyncRead,
+    NoTls: AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -145,9 +147,10 @@ where
     }
 }
 
-impl<Tls> AsyncWrite for Braid<Tls>
+impl<Tls, NoTls> AsyncWrite for Braid<Tls, NoTls>
 where
     Tls: AsyncWrite,
+    NoTls: AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -172,11 +175,8 @@ where
     }
 }
 
-impl<T, Tls> From<T> for Braid<Tls>
-where
-    T: Into<BraidCore>,
-{
-    fn from(stream: T) -> Self {
-        Self::NoTls(stream.into())
+impl<Tls, NoTls> From<NoTls> for Braid<Tls, NoTls> {
+    fn from(stream: NoTls) -> Self {
+        Self::NoTls(stream)
     }
 }

@@ -14,7 +14,7 @@ use tokio::net::{TcpStream, UnixStream};
 
 use crate::stream::core::{Braid, BraidCore};
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::Connection as _;
+use crate::stream::info::Connection;
 use crate::stream::tls::client::TlsStream;
 use crate::stream::tls::TlsHandshakeStream as _;
 
@@ -24,9 +24,9 @@ use crate::stream::tls::TlsHandshakeStream as _;
 /// This is the client side of the Braid stream.
 #[derive(Debug)]
 #[pin_project]
-pub struct Stream {
+pub struct Stream<IO = BraidCore> {
     #[pin]
-    inner: Braid<TlsStream<BraidCore>>,
+    inner: Braid<TlsStream<IO>, IO>,
 }
 
 impl Stream {
@@ -36,6 +36,18 @@ impl Stream {
     pub async fn connect(addr: impl Into<SocketAddr>) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr.into()).await?;
         Ok(stream.into())
+    }
+}
+
+impl<IO> Stream<IO>
+where
+    IO: Connection + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    /// Create a new client stream from an existing connection.
+    pub fn new(inner: IO) -> Self {
+        Stream {
+            inner: Braid::NoTls(inner),
+        }
     }
 
     /// Add TLS to the underlying stream.
@@ -83,7 +95,7 @@ impl Stream {
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
-            inner: stream.into(),
+            inner: BraidCore::from(stream).into(),
         }
     }
 }
@@ -91,7 +103,7 @@ impl From<TcpStream> for Stream {
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
-            inner: stream.into(),
+            inner: BraidCore::from(stream).into(),
         }
     }
 }
@@ -99,12 +111,15 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            inner: stream.into(),
+            inner: BraidCore::from(stream).into(),
         }
     }
 }
 
-impl AsyncRead for Stream {
+impl<IO> AsyncRead for Stream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -114,7 +129,10 @@ impl AsyncRead for Stream {
     }
 }
 
-impl AsyncWrite for Stream {
+impl<IO> AsyncWrite for Stream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

@@ -61,7 +61,7 @@ pub struct Stream {
     info: ConnectionInfoState,
 
     #[pin]
-    inner: Braid<TlsStream<BraidCore>>,
+    inner: Braid<TlsStream<BraidCore>, BraidCore>,
 }
 
 impl Stream {
@@ -120,7 +120,7 @@ impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
             info: ConnectionInfoState::Connected(<TcpStream as HasConnectionInfo>::info(&stream)),
-            inner: stream.into(),
+            inner: BraidCore::from(stream).into(),
         }
     }
 }
@@ -131,7 +131,7 @@ impl From<DuplexStream> for Stream {
             info: ConnectionInfoState::Connected(<DuplexStream as HasConnectionInfo>::info(
                 &stream,
             )),
-            inner: stream.into(),
+            inner: BraidCore::from(stream).into(),
         }
     }
 }
@@ -140,7 +140,7 @@ impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
             info: ConnectionInfoState::Connected(stream.info()),
-            inner: stream.into(),
+            inner: BraidCore::from(stream).into(),
         }
     }
 }
