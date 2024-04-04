@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use hyper::body::Incoming;
 use hyper::server::conn::http2;
-use hyperdrive::bridge::rt::TokioExecutor;
+use hyperdriver::bridge::rt::TokioExecutor;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
     let cert_data = std::fs::read(format!("minica/{domain}/cert.pem")).unwrap();
@@ -38,16 +38,16 @@ async fn main() {
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let acceptor =
-        hyperdrive::stream::server::Acceptor::from(incoming).tls(Arc::new(tls_config("localhost")));
+    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming)
+        .tls(Arc::new(tls_config("localhost")));
 
-    let server = hyperdrive::server::Server::new(
+    let server = hyperdriver::server::Server::new(
         acceptor,
         tower::service_fn(|_| async {
             Ok::<_, hyper::Error>(tower::service_fn(|req: http::Request<Incoming>| async {
                 let body = req.into_body();
                 let data = body.collect().await?;
-                Ok::<_, hyper::Error>(hyper::Response::new(hyperdrive::body::Body::from(
+                Ok::<_, hyper::Error>(hyper::Response::new(hyperdriver::body::Body::from(
                     data.to_bytes(),
                 )))
             }))

@@ -7,7 +7,7 @@ async fn braided_unix() {
 
     let incoming = tokio::net::UnixListener::bind(dir.path().join("braid.sock")).unwrap();
 
-    let server = hyperdrive::stream::server::Acceptor::from(incoming);
+    let server = hyperdriver::stream::server::Acceptor::from(incoming);
     tokio::spawn(async move {
         let mut incoming = server.fuse();
         while let Some(Ok(mut stream)) = incoming.next().await {
@@ -17,7 +17,7 @@ async fn braided_unix() {
         }
     });
 
-    let mut conn = hyperdrive::stream::client::Stream::from(
+    let mut conn = hyperdriver::stream::client::Stream::from(
         tokio::net::UnixStream::connect(dir.path().join("braid.sock"))
             .await
             .unwrap(),

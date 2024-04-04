@@ -10,7 +10,7 @@ async fn braided_tcp() {
         .unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let server = hyperdrive::stream::server::Acceptor::from(incoming);
+    let server = hyperdriver::stream::server::Acceptor::from(incoming);
     tokio::spawn(async move {
         let mut incoming = server.fuse();
         while let Some(Ok(mut stream)) = incoming.next().await {
@@ -20,7 +20,7 @@ async fn braided_tcp() {
         }
     });
 
-    let mut conn = hyperdrive::stream::client::Stream::connect(addr)
+    let mut conn = hyperdriver::stream::client::Stream::connect(addr)
         .await
         .unwrap();
 

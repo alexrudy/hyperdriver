@@ -1,6 +1,6 @@
 use http::Uri;
 use http_body_util::BodyExt as _;
-use hyperdrive::client::{Client, HttpProtocol};
+use hyperdriver::client::{Client, HttpProtocol};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]

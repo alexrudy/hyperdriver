@@ -1,6 +1,6 @@
 use http::Uri;
 use http_body_util::BodyExt as _;
-use hyperdrive::client::Client;
+use hyperdriver::client::Client;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -592,7 +592,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyperdrive"
+name = "hyperdriver"
 version = "0.1.0"
 dependencies = [
  "axum",

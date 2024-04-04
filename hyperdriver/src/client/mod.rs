@@ -1,4 +1,4 @@
-//! HTTP client library for Rust, built on top of [hyper] and [braid].
+//! HTTP client library for Rust, built on top of [hyper].
 
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]

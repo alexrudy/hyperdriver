@@ -1,7 +1,7 @@
 use clap::arg;
 use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;
-use hyperdrive::client::Client;
+use hyperdriver::client::Client;
 use tokio::io::AsyncWriteExt as _;
 
 #[tokio::main]
@@ -29,9 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let body = if let Some(body) = args.get_one::<String>("body") {
-        hyperdrive::body::Body::from(body.to_owned())
+        hyperdriver::body::Body::from(body.to_owned())
     } else {
-        hyperdrive::body::Body::empty()
+        hyperdriver::body::Body::empty()
     };
 
     let mut req = http::Request::builder()
