@@ -1,22 +1,8 @@
 [workspace]
-members = [
-    "arnold",
-    "braid",
-    "bridge",
-    "hyperdrive",
-    "patron",
-    "pidfile",
-    "platter",
-    "roomservice",
-]
+members = ["hyperdriver"]
 resolver = "2"
 
 [workspace.dependencies]
-arnold = { path = "./arnold" }
-braid = { path = "./braid" }
-bridge = { path = "./bridge" }
-patron = { path = "./patron" }
-pidfile = { path = "./pidfile" }
 
 axum = "0.7"
 bytes = "1"
@@ -29,6 +15,7 @@ http-body = { version = "1" }
 http-body-util = { version = "0.1" }
 humantime-serde = "1.1.1"
 hyper = { version = "1", features = ["full"] }
+libc = { version = "*" }
 ouroboros = "0.18"
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pin-project = { version = "1" }
@@ -43,4 +30,5 @@ tokio = { version = "1" }
 tokio-rustls = "0.26"
 tower = { version = "0.4" }
 tracing = { version = "^0.1" }
+tracing-subscriber = { version = "^0.2" }
 tracing-test = { version = "*" }
