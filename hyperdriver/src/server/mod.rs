@@ -13,7 +13,8 @@ use std::{fmt, io};
 pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
-use crate::stream::server::{Accept, Stream};
+use crate::stream::info::Connection as HasConnectionInfo;
+use crate::stream::server::Accept;
 use futures_util::future::FutureExt as _;
 use tower::make::MakeService;
 use tracing::instrument::Instrumented;
@@ -28,7 +29,7 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 ///
 /// This is not meant to be the "accept" part of a server, but instead the connection
 /// management and serving part.
-pub trait Protocol<S> {
+pub trait Protocol<S, IO> {
     /// The error when a connection has a problem.
     type Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>;
 
@@ -38,20 +39,20 @@ pub trait Protocol<S> {
     /// Serve a connection with upgrades.
     ///
     /// Implementing this method i
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection;
+    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection;
 }
 
 /// A server that can accept connections, and run each connection
 /// using a [tower::Service].
-pub struct Server<S, P>
+pub struct Server<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
-    incoming: crate::stream::server::Acceptor,
+    incoming: A,
     make_service: S,
     protocol: P,
 }
-impl<S, P> fmt::Debug for Server<S, P>
+impl<S, P, A> fmt::Debug for Server<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
@@ -59,12 +60,12 @@ where
         f.debug_struct("Server").finish()
     }
 }
-impl<S, P> Server<S, P>
+impl<S, P, A> Server<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
     /// Set the protocol to use for serving connections.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2> {
+    pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2, A> {
         Server {
             incoming: self.incoming,
             make_service: self.make_service,
@@ -76,11 +77,7 @@ where
     ///
     /// The default protocol is [AutoBuilder], which can serve both HTTP/1 and HTTP/2 connections,
     /// and will automatically detect the protocol used by the client.
-    pub fn new_with_protocol(
-        incoming: crate::stream::server::Acceptor,
-        make_service: S,
-        protocol: P,
-    ) -> Self {
+    pub fn new_with_protocol(incoming: A, make_service: S, protocol: P) -> Self {
         Self {
             incoming,
             make_service,
@@ -89,7 +86,7 @@ where
     }
 
     /// Shutdown the server gracefully when the given future resolves.
-    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<S, P, F>
+    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<S, P, A, F>
     where
         S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = crate::body::Response>,
         S::Service: Clone + Send + 'static,
@@ -97,19 +94,22 @@ where
         S::MakeError: std::error::Error + Send + Sync + 'static,
         <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future:
             Send + 'static,
-        P: Protocol<S::Service>,
+        P: Protocol<S::Service, A::Conn>,
+        A: Accept + Unpin,
+        A::Conn: HasConnectionInfo + Send + 'static,
+        A::Error: std::error::Error + Send + Sync + 'static,
         F: Future<Output = ()> + Send + 'static,
     {
         GracefulShutdown::new(self, signal)
     }
 }
 
-impl<S> Server<S, AutoBuilder<TokioExecutor>>
+impl<S, A> Server<S, AutoBuilder<TokioExecutor>, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
     /// Create a new server with the given `MakeService` and `Acceptor`.
-    pub fn new(incoming: crate::stream::server::Acceptor, make_service: S) -> Self {
+    pub fn new(incoming: A, make_service: S) -> Self {
         Self {
             incoming,
             make_service,
@@ -118,17 +118,20 @@ where
     }
 }
 
-impl<S, P> IntoFuture for Server<S, P>
+impl<S, P, A> IntoFuture for Server<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = crate::body::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service>,
+    P: Protocol<S::Service, A::Conn>,
+    A: Accept + Unpin,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
 {
-    type IntoFuture = Serving<S, P>;
-    type Output = Result<(), ServerError<S::MakeError>>;
+    type IntoFuture = Serving<S, P, A>;
+    type Output = Result<(), ServerError<S::MakeError, A::Error>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Serving {
@@ -142,11 +145,11 @@ where
 #[derive(Debug)]
 #[pin_project::pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Serving<S, P>
+pub struct Serving<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
-    server: Server<S, P>,
+    server: Server<S, P, A>,
 
     #[pin]
     state: State<S::Service, S::Future>,
@@ -165,14 +168,17 @@ enum State<S, F> {
     },
 }
 
-impl<S, P> Serving<S, P>
+impl<S, P, A> Serving<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = crate::body::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service>,
+    P: Protocol<S::Service, A::Conn>,
+    A: Accept + Unpin,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
 {
     /// Polls the server to accept a single new connection.
     ///
@@ -181,7 +187,8 @@ where
     fn poll_once(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Instrumented<P::Connection>>, ServerError<S::MakeError>>> {
+    ) -> Poll<Result<Option<Instrumented<P::Connection>>, ServerError<S::MakeError, A::Error>>>
+    {
         let mut me = self.as_mut().project();
 
         match me.state.as_mut().project() {
@@ -198,12 +205,12 @@ where
             StateProj::Accepting { .. } => {
                 match ready!(Pin::new(&mut me.server.incoming).poll_accept(cx)) {
                     Ok(stream) => {
-                        trace!("accepted connection from {}", stream.remote_addr());
+                        trace!("accepted connection from {}", stream.info().remote_addr());
 
                         if let StateProjOwn::Accepting { service } =
                             me.state.project_replace(State::Preparing)
                         {
-                            let span = tracing::span!(tracing::Level::TRACE, "connection", remote = %stream.remote_addr());
+                            let span = tracing::span!(tracing::Level::TRACE, "connection", remote = %stream.info().remote_addr());
                             let conn = me
                                 .server
                                 .protocol
@@ -217,7 +224,7 @@ where
                     }
                     Err(e) => {
                         debug!("accept error: {}", e);
-                        return Poll::Ready(Err(e.into()));
+                        return Poll::Ready(Err(ServerError::accept(e)));
                     }
                 }
             }
@@ -226,16 +233,19 @@ where
     }
 }
 
-impl<S, P> Future for Serving<S, P>
+impl<S, P, A> Future for Serving<S, P, A>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = crate::body::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service>,
+    P: Protocol<S::Service, A::Conn>,
+    A: Accept + Unpin,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Output = Result<(), ServerError<S::MakeError>>;
+    type Output = Result<(), ServerError<S::MakeError, A::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
@@ -297,12 +307,12 @@ fn close() -> (CloseSender, CloseReciever) {
 
 /// A server that can accept connections, and run each connection, and can also process graceful shutdown signals.
 #[pin_project::pin_project]
-pub struct GracefulShutdown<S, P, F>
+pub struct GracefulShutdown<S, P, A, F>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
     #[pin]
-    server: Serving<S, P>,
+    server: Serving<S, P, A>,
 
     #[pin]
     signal: F,
@@ -315,17 +325,20 @@ where
     connection: CloseSender,
 }
 
-impl<S, P, F> GracefulShutdown<S, P, F>
+impl<S, P, A, F> GracefulShutdown<S, P, A, F>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = crate::body::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service>,
+    P: Protocol<S::Service, A::Conn>,
+    A: Accept + Unpin,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
     F: Future<Output = ()>,
 {
-    fn new(server: Server<S, P>, signal: F) -> Self {
+    fn new(server: Server<S, P, A>, signal: F) -> Self {
         let (tx, rx) = close();
         let (tx2, rx2) = close();
         Self {
@@ -339,7 +352,7 @@ where
     }
 }
 
-impl<S, P, F> fmt::Debug for GracefulShutdown<S, P, F>
+impl<S, P, A, F> fmt::Debug for GracefulShutdown<S, P, A, F>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>>,
 {
@@ -348,17 +361,20 @@ where
     }
 }
 
-impl<S, P, F> Future for GracefulShutdown<S, P, F>
+impl<S, P, A, F> Future for GracefulShutdown<S, P, A, F>
 where
     S: MakeService<(), hyper::Request<hyper::body::Incoming>, Response = crate::body::Response>,
     S::Service: Clone + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service>,
+    P: Protocol<S::Service, A::Conn>,
+    A: Accept + Unpin,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
     F: Future<Output = ()>,
 {
-    type Output = Result<(), ServerError<S::MakeError>>;
+    type Output = Result<(), ServerError<S::MakeError, A::Error>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
@@ -421,7 +437,11 @@ where
 /// errors are discarded and not returned. To handle an individual connection's
 /// error, apply a middleware which can process that error in the Service.
 #[derive(Debug, thiserror::Error)]
-pub enum ServerError<E> {
+pub enum ServerError<E, A> {
+    /// Accept Error
+    #[error("accept error: {0}")]
+    Accept(#[source] A),
+
     /// IO Errors
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -431,7 +451,12 @@ pub enum ServerError<E> {
     MakeService(#[source] E),
 }
 
-impl<E: std::error::Error> ServerError<E> {
+impl<E: std::error::Error, A: std::error::Error> ServerError<E, A> {
+    fn accept(error: A) -> Self {
+        debug!("accept error: {}", error);
+        Self::Accept(error)
+    }
+
     fn make(error: E) -> Self {
         debug!("make service error: {}", error);
         Self::MakeService(error)

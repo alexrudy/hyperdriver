@@ -18,12 +18,22 @@ use crate::stream::info::Connection as HasConnectionInfo;
 use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
 use crate::stream::{core::Braid, duplex::DuplexIncoming};
 
-/// Accept incoming connections for Braid streams.
+/// Accept incoming connections for streams which might
+/// be wrapped in TLS. Use [`Acceptor::tls`] to enable TLS.
 #[derive(Debug)]
 #[pin_project]
 pub struct Acceptor<A = AcceptorCore> {
     #[pin]
     inner: AcceptorInner<A>,
+}
+
+impl<A> Acceptor<A> {
+    /// Create a new acceptor from the given acceptor.
+    pub fn new(accept: A) -> Self {
+        Acceptor {
+            inner: AcceptorInner::NoTls(accept),
+        }
+    }
 }
 
 #[derive(Debug)]

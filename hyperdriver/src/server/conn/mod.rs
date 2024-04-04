@@ -6,9 +6,10 @@ use std::pin::Pin;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
-use crate::stream::server::Stream;
 pub use hyper::server::conn::http1;
 pub use hyper::server::conn::http2;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 
 use crate::server::Protocol;
 
@@ -22,8 +23,8 @@ pub trait Connection<E>: Future<Output = Result<(), E>> {
     fn graceful_shutdown(self: Pin<&mut Self>);
 }
 
-impl<S> Connection<hyper::Error>
-    for http1::UpgradeableConnection<TokioIo<Stream>, TowerHyperService<S>>
+impl<S, IO> Connection<hyper::Error>
+    for http1::UpgradeableConnection<TokioIo<IO>, TowerHyperService<S>>
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone
@@ -31,13 +32,14 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
         self.graceful_shutdown()
     }
 }
 
-impl<S> Protocol<S> for http1::Builder
+impl<S, IO> Protocol<S, IO> for http1::Builder
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone
@@ -45,18 +47,22 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Connection = http1::UpgradeableConnection<TokioIo<Stream>, TowerHyperService<S>>;
+    type Connection = http1::UpgradeableConnection<TokioIo<IO>, TowerHyperService<S>>;
     type Error = hyper::Error;
 
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
+    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection
+    where
+        IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    {
         let conn = self.serve_connection(TokioIo::new(stream), TowerHyperService::new(service));
         conn.with_upgrades()
     }
 }
 
-impl<S> Connection<hyper::Error>
-    for http2::Connection<TokioIo<Stream>, TowerHyperService<S>, TokioExecutor>
+impl<S, IO> Connection<hyper::Error>
+    for http2::Connection<TokioIo<IO>, TowerHyperService<S>, TokioExecutor>
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone
@@ -64,13 +70,14 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
         self.graceful_shutdown()
     }
 }
 
-impl<S> Protocol<S> for http2::Builder<TokioExecutor>
+impl<S, IO> Protocol<S, IO> for http2::Builder<TokioExecutor>
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone
@@ -78,11 +85,12 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Connection = http2::Connection<TokioIo<Stream>, TowerHyperService<S>, TokioExecutor>;
+    type Connection = http2::Connection<TokioIo<IO>, TowerHyperService<S>, TokioExecutor>;
     type Error = hyper::Error;
 
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
+    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {
         self.serve_connection(TokioIo::new(stream), TowerHyperService::new(service))
     }
 }

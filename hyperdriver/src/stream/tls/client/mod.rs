@@ -40,8 +40,7 @@ impl<IO> fmt::Debug for State<IO> {
 ///
 /// This stream implements a delayed handshake by default, where
 /// the handshake won't be completed until the first read/write
-/// request to the underlying stream. The handshake can be forced
-/// to completion using the [`finish_handshake`](TlsStream::finish_handshake) method.
+/// request to the underlying stream.
 #[derive(Debug)]
 pub struct ClientTlsStream<IO> {
     state: State<IO>,
