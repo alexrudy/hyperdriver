@@ -21,18 +21,18 @@ use super::tls::TlsHandshakeStream;
 /// generic over the TLS stream type (which is different for client and server).
 #[derive(Debug)]
 #[pin_project(project = BraidCoreProjection)]
-pub enum BraidCore {
+pub enum Braid {
     Tcp(#[pin] TcpStream),
     Duplex(#[pin] DuplexStream),
     Unix(#[pin] UnixStream),
 }
 
-impl Connection for BraidCore {
+impl Connection for Braid {
     fn info(&self) -> ConnectionInfo {
         match self {
-            BraidCore::Tcp(stream) => stream.info(),
-            BraidCore::Duplex(stream) => <DuplexStream as Connection>::info(stream),
-            BraidCore::Unix(stream) => stream.info(),
+            Braid::Tcp(stream) => stream.info(),
+            Braid::Duplex(stream) => <DuplexStream as Connection>::info(stream),
+            Braid::Unix(stream) => stream.info(),
         }
     }
 }
@@ -48,7 +48,7 @@ macro_rules! dispatch_core {
     };
 }
 
-impl AsyncRead for BraidCore {
+impl AsyncRead for Braid {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -58,7 +58,7 @@ impl AsyncRead for BraidCore {
     }
 }
 
-impl AsyncWrite for BraidCore {
+impl AsyncWrite for Braid {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -82,19 +82,19 @@ impl AsyncWrite for BraidCore {
     }
 }
 
-impl From<TcpStream> for BraidCore {
+impl From<TcpStream> for Braid {
     fn from(stream: TcpStream) -> Self {
         Self::Tcp(stream)
     }
 }
 
-impl From<DuplexStream> for BraidCore {
+impl From<DuplexStream> for Braid {
     fn from(stream: DuplexStream) -> Self {
         Self::Duplex(stream)
     }
 }
 
-impl From<UnixStream> for BraidCore {
+impl From<UnixStream> for Braid {
     fn from(stream: UnixStream) -> Self {
         Self::Unix(stream)
     }
@@ -102,12 +102,12 @@ impl From<UnixStream> for BraidCore {
 
 #[derive(Debug)]
 #[pin_project(project=BraidProjection)]
-pub(crate) enum Braid<Tls, NoTls> {
+pub enum TlsBraid<Tls, NoTls> {
     NoTls(#[pin] NoTls),
     Tls(#[pin] Tls),
 }
 
-impl<Tls, NoTls> TlsHandshakeStream for Braid<Tls, NoTls>
+impl<Tls, NoTls> TlsHandshakeStream for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeStream + Unpin,
     NoTls: AsyncRead + AsyncWrite + Unpin,
@@ -117,8 +117,8 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         match self {
-            Braid::NoTls(_) => Poll::Ready(Ok(())),
-            Braid::Tls(ref mut stream) => stream.poll_handshake(cx),
+            TlsBraid::NoTls(_) => Poll::Ready(Ok(())),
+            TlsBraid::Tls(ref mut stream) => stream.poll_handshake(cx),
         }
     }
 }
@@ -133,7 +133,7 @@ macro_rules! dispatch {
     };
 }
 
-impl<Tls, NoTls> AsyncRead for Braid<Tls, NoTls>
+impl<Tls, NoTls> AsyncRead for TlsBraid<Tls, NoTls>
 where
     Tls: AsyncRead,
     NoTls: AsyncRead,
@@ -147,7 +147,7 @@ where
     }
 }
 
-impl<Tls, NoTls> AsyncWrite for Braid<Tls, NoTls>
+impl<Tls, NoTls> AsyncWrite for TlsBraid<Tls, NoTls>
 where
     Tls: AsyncWrite,
     NoTls: AsyncWrite,
@@ -175,7 +175,7 @@ where
     }
 }
 
-impl<Tls, NoTls> From<NoTls> for Braid<Tls, NoTls> {
+impl<Tls, NoTls> From<NoTls> for TlsBraid<Tls, NoTls> {
     fn from(stream: NoTls) -> Self {
         Self::NoTls(stream)
     }

@@ -10,7 +10,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::stream::core::{Braid, BraidCore};
+use crate::stream::core::{Braid, TlsBraid};
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::{Connection as HasConnectionInfo, ConnectionInfo, SocketAddr};
 use crate::stream::tls::info::TlsConnectionInfoReciever;
@@ -61,7 +61,7 @@ pub struct Stream {
     info: ConnectionInfoState,
 
     #[pin]
-    inner: Braid<TlsStream<BraidCore>, BraidCore>,
+    inner: TlsBraid<TlsStream<Braid>, Braid>,
 }
 
 impl Stream {
@@ -90,8 +90,8 @@ impl Stream {
 impl TlsHandshakeStream for Stream {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match &mut self.inner {
-            Braid::Tls(stream) => stream.poll_handshake(cx),
-            Braid::NoTls(_) => Poll::Ready(Ok(())),
+            TlsBraid::Tls(stream) => stream.poll_handshake(cx),
+            TlsBraid::NoTls(_) => Poll::Ready(Ok(())),
         }
     }
 }
@@ -107,11 +107,11 @@ impl HasConnectionInfo for Stream {
     }
 }
 
-impl From<TlsStream<BraidCore>> for Stream {
-    fn from(stream: TlsStream<BraidCore>) -> Self {
+impl From<TlsStream<Braid>> for Stream {
+    fn from(stream: TlsStream<Braid>) -> Self {
         Stream {
             info: ConnectionInfoState::Handshake(stream.rx.clone()),
-            inner: crate::stream::core::Braid::Tls(stream),
+            inner: crate::stream::core::TlsBraid::Tls(stream),
         }
     }
 }
@@ -120,7 +120,7 @@ impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
             info: ConnectionInfoState::Connected(<TcpStream as HasConnectionInfo>::info(&stream)),
-            inner: BraidCore::from(stream).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }
@@ -131,7 +131,7 @@ impl From<DuplexStream> for Stream {
             info: ConnectionInfoState::Connected(<DuplexStream as HasConnectionInfo>::info(
                 &stream,
             )),
-            inner: BraidCore::from(stream).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }
@@ -140,13 +140,13 @@ impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
             info: ConnectionInfoState::Connected(stream.info()),
-            inner: BraidCore::from(stream).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }
 
-impl From<BraidCore> for Stream {
-    fn from(stream: BraidCore) -> Self {
+impl From<Braid> for Stream {
+    fn from(stream: Braid) -> Self {
         Stream {
             info: ConnectionInfoState::Connected(stream.info()),
             inner: stream.into(),

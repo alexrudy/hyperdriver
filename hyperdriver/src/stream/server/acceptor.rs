@@ -15,7 +15,7 @@ use tokio::net::{TcpListener, UnixListener};
 use super::Accept;
 use super::Stream;
 use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
-use crate::stream::{core::BraidCore, duplex::DuplexIncoming};
+use crate::stream::{core::Braid, duplex::DuplexIncoming};
 
 /// Accept incoming connections for Braid streams.
 #[derive(Debug)]
@@ -105,7 +105,7 @@ where
 }
 
 impl Accept for AcceptorCore {
-    type Conn = BraidCore;
+    type Conn = Braid;
     type Error = io::Error;
 
     fn poll_accept(

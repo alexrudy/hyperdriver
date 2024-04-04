@@ -12,7 +12,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::stream::core::{Braid, BraidCore};
+use crate::stream::core::{Braid, TlsBraid};
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::Connection;
 use crate::stream::tls::client::TlsStream;
@@ -24,9 +24,9 @@ use crate::stream::tls::TlsHandshakeStream as _;
 /// This is the client side of the Braid stream.
 #[derive(Debug)]
 #[pin_project]
-pub struct Stream<IO = BraidCore> {
+pub struct Stream<IO = Braid> {
     #[pin]
-    inner: Braid<TlsStream<IO>, IO>,
+    inner: TlsBraid<TlsStream<IO>, IO>,
 }
 
 impl Stream {
@@ -46,7 +46,7 @@ where
     /// Create a new client stream from an existing connection.
     pub fn new(inner: IO) -> Self {
         Stream {
-            inner: Braid::NoTls(inner),
+            inner: TlsBraid::NoTls(inner),
         }
     }
 
@@ -61,12 +61,12 @@ where
     /// * `config` - The TLS client configuration to use.
     pub fn tls(self, domain: &str, config: Arc<rustls::ClientConfig>) -> Self {
         let core = match self.inner {
-            crate::stream::core::Braid::NoTls(core) => core,
-            crate::stream::core::Braid::Tls(_) => panic!("Stream::tls called twice"),
+            crate::stream::core::TlsBraid::NoTls(core) => core,
+            crate::stream::core::TlsBraid::Tls(_) => panic!("Stream::tls called twice"),
         };
 
         Stream {
-            inner: crate::stream::core::Braid::Tls(TlsStream::new(core, domain, config)),
+            inner: crate::stream::core::TlsBraid::Tls(TlsStream::new(core, domain, config)),
         }
     }
 
@@ -86,8 +86,8 @@ where
     /// is complete. This method will not return until the handshake is complete.
     pub async fn info(&self) -> io::Result<crate::stream::info::ConnectionInfo> {
         match self.inner {
-            crate::stream::core::Braid::Tls(ref stream) => stream.info().await,
-            crate::stream::core::Braid::NoTls(ref stream) => Ok(stream.info()),
+            crate::stream::core::TlsBraid::Tls(ref stream) => stream.info().await,
+            crate::stream::core::TlsBraid::NoTls(ref stream) => Ok(stream.info()),
         }
     }
 }
@@ -95,7 +95,7 @@ where
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
-            inner: BraidCore::from(stream).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }
@@ -103,7 +103,7 @@ impl From<TcpStream> for Stream {
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
-            inner: BraidCore::from(stream).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }
@@ -111,7 +111,7 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            inner: BraidCore::from(stream).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }
