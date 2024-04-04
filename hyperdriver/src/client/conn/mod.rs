@@ -24,15 +24,15 @@ pub(crate) use self::tcp::TcpConnectionConfig;
 pub(crate) use self::tcp::TcpConnector;
 
 /// A transport provides data transmission between two endpoints.
-pub trait Transport: Clone + Send
-where
-    Self: Service<Uri, Response = TransportStream>,
-{
+pub trait Transport: Clone + Send {
+    /// The type of IO stream used by this transport
+    type IO: AsyncRead + AsyncWrite + Send + 'static;
+
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The future type returned by this service
-    type Future: Future<Output = Result<TransportStream, <Self as Transport>::Error>>
+    type Future: Future<Output = Result<TransportStream<Self::IO>, <Self as Transport>::Error>>
         + Send
         + 'static;
 
@@ -46,13 +46,15 @@ where
     ) -> std::task::Poll<Result<(), <Self as Transport>::Error>>;
 }
 
-impl<T> Transport for T
+impl<T, IO> Transport for T
 where
-    T: Service<Uri, Response = TransportStream>,
+    T: Service<Uri, Response = TransportStream<IO>>,
     T: Clone + Send + Sync + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
+    IO: AsyncRead + AsyncWrite + Send + 'static,
 {
+    type IO = IO;
     type Error = T::Error;
     type Future = T::Future;
 
@@ -73,13 +75,27 @@ where
 /// This transport uses braid to power the underlying
 #[derive(Debug)]
 #[pin_project]
-pub struct TransportStream {
+pub struct TransportStream<IO> {
     #[pin]
-    stream: Stream,
+    stream: IO,
     info: ConnectionInfo,
 }
 
-impl TransportStream {
+impl<IO> TransportStream<IO> {
+    pub(crate) fn info(&self) -> &ConnectionInfo {
+        &self.info
+    }
+
+    pub(crate) fn host(&self) -> Option<&str> {
+        self.info.authority.as_ref().map(|a| a.as_str())
+    }
+
+    pub(crate) fn into_inner(self) -> IO {
+        self.stream
+    }
+}
+
+impl TransportStream<Stream> {
     /// Create a new transport from a `crate::stream::client::Stream`.
     pub async fn new(mut stream: Stream) -> io::Result<Self> {
         stream.finish_handshake().await?;
@@ -88,17 +104,12 @@ impl TransportStream {
 
         Ok(Self { stream, info })
     }
-
-    pub(crate) fn info(&self) -> &ConnectionInfo {
-        &self.info
-    }
-
-    pub(crate) fn host(&self) -> Option<&str> {
-        self.info.authority.as_ref().map(|a| a.as_str())
-    }
 }
 
-impl PoolableTransport for TransportStream {
+impl<IO> PoolableTransport for TransportStream<IO>
+where
+    IO: Unpin + Send + 'static,
+{
     fn can_share(&self) -> bool {
         self.info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
             == Some(&crate::stream::info::Protocol::Http(
@@ -107,13 +118,10 @@ impl PoolableTransport for TransportStream {
     }
 }
 
-impl From<TransportStream> for Stream {
-    fn from(transport: TransportStream) -> Self {
-        transport.stream
-    }
-}
-
-impl AsyncRead for TransportStream {
+impl<IO> AsyncRead for TransportStream<IO>
+where
+    IO: AsyncRead,
+{
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -123,7 +131,10 @@ impl AsyncRead for TransportStream {
     }
 }
 
-impl AsyncWrite for TransportStream {
+impl<IO> AsyncWrite for TransportStream<IO>
+where
+    IO: AsyncWrite,
+{
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -160,9 +171,9 @@ impl AsyncWrite for TransportStream {
 }
 
 /// Protocols (like HTTP) define how data is sent and received over a connection.
-pub trait Protocol
+pub trait Protocol<IO>
 where
-    Self: Service<TransportStream, Response = Self::Connection>,
+    Self: Service<TransportStream<IO>, Response = Self::Connection>,
 {
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
@@ -171,23 +182,23 @@ where
     type Connection: Connection;
 
     /// The type of the handshake future
-    type Future: Future<Output = Result<Self::Connection, <Self as Protocol>::Error>>
+    type Future: Future<Output = Result<Self::Connection, <Self as Protocol<IO>>::Error>>
         + Send
         + 'static;
 
     /// Connect to a remote server and return a connection.
-    fn connect(&mut self, transport: TransportStream) -> <Self as Protocol>::Future;
+    fn connect(&mut self, transport: TransportStream<IO>) -> <Self as Protocol<IO>>::Future;
 
     /// Poll the protocol to see if it is ready to accept a new connection.
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Protocol>::Error>>;
+    ) -> std::task::Poll<Result<(), <Self as Protocol<IO>>::Error>>;
 }
 
-impl<T, C> Protocol for T
+impl<T, C, IO> Protocol<IO> for T
 where
-    T: Service<TransportStream, Response = C> + Send + 'static,
+    T: Service<TransportStream<IO>, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
     C: Connection,
@@ -196,14 +207,14 @@ where
     type Connection = C;
     type Future = T::Future;
 
-    fn connect(&mut self, transport: TransportStream) -> <Self as Protocol>::Future {
+    fn connect(&mut self, transport: TransportStream<IO>) -> <Self as Protocol<IO>>::Future {
         self.call(transport)
     }
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Protocol>::Error>> {
+    ) -> std::task::Poll<Result<(), <Self as Protocol<IO>>::Error>> {
         Service::poll_ready(self, cx)
     }
 }

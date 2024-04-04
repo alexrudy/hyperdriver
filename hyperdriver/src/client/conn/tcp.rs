@@ -51,7 +51,7 @@ where
         + 'static,
     R::Future: Send,
 {
-    type Response = TransportStream;
+    type Response = TransportStream<Stream>;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 

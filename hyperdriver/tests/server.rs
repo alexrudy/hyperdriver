@@ -8,6 +8,7 @@ use hyper::body::Incoming;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
+use hyperdriver::stream::client::Stream;
 use tower::MakeService;
 
 use hyperdriver::server::{Protocol, Server};
@@ -24,7 +25,7 @@ async fn echo(
     )))
 }
 
-async fn connection<P: hyperdriver::client::Protocol>(
+async fn connection<P: hyperdriver::client::Protocol<Stream>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
