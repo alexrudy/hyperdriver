@@ -4,8 +4,6 @@
 #![warn(missing_debug_implementations)]
 #![deny(unsafe_code)]
 
-use std::fmt;
-
 use thiserror::Error;
 use tracing::warn;
 
@@ -13,7 +11,6 @@ mod clients;
 
 /// Connection utilities.
 pub mod conn;
-mod lazy;
 /// Connection pooling
 pub mod pool;
 
@@ -75,12 +72,4 @@ pub fn default_tls_config() -> rustls::ClientConfig {
     rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth()
-}
-
-pub(crate) struct DebugLiteral<T: fmt::Display>(T);
-
-impl<T: fmt::Display> fmt::Debug for DebugLiteral<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }

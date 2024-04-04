@@ -231,7 +231,7 @@ mod future {
     use futures_util::FutureExt;
 
     use crate::client::conn::TransportStream;
-    use crate::client::DebugLiteral;
+    use crate::DebugLiteral;
 
     use super::ConnectionError;
     use super::HttpConnection;

@@ -114,7 +114,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E> Connector<C, T, E> {
         F: FnOnce() -> R + Send + 'static,
     {
         Self {
-            transport: Box::pin(crate::client::lazy::lazy(transport)),
+            transport: Box::pin(crate::lazy::lazy(transport)),
             handshake: Box::new(handshake),
         }
     }

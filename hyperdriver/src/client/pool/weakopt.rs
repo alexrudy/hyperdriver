@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use std::sync::Weak;
 
-use crate::client::DebugLiteral;
+use crate::DebugLiteral;
 
 pub(crate) struct WeakOpt<T>(Option<Weak<T>>);
 

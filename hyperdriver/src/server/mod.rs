@@ -20,7 +20,6 @@ use tracing::instrument::Instrumented;
 use tracing::{debug, trace, Instrument};
 
 pub mod conn;
-mod rewind;
 // use self::connecting::Connecting;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

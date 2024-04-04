@@ -13,7 +13,7 @@ use hyper::rt::{ReadBuf, Write};
 use hyper::{body, rt::Read};
 use pin_project::pin_project;
 
-use crate::server::rewind::Rewind;
+use crate::rewind::Rewind;
 use crate::server::Protocol;
 
 use super::connecting::Connecting;
