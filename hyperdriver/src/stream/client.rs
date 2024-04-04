@@ -3,6 +3,7 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+use std::future::poll_fn;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use crate::stream::core::{Braid, BraidCore};
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::Connection as _;
 use crate::stream::tls::client::TlsStream;
+use crate::stream::tls::TlsHandshakeStream as _;
 
 /// A stream which can handle multiple different underlying transports, and TLS
 /// through a unified type.
@@ -63,10 +65,7 @@ impl Stream {
     /// handshake to complete. If this method is not called, the TLS handshake
     /// will be completed the first time the connection is used.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        match self.inner {
-            crate::stream::core::Braid::Tls(ref mut stream) => stream.finish_handshake().await,
-            _ => Ok(()),
-        }
+        poll_fn(|cx| self.inner.poll_handshake(cx)).await
     }
 
     /// Get information about the connection.

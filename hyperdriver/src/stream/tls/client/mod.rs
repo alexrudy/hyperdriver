@@ -14,6 +14,7 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 use crate::stream::info::{Connection, ConnectionInfo};
 
 use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use super::TlsHandshakeStream;
 
 #[cfg(feature = "connector")]
 mod connector;
@@ -52,6 +53,15 @@ impl<IO> TlsStream<IO> {
     /// Get the connection info for this stream.
     pub async fn info(&self) -> io::Result<ConnectionInfo> {
         self.rx.recv().await
+    }
+}
+
+impl<IO> TlsHandshakeStream for TlsStream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.handshake(cx, |_, _| Poll::Ready(Ok(())))
     }
 }
 

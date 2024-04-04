@@ -11,6 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
 use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use super::TlsHandshakeStream;
 use crate::stream::info::{Connection, ConnectionInfo};
 
 pub mod acceptor;
@@ -44,19 +45,19 @@ pub struct TlsStream<IO> {
     pub(crate) rx: TlsConnectionInfoReciever,
 }
 
+impl<IO> TlsHandshakeStream for TlsStream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.handshake(cx, |_, _| Poll::Ready(Ok(())))
+    }
+}
+
 impl<IO> TlsStream<IO>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
 {
-    /// Wait for the TLS handshake to complete.
-    ///
-    /// This will drive the underlying connection to complete the handshake. If this method
-    /// is not called, the handshake will complete the first time the underlying IO is
-    /// read or written to.
-    pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
-    }
-
     fn handshake<F, R>(&mut self, cx: &mut Context, action: F) -> Poll<io::Result<R>>
     where
         F: FnOnce(&mut tokio_rustls::server::TlsStream<IO>, &mut Context) -> Poll<io::Result<R>>,

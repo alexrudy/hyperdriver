@@ -1,11 +1,16 @@
 //! Core stream type for braid providing [AsyncRead] and [AsyncWrite].
 
+use std::pin::pin;
+use std::task::Poll;
+
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::{Connection, ConnectionInfo};
+
+use super::tls::TlsHandshakeStream;
 
 /// Dispatching wrapper for potential stream connection types
 ///
@@ -100,6 +105,21 @@ impl From<UnixStream> for BraidCore {
 pub(crate) enum Braid<Tls> {
     NoTls(#[pin] BraidCore),
     Tls(#[pin] Tls),
+}
+
+impl<Tls> TlsHandshakeStream for Braid<Tls>
+where
+    Tls: TlsHandshakeStream + Unpin,
+{
+    fn poll_handshake(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        match self {
+            Braid::NoTls(_) => Poll::Ready(Ok(())),
+            Braid::Tls(ref mut stream) => stream.poll_handshake(cx),
+        }
+    }
 }
 
 macro_rules! dispatch {

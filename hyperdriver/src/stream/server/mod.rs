@@ -4,6 +4,7 @@
 //! TCP and Duplex streams are the same whether they are server or client.
 
 use std::io;
+use std::task::{Context, Poll};
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -20,6 +21,8 @@ mod connector;
 
 pub use acceptor::Acceptor;
 pub use connector::{Connection, StartConnectionInfoLayer, StartConnectionInfoService};
+
+use super::tls::TlsHandshakeStream;
 
 #[derive(Debug, Clone)]
 enum ConnectionInfoState {
@@ -47,8 +50,8 @@ pub trait Accept {
     /// Poll for a new connection
     fn poll_accept(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Self::Conn, Self::Error>>;
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Self::Conn, Self::Error>>;
 }
 
 /// Dispatching wrapper for potential stream connection types for clients
@@ -82,14 +85,13 @@ impl Stream {
             ConnectionInfoState::Connected(info) => info.remote_addr(),
         }
     }
+}
 
-    /// Finish the TLS handshake now, driving the connection to completion.
-    ///
-    /// This is a no-op for non-TLS connections.
-    pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        match self.inner {
-            crate::stream::core::Braid::Tls(ref mut stream) => stream.finish_handshake().await,
-            _ => Ok(()),
+impl TlsHandshakeStream for Stream {
+    fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        match &mut self.inner {
+            Braid::Tls(stream) => stream.poll_handshake(cx),
+            Braid::NoTls(_) => Poll::Ready(Ok(())),
         }
     }
 }
@@ -155,9 +157,9 @@ impl From<BraidCore> for Stream {
 impl AsyncRead for Stream {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
+    ) -> Poll<std::io::Result<()>> {
         self.project().inner.poll_read(cx, buf)
     }
 }
@@ -165,23 +167,23 @@ impl AsyncRead for Stream {
 impl AsyncWrite for Stream {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+    ) -> Poll<Result<usize, std::io::Error>> {
         self.project().inner.poll_write(cx, buf)
     }
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         self.project().inner.poll_flush(cx)
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         self.project().inner.poll_shutdown(cx)
     }
 }
