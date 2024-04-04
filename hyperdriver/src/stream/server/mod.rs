@@ -57,14 +57,27 @@ pub trait Accept {
 /// Dispatching wrapper for potential stream connection types for clients
 #[derive(Debug)]
 #[pin_project]
-pub struct Stream {
+pub struct Stream<IO = Braid> {
     info: ConnectionInfoState,
 
     #[pin]
-    inner: TlsBraid<TlsStream<Braid>, Braid>,
+    inner: TlsBraid<TlsStream<IO>, IO>,
 }
 
-impl Stream {
+impl<IO> Stream<IO>
+where
+    IO: HasConnectionInfo,
+{
+    /// Create a new stream from an inner stream, without TLS
+    pub fn new(inner: IO) -> Self {
+        Stream {
+            info: ConnectionInfoState::Connected(inner.info()),
+            inner: TlsBraid::NoTls(inner),
+        }
+    }
+}
+
+impl<IO> Stream<IO> {
     /// Get the connection info for this stream
     ///
     /// This will block until the handshake completes for
@@ -87,7 +100,10 @@ impl Stream {
     }
 }
 
-impl TlsHandshakeStream for Stream {
+impl<IO> TlsHandshakeStream for Stream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match &mut self.inner {
             TlsBraid::Tls(stream) => stream.poll_handshake(cx),
@@ -96,7 +112,7 @@ impl TlsHandshakeStream for Stream {
     }
 }
 
-impl HasConnectionInfo for Stream {
+impl<IO> HasConnectionInfo for Stream<IO> {
     fn info(&self) -> ConnectionInfo {
         match &self.info {
             ConnectionInfoState::Handshake(_) => {
@@ -107,8 +123,8 @@ impl HasConnectionInfo for Stream {
     }
 }
 
-impl From<TlsStream<Braid>> for Stream {
-    fn from(stream: TlsStream<Braid>) -> Self {
+impl<IO> From<TlsStream<IO>> for Stream<IO> {
+    fn from(stream: TlsStream<IO>) -> Self {
         Stream {
             info: ConnectionInfoState::Handshake(stream.rx.clone()),
             inner: crate::stream::core::TlsBraid::Tls(stream),
@@ -154,7 +170,10 @@ impl From<Braid> for Stream {
     }
 }
 
-impl AsyncRead for Stream {
+impl<IO> AsyncRead for Stream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -164,7 +183,10 @@ impl AsyncRead for Stream {
     }
 }
 
-impl AsyncWrite for Stream {
+impl<IO> AsyncWrite for Stream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Unpin,
+{
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
