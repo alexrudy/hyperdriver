@@ -2,7 +2,7 @@ use core::fmt;
 use std::{io, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
 
-use crate::stream::info::{ConnectionInfo, Protocol, SocketAddr};
+use crate::stream::info::{ConnectionInfo, Protocol};
 
 /// Information about a TLS connection.
 #[derive(Debug, Clone)]
@@ -19,9 +19,12 @@ pub struct TlsConnectionInfo {
 }
 
 impl TlsConnectionInfo {
-    pub(crate) fn channel(
-        info: ConnectionInfo,
-    ) -> (TlsConnectionInfoSender, TlsConnectionInfoReciever) {
+    pub(crate) fn channel<Addr: Clone>(
+        info: ConnectionInfo<Addr>,
+    ) -> (
+        TlsConnectionInfoSender<Addr>,
+        TlsConnectionInfoReciever<Addr>,
+    ) {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         (
@@ -93,25 +96,27 @@ impl RxState {
 
 /// A receiver for TLS connection info.
 #[derive(Debug, Clone)]
-pub(crate) struct TlsConnectionInfoReciever {
+pub(crate) struct TlsConnectionInfoReciever<Addr> {
     state: Arc<RwLock<RxState>>,
-    info: ConnectionInfo,
+    info: ConnectionInfo<Addr>,
 }
 
-impl TlsConnectionInfoReciever {
+impl<Addr> TlsConnectionInfoReciever<Addr> {
     /// Create a new TLS connection info receiver.
     pub(crate) fn new(
         inner: tokio::sync::oneshot::Receiver<TlsConnectionInfo>,
-        info: ConnectionInfo,
+        info: ConnectionInfo<Addr>,
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(RxState::Handshake(inner))),
             info,
         }
     }
+}
 
+impl<Addr: Clone> TlsConnectionInfoReciever<Addr> {
     #[allow(dead_code)]
-    pub(crate) fn info(&self) -> ConnectionInfo {
+    pub(crate) fn info(&self) -> ConnectionInfo<Addr> {
         if let Ok(state) = self.state.try_read() {
             if let RxState::Received(info) = state.deref() {
                 return self.info.clone().tls(info.clone());
@@ -120,22 +125,26 @@ impl TlsConnectionInfoReciever {
 
         self.info.clone()
     }
+}
 
+impl<Addr> TlsConnectionInfoReciever<Addr> {
     /// Get the local address for this connection.
-    pub fn local_addr(&self) -> &SocketAddr {
+    pub fn local_addr(&self) -> &Addr {
         self.info.local_addr()
     }
 
     /// Get the remote address for this connection.
-    pub fn remote_addr(&self) -> &SocketAddr {
+    pub fn remote_addr(&self) -> &Addr {
         self.info.remote_addr()
     }
+}
 
+impl<Addr: Clone> TlsConnectionInfoReciever<Addr> {
     /// Receive the TLS connection info.
     ///
     /// This will wait until the handshake completes,
     /// and return the underlying connection info.
-    pub(crate) async fn recv(&self) -> io::Result<ConnectionInfo> {
+    pub(crate) async fn recv(&self) -> io::Result<ConnectionInfo<Addr>> {
         {
             let state = self.state.read().await;
 
@@ -153,20 +162,20 @@ impl TlsConnectionInfoReciever {
 
 enum TxState {
     Handshake(tokio::sync::oneshot::Sender<TlsConnectionInfo>),
-    Sent(TlsConnectionInfo),
+    Sent,
 }
 
 /// A sender for TLS connection info.
-pub(crate) struct TlsConnectionInfoSender {
+pub(crate) struct TlsConnectionInfoSender<Addr> {
     state: TxState,
-    info: ConnectionInfo,
+    info: ConnectionInfo<Addr>,
 }
 
 #[allow(dead_code)]
-impl TlsConnectionInfoSender {
+impl<Addr> TlsConnectionInfoSender<Addr> {
     pub(crate) fn new(
         tx: tokio::sync::oneshot::Sender<TlsConnectionInfo>,
-        info: ConnectionInfo,
+        info: ConnectionInfo<Addr>,
     ) -> Self {
         Self {
             state: TxState::Handshake(tx),
@@ -175,32 +184,24 @@ impl TlsConnectionInfoSender {
     }
 
     pub(crate) fn send(&mut self, info: TlsConnectionInfo) {
-        let state = std::mem::replace(&mut self.state, TxState::Sent(info.clone()));
+        let state = std::mem::replace(&mut self.state, TxState::Sent);
         if let TxState::Handshake(tx) = state {
             let _ = tx.send(info);
         }
     }
 
     /// Get the local address for this connection.
-    pub(crate) fn local_addr(&self) -> &SocketAddr {
+    pub(crate) fn local_addr(&self) -> &Addr {
         self.info.local_addr()
     }
 
     /// Get the remote address for this connection.
-    pub(crate) fn remote_addr(&self) -> &SocketAddr {
+    pub(crate) fn remote_addr(&self) -> &Addr {
         self.info.remote_addr()
-    }
-
-    /// Get the connection info for this connection.
-    pub(crate) fn info(&self) -> ConnectionInfo {
-        match &self.state {
-            TxState::Handshake(_) => self.info.clone(),
-            TxState::Sent(tls) => self.info.clone().tls(tls.clone()),
-        }
     }
 }
 
-impl fmt::Debug for TlsConnectionInfoSender {
+impl<Addr> fmt::Debug for TlsConnectionInfoSender<Addr> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("TlsConnectionInfoSender {{ ...}}")
     }

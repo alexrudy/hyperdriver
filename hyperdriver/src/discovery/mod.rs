@@ -277,7 +277,7 @@ impl Default for RegistryTransport {
 }
 
 impl tower::Service<Uri> for RegistryTransport {
-    type Response = TransportStream;
+    type Response = TransportStream<ClientStream>;
 
     type Error = ConnectionError;
 

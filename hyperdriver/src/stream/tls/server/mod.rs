@@ -11,7 +11,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
 use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
-use crate::stream::info::{Connection, ConnectionInfo};
+use super::TlsHandshakeStream;
+use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
 pub mod acceptor;
 pub mod connector;
@@ -38,25 +39,29 @@ impl<IO> fmt::Debug for TlsState<IO> {
 
 /// A TLS stream, generic over the underlying IO.
 #[derive(Debug)]
-pub struct TlsStream<IO> {
+pub struct TlsStream<IO>
+where
+    IO: HasConnectionInfo,
+{
     state: TlsState<IO>,
-    tx: TlsConnectionInfoSender,
-    pub(crate) rx: TlsConnectionInfoReciever,
+    tx: TlsConnectionInfoSender<IO::Addr>,
+    pub(crate) rx: TlsConnectionInfoReciever<IO::Addr>,
+}
+
+impl<IO> TlsHandshakeStream for TlsStream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
+{
+    fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.handshake(cx, |_, _| Poll::Ready(Ok(())))
+    }
 }
 
 impl<IO> TlsStream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
 {
-    /// Wait for the TLS handshake to complete.
-    ///
-    /// This will drive the underlying connection to complete the handshake. If this method
-    /// is not called, the handshake will complete the first time the underlying IO is
-    /// read or written to.
-    pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
-    }
-
     fn handshake<F, R>(&mut self, cx: &mut Context, action: F) -> Poll<io::Result<R>>
     where
         F: FnOnce(&mut tokio_rustls::server::TlsStream<IO>, &mut Context) -> Poll<io::Result<R>>,
@@ -87,13 +92,14 @@ where
 
 impl<IO> TlsStream<IO>
 where
-    IO: Connection,
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
 {
     pub(crate) fn new(accept: Accept<IO>) -> Self {
         // We don't expect these to panic because we assume that the handshake has not finished when
         // this implementation is called. As long as no-one manually polls the future and then
         // does this after the future has returned ready, we should be okay.
-        let info: ConnectionInfo = accept
+        let info: ConnectionInfo<IO::Addr> = accept
             .get_ref()
             .map(|stream| stream.info())
             .expect("TLS handshake should have access to underlying IO");
@@ -108,9 +114,22 @@ where
     }
 }
 
+impl<IO> HasConnectionInfo for TlsStream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
+    type Addr = IO::Addr;
+
+    fn info(&self) -> ConnectionInfo<Self::Addr> {
+        self.rx.info()
+    }
+}
+
 impl<IO> AsyncRead for TlsStream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -124,7 +143,8 @@ where
 
 impl<IO> AsyncWrite for TlsStream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_write(
         self: Pin<&mut Self>,

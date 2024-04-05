@@ -6,12 +6,12 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, future::Future, io};
 
 use crate::bridge::rt::TokioExecutor;
-use crate::stream::server::Stream;
 use hyper::body::Body;
 use hyper::rt::bounds::Http2ServerConnExec;
 use hyper::rt::{ReadBuf, Write};
 use hyper::{body, rt::Read};
 use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::rewind::Rewind;
 use crate::server::Protocol;
@@ -99,7 +99,7 @@ impl<E> Builder<E> {
     }
 }
 
-impl<S> Protocol<S> for Builder<TokioExecutor>
+impl<S, IO> Protocol<S, IO> for Builder<TokioExecutor>
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone
@@ -107,11 +107,12 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Connection = Connecting<S>;
+    type Connection = Connecting<S, IO>;
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-    fn serve_connection_with_upgrades(&self, stream: Stream, service: S) -> Self::Connection {
+    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {
         Connecting::build(self.clone(), service, stream)
     }
 }

@@ -6,16 +6,17 @@ use super::auto::UpgradableConnection;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
-use crate::stream::server::Stream;
 use hyper::body::Incoming;
 use ouroboros::self_referencing;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 use tower::BoxError;
 
-type Connection<'a, S> =
-    UpgradableConnection<'a, TokioIo<Stream>, TowerHyperService<S>, TokioExecutor>;
+type Connection<'a, S, IO> =
+    UpgradableConnection<'a, TokioIo<IO>, TowerHyperService<S>, TokioExecutor>;
 
 #[self_referencing]
-pub struct Connecting<S>
+pub struct Connecting<S, IO>
 where
     S: tower::Service<http::Request<Incoming>, Response = crate::body::Response>
         + Clone
@@ -28,10 +29,10 @@ where
 
     #[borrows(protocol)]
     #[not_covariant]
-    conn: Pin<Box<Connection<'this, S>>>,
+    conn: Pin<Box<Connection<'this, S, IO>>>,
 }
 
-impl<S> Connecting<S>
+impl<S, IO> Connecting<S, IO>
 where
     S: tower::Service<http::Request<Incoming>, Response = crate::body::Response>
         + Clone
@@ -39,8 +40,9 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    pub(crate) fn build(protocol: Builder<TokioExecutor>, service: S, stream: Stream) -> Self {
+    pub(crate) fn build(protocol: Builder<TokioExecutor>, service: S, stream: IO) -> Self {
         Self::new(protocol, move |protocol| {
             Box::pin(protocol.serve_connection_with_upgrades(
                 TokioIo::new(stream),
@@ -50,7 +52,7 @@ where
     }
 }
 
-impl<S> crate::server::Connection<BoxError> for Connecting<S>
+impl<S, IO> crate::server::Connection<BoxError> for Connecting<S, IO>
 where
     S: tower::Service<http::Request<Incoming>, Response = crate::body::Response>
         + Clone
@@ -58,13 +60,14 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(mut self: Pin<&mut Self>) {
         self.with_conn_mut(|conn| conn.as_mut().graceful_shutdown())
     }
 }
 
-impl<S> Future for Connecting<S>
+impl<S, IO> Future for Connecting<S, IO>
 where
     S: tower::Service<http::Request<Incoming>, Response = crate::body::Response>
         + Clone
@@ -72,6 +75,7 @@ where
         + 'static,
     S::Future: Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
+    IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Output = Result<(), BoxError>;
 

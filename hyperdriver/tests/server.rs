@@ -8,6 +8,9 @@ use hyper::body::Incoming;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
+use hyperdriver::stream::client::Stream;
+use hyperdriver::stream::info::HasConnectionInfo;
+use hyperdriver::stream::server::Accept;
 use tower::MakeService;
 
 use hyperdriver::server::{Protocol, Server};
@@ -24,7 +27,7 @@ async fn echo(
     )))
 }
 
-async fn connection<P: hyperdriver::client::Protocol>(
+async fn connection<P: hyperdriver::client::Protocol<Stream>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
@@ -44,7 +47,7 @@ fn hello_world() -> hyperdriver::body::Request {
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-fn serve<S, P>(server: Server<S, P>) -> impl Future<Output = Result<(), BoxError>>
+fn serve<S, P, A>(server: Server<S, P, A>) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeService<
             (),
@@ -57,7 +60,10 @@ where
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service> + Send + 'static,
+    P: Protocol<S::Service, A::Conn> + Send + 'static,
+    A: Accept + Send + Unpin + 'static,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -82,7 +88,7 @@ where
     }
 }
 
-fn serve_gracefully<S, P>(server: Server<S, P>) -> impl Future<Output = Result<(), BoxError>>
+fn serve_gracefully<S, P, A>(server: Server<S, P, A>) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeService<
             (),
@@ -95,7 +101,10 @@ where
     S::Error: std::error::Error + Send + Sync + 'static,
     S::MakeError: std::error::Error + Send + Sync + 'static,
     <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
-    P: Protocol<S::Service> + Send + 'static,
+    P: Protocol<S::Service, A::Conn> + Send + 'static,
+    A: Accept + Send + Unpin + 'static,
+    A::Conn: HasConnectionInfo + Send + 'static,
+    A::Error: std::error::Error + Send + Sync + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(server.with_graceful_shutdown(async {
@@ -238,7 +247,7 @@ async fn echo_auto_h2() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor = hyperdriver::stream::server::Acceptor::new(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         tower::service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),

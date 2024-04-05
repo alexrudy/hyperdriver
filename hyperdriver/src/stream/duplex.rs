@@ -3,6 +3,7 @@
 //! This is a wrapper around tokio's `DuplexStream`, while providing
 //! a connection info struct which can be used to identify the connection.
 
+use core::fmt;
 use std::{
     io,
     pin::Pin,
@@ -13,8 +14,20 @@ use http::uri::Authority;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::stream::info::{Connection, ConnectionInfo, Protocol};
+use crate::stream::info::{self, HasConnectionInfo, Protocol};
 use crate::stream::server::Accept;
+
+/// Address (blank) for a duplex stream
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct DuplexAddr;
+
+impl fmt::Display for DuplexAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "duplex")
+    }
+}
+
+type ConnectionInfo = info::ConnectionInfo<DuplexAddr>;
 
 /// A duplex stream transports data entirely in memory within the tokio runtime.
 #[derive(Debug)]
@@ -25,7 +38,9 @@ pub struct DuplexStream {
     info: ConnectionInfo,
 }
 
-impl Connection for DuplexStream {
+impl HasConnectionInfo for DuplexStream {
+    type Addr = DuplexAddr;
+
     fn info(&self) -> ConnectionInfo {
         self.info.clone()
     }
@@ -40,7 +55,7 @@ impl DuplexStream {
     /// to create a client/server pair of duplex streams.
     pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info = ConnectionInfo::duplex(name, protocol, max_buf_size);
+        let info = info::ConnectionInfo::duplex(name, protocol, max_buf_size).map(|_| DuplexAddr);
         (
             DuplexStream {
                 inner: a,

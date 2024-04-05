@@ -9,17 +9,18 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use crate::stream::client::Stream;
 use futures_util::FutureExt;
 use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
-use tokio::net::TcpSocket;
+use tokio::net::{TcpSocket, TcpStream};
 use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
+use crate::stream::client::Stream as ClientStream;
+use crate::stream::info::HasConnectionInfo as _;
 
 /// A TCP connector for client connections.
 #[derive(Debug, Clone)]
@@ -51,7 +52,7 @@ where
         + 'static,
     R::Future: Send,
 {
-    type Response = TransportStream;
+    type Response = TransportStream<ClientStream<TcpStream>>;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -73,30 +74,27 @@ where
 
         Box::pin(
             async move {
-                let mut stream = connector.connect(host.clone(), port).await?;
+                let stream = connector.connect(host.clone(), port).await?;
                 if req.scheme_str() == Some("https") {
-                    let mut stream = stream.tls(host.as_ref(), connector.tls.clone());
+                    let mut stream =
+                        ClientStream::new(stream).tls(host.as_ref(), connector.tls.clone());
+
                     stream
                         .finish_handshake()
                         .await
                         .map_err(TcpConnectionError::msg("TLS handshake"))?;
 
-                    let info = stream
-                        .info()
-                        .await
-                        .map_err(TcpConnectionError::msg("TLS connection info"))?;
+                    let info = stream.info();
 
                     Ok(TransportStream { stream, info })
                 } else {
+                    let mut stream = ClientStream::new(stream);
                     stream
                         .finish_handshake()
                         .await
                         .map_err(TcpConnectionError::msg("TCP handshake (noop)"))?;
 
-                    let info = stream
-                        .info()
-                        .await
-                        .map_err(TcpConnectionError::msg("TCP connection info"))?;
+                    let info = stream.info();
 
                     Ok(TransportStream { stream, info })
                 }
@@ -110,7 +108,7 @@ impl<R> TcpConnector<R>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {
-    async fn connect(&self, host: Box<str>, port: u16) -> Result<Stream, TcpConnectionError> {
+    async fn connect(&self, host: Box<str>, port: u16) -> Result<TcpStream, TcpConnectionError> {
         let mut addrs = self
             .resolver
             .clone()
@@ -168,7 +166,7 @@ pub(crate) struct TcpConnecting<'c> {
 }
 
 impl<'c> TcpConnecting<'c> {
-    async fn connect(self) -> Result<Stream, TcpConnectionError> {
+    async fn connect(self) -> Result<TcpStream, TcpConnectionError> {
         let mut fallback_delay = if let Some(fallback) = self.fallback {
             futures_util::future::Either::Left(async move {
                 tokio::time::sleep(fallback.delay).await;
@@ -222,7 +220,7 @@ impl TcpConnectingSet {
         }
     }
 
-    async fn connect(&self, config: &TcpConnectionConfig) -> Result<Stream, TcpConnectionError> {
+    async fn connect(&self, config: &TcpConnectionConfig) -> Result<TcpStream, TcpConnectionError> {
         let mut last_err = None;
         for addr in &self.addrs {
             match connect(addr, self.timeout, config)?.await {
@@ -368,7 +366,7 @@ fn connect(
     addr: &SocketAddr,
     connect_timeout: Option<Duration>,
     config: &TcpConnectionConfig,
-) -> Result<impl Future<Output = Result<Stream, TcpConnectionError>>, TcpConnectionError> {
+) -> Result<impl Future<Output = Result<TcpStream, TcpConnectionError>>, TcpConnectionError> {
     use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 
     let domain = Domain::for_address(*addr);
@@ -434,7 +432,6 @@ fn connect(
             None => connect.await,
         }
         .map_err(TcpConnectionError::msg("tcp connect error"))
-        .map(Stream::from)
     })
 }
 

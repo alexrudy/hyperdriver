@@ -14,6 +14,8 @@ use hyper::{Request, Response};
 use tower::{Layer, Service};
 use tracing::{dispatcher, Instrument};
 
+use crate::stream::info::HasConnectionInfo;
+
 use super::acceptor::TlsStream;
 
 /// A middleware which adds TLS connection information to the request extensions.
@@ -43,8 +45,10 @@ impl<S> TlsConnectionInfoService<S> {
 impl<S, IO> Service<&TlsStream<IO>> for TlsConnectionInfoService<S>
 where
     S: Clone + Send + 'static,
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
 {
-    type Response = TlsConnection<S>;
+    type Response = TlsConnection<S, IO::Addr>;
 
     type Error = Infallible;
 
@@ -65,17 +69,18 @@ where
 }
 
 /// Tower middleware for collecting TLS connection information after a handshake has been completed.
-pub struct TlsConnection<S> {
+pub struct TlsConnection<S, A> {
     inner: S,
-    rx: crate::stream::tls::info::TlsConnectionInfoReciever,
+    rx: crate::stream::tls::info::TlsConnectionInfoReciever<A>,
 }
 
-impl<S, BIn, BOut> Service<Request<BIn>> for TlsConnection<S>
+impl<S, A, BIn, BOut> Service<Request<BIn>> for TlsConnection<S, A>
 where
     S: Service<Request<BIn>, Response = Response<BOut>> + Clone + Send + 'static,
     S::Future: Send,
     S::Error: fmt::Display,
     BIn: Send + 'static,
+    A: Clone + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;

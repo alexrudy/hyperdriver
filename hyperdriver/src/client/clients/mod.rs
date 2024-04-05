@@ -27,6 +27,7 @@ use crate::client::pool::Connector;
 use crate::client::pool::{self, PoolableConnection, Pooled};
 use crate::client::Error;
 use crate::client::HttpConnectionBuilder;
+use crate::stream::info::HasConnectionInfo;
 
 mod builder;
 
@@ -34,7 +35,8 @@ mod builder;
 #[derive(Debug)]
 pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>
 where
-    P: Protocol,
+    T: Transport,
+    P: Protocol<T::IO>,
     P::Connection: PoolableConnection,
 {
     protocol: P,
@@ -44,7 +46,8 @@ where
 
 impl<P, T> Client<P, T>
 where
-    P: Protocol,
+    T: Transport,
+    P: Protocol<T::IO>,
     P::Connection: PoolableConnection,
 {
     /// Create a new client with the given connector and pool configuration.
@@ -59,9 +62,9 @@ where
 
 impl<P, T> Clone for Client<P, T>
 where
-    P: Protocol + Clone,
+    P: Protocol<T::IO> + Clone,
     P::Connection: PoolableConnection,
-    T: Clone,
+    T: Transport + Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -103,14 +106,16 @@ impl Default for Client<HttpConnectionBuilder> {
 impl<P, C, T> Client<P, T>
 where
     C: Connection + PoolableConnection,
-    P: Protocol<Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
     T: Transport + 'static,
+    T::IO: Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
     fn connect_to(
         &self,
         uri: http::Uri,
         http_protocol: &HttpProtocol,
-    ) -> Checkout<P::Connection, TransportStream, ConnectionError> {
+    ) -> Checkout<P::Connection, TransportStream<T::IO>, ConnectionError> {
         let key: pool::Key = uri.clone().into();
 
         let mut protocol = self.protocol.clone();
@@ -150,7 +155,7 @@ where
     pub fn request(
         &self,
         request: crate::body::Request,
-    ) -> ResponseFuture<P::Connection, TransportStream> {
+    ) -> ResponseFuture<P::Connection, TransportStream<T::IO>> {
         let uri = request.uri().clone();
 
         let protocol: HttpProtocol = request.version().into();
@@ -173,12 +178,14 @@ where
 impl<P, C, T> tower::Service<http::Request<crate::body::Body>> for Client<P, T>
 where
     C: Connection + PoolableConnection,
-    P: Protocol<Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
     T: Transport + 'static,
+    T::IO: Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
     type Response = http::Response<Incoming>;
     type Error = Error;
-    type Future = ResponseFuture<P::Connection, TransportStream>;
+    type Future = ResponseFuture<P::Connection, TransportStream<T::IO>>;
 
     fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

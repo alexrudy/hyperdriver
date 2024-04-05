@@ -3,6 +3,7 @@
 use std::io;
 use std::task::{Context, Poll};
 
+use crate::stream::client::Stream;
 use crate::stream::info::Protocol;
 use futures_util::future::BoxFuture;
 use http::Uri;
@@ -33,11 +34,11 @@ impl DuplexTransport {
 }
 
 impl tower::Service<Uri> for DuplexTransport {
-    type Response = TransportStream;
+    type Response = TransportStream<Stream>;
 
     type Error = io::Error;
 
-    type Future = BoxFuture<'static, Result<TransportStream, io::Error>>;
+    type Future = BoxFuture<'static, Result<TransportStream<Stream>, io::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

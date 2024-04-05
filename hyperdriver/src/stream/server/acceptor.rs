@@ -14,22 +14,33 @@ use tokio::net::{TcpListener, UnixListener};
 
 use super::Accept;
 use super::Stream;
+use crate::stream::info::HasConnectionInfo;
 use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
-use crate::stream::{core::BraidCore, duplex::DuplexIncoming};
+use crate::stream::{core::Braid, duplex::DuplexIncoming};
 
-/// Accept incoming connections for Braid streams.
+/// Accept incoming connections for streams which might
+/// be wrapped in TLS. Use [`Acceptor::tls`] to enable TLS.
 #[derive(Debug)]
 #[pin_project]
-pub struct Acceptor {
+pub struct Acceptor<A = AcceptorCore> {
     #[pin]
-    inner: AcceptorInner,
+    inner: AcceptorInner<A>,
+}
+
+impl<A> Acceptor<A> {
+    /// Create a new acceptor from the given acceptor.
+    pub fn new(accept: A) -> Self {
+        Acceptor {
+            inner: AcceptorInner::NoTls(accept),
+        }
+    }
 }
 
 #[derive(Debug)]
 #[pin_project(project = AcceptorInnerProj)]
-enum AcceptorInner {
-    NoTls(#[pin] AcceptorCore),
-    Tls(#[pin] RawTlsAcceptor<AcceptorCore>),
+enum AcceptorInner<A> {
+    NoTls(#[pin] A),
+    Tls(#[pin] RawTlsAcceptor<A>),
 }
 
 /// A stream of incoming connections.
@@ -39,7 +50,7 @@ enum AcceptorInner {
 /// for compatibility with `Stream`.
 #[derive(Debug)]
 #[pin_project(project = AcceptorProj)]
-enum AcceptorCore {
+pub enum AcceptorCore {
     Tcp(#[pin] TcpListener),
     Duplex(#[pin] DuplexIncoming),
     Unix(#[pin] UnixListener),
@@ -53,7 +64,9 @@ impl Acceptor {
     pub async fn bind(addr: &SocketAddr) -> Result<Self, io::Error> {
         Ok(TcpListener::bind(addr).await?.into())
     }
+}
 
+impl<A> Acceptor<A> {
     /// Convert this acceptor to support TLS on top of the underlying
     /// transport.
     ///
@@ -105,7 +118,7 @@ where
 }
 
 impl Accept for AcceptorCore {
-    type Conn = BraidCore;
+    type Conn = Braid;
     type Error = io::Error;
 
     fn poll_accept(
@@ -126,9 +139,14 @@ impl Accept for AcceptorCore {
     }
 }
 
-impl Accept for Acceptor {
-    type Conn = Stream;
-    type Error = io::Error;
+impl<A> Accept for Acceptor<A>
+where
+    A: Accept,
+    A::Conn: HasConnectionInfo,
+    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
+{
+    type Conn = Stream<A::Conn>;
+    type Error = A::Error;
 
     fn poll_accept(
         self: Pin<&mut Self>,
@@ -136,7 +154,7 @@ impl Accept for Acceptor {
     ) -> Poll<Result<Self::Conn, Self::Error>> {
         match self.project().inner.project() {
             AcceptorInnerProj::NoTls(acceptor) => {
-                acceptor.poll_accept(cx).map(|r| r.map(Stream::from))
+                acceptor.poll_accept(cx).map(|r| r.map(Stream::new))
             }
             AcceptorInnerProj::Tls(acceptor) => {
                 acceptor.poll_accept(cx).map(|r| r.map(|s| s.into()))

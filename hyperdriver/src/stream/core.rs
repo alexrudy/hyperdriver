@@ -1,11 +1,17 @@
 //! Core stream type for braid providing [AsyncRead] and [AsyncWrite].
 
+use std::pin::pin;
+use std::task::Poll;
+
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::{Connection, ConnectionInfo};
+use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
+
+use super::info::BraidAddr;
+use super::tls::TlsHandshakeStream;
 
 /// Dispatching wrapper for potential stream connection types
 ///
@@ -16,18 +22,26 @@ use crate::stream::info::{Connection, ConnectionInfo};
 /// generic over the TLS stream type (which is different for client and server).
 #[derive(Debug)]
 #[pin_project(project = BraidCoreProjection)]
-pub(crate) enum BraidCore {
+pub enum Braid {
+    /// A TCP stream
     Tcp(#[pin] TcpStream),
+
+    /// A duplex stream
     Duplex(#[pin] DuplexStream),
+
+    /// A Unix stream
     Unix(#[pin] UnixStream),
 }
 
-impl Connection for BraidCore {
-    fn info(&self) -> ConnectionInfo {
+impl HasConnectionInfo for Braid {
+    type Addr = BraidAddr;
+    fn info(&self) -> ConnectionInfo<BraidAddr> {
         match self {
-            BraidCore::Tcp(stream) => stream.info(),
-            BraidCore::Duplex(stream) => <DuplexStream as Connection>::info(stream),
-            BraidCore::Unix(stream) => stream.info(),
+            Braid::Tcp(stream) => stream.info().map(BraidAddr::Tcp),
+            Braid::Duplex(stream) => {
+                <DuplexStream as HasConnectionInfo>::info(stream).map(|_| BraidAddr::Duplex)
+            }
+            Braid::Unix(stream) => stream.info().map(BraidAddr::Unix),
         }
     }
 }
@@ -43,7 +57,7 @@ macro_rules! dispatch_core {
     };
 }
 
-impl AsyncRead for BraidCore {
+impl AsyncRead for Braid {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -53,7 +67,7 @@ impl AsyncRead for BraidCore {
     }
 }
 
-impl AsyncWrite for BraidCore {
+impl AsyncWrite for Braid {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -77,29 +91,49 @@ impl AsyncWrite for BraidCore {
     }
 }
 
-impl From<TcpStream> for BraidCore {
+impl From<TcpStream> for Braid {
     fn from(stream: TcpStream) -> Self {
         Self::Tcp(stream)
     }
 }
 
-impl From<DuplexStream> for BraidCore {
+impl From<DuplexStream> for Braid {
     fn from(stream: DuplexStream) -> Self {
         Self::Duplex(stream)
     }
 }
 
-impl From<UnixStream> for BraidCore {
+impl From<UnixStream> for Braid {
     fn from(stream: UnixStream) -> Self {
         Self::Unix(stream)
     }
 }
 
+/// Dispatching wrapper for optionally supporting TLS
 #[derive(Debug)]
 #[pin_project(project=BraidProjection)]
-pub(crate) enum Braid<Tls> {
-    NoTls(#[pin] BraidCore),
+pub enum TlsBraid<Tls, NoTls> {
+    /// A stream without TLS
+    NoTls(#[pin] NoTls),
+
+    /// A stream with TLS
     Tls(#[pin] Tls),
+}
+
+impl<Tls, NoTls> TlsHandshakeStream for TlsBraid<Tls, NoTls>
+where
+    Tls: TlsHandshakeStream + Unpin,
+    NoTls: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_handshake(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        match self {
+            TlsBraid::NoTls(_) => Poll::Ready(Ok(())),
+            TlsBraid::Tls(ref mut stream) => stream.poll_handshake(cx),
+        }
+    }
 }
 
 macro_rules! dispatch {
@@ -112,9 +146,10 @@ macro_rules! dispatch {
     };
 }
 
-impl<Tls> AsyncRead for Braid<Tls>
+impl<Tls, NoTls> AsyncRead for TlsBraid<Tls, NoTls>
 where
     Tls: AsyncRead,
+    NoTls: AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -125,9 +160,10 @@ where
     }
 }
 
-impl<Tls> AsyncWrite for Braid<Tls>
+impl<Tls, NoTls> AsyncWrite for TlsBraid<Tls, NoTls>
 where
     Tls: AsyncWrite,
+    NoTls: AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -152,11 +188,8 @@ where
     }
 }
 
-impl<T, Tls> From<T> for Braid<Tls>
-where
-    T: Into<BraidCore>,
-{
-    fn from(stream: T) -> Self {
-        Self::NoTls(stream.into())
+impl<Tls, NoTls> From<NoTls> for TlsBraid<Tls, NoTls> {
+    fn from(stream: NoTls) -> Self {
+        Self::NoTls(stream)
     }
 }

@@ -11,9 +11,10 @@ use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 
-use crate::stream::info::{Connection, ConnectionInfo};
+use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
 use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use super::TlsHandshakeStream;
 
 #[cfg(feature = "connector")]
 mod connector;
@@ -39,25 +40,42 @@ impl<IO> fmt::Debug for State<IO> {
 ///
 /// This stream implements a delayed handshake by default, where
 /// the handshake won't be completed until the first read/write
-/// request to the underlying stream. The handshake can be forced
-/// to completion using the [`finish_handshake`](TlsStream::finish_handshake) method.
+/// request to the underlying stream.
 #[derive(Debug)]
-pub struct TlsStream<IO> {
+pub struct ClientTlsStream<IO>
+where
+    IO: HasConnectionInfo,
+{
     state: State<IO>,
-    tx: TlsConnectionInfoSender,
-    rx: TlsConnectionInfoReciever,
+    tx: TlsConnectionInfoSender<IO::Addr>,
+    rx: TlsConnectionInfoReciever<IO::Addr>,
 }
 
-impl<IO> TlsStream<IO> {
-    /// Get the connection info for this stream.
-    pub async fn info(&self) -> io::Result<ConnectionInfo> {
-        self.rx.recv().await
+impl<IO> HasConnectionInfo for ClientTlsStream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
+    type Addr = IO::Addr;
+
+    fn info(&self) -> ConnectionInfo<Self::Addr> {
+        self.rx.info()
     }
 }
 
-impl<IO> TlsStream<IO>
+impl<IO> TlsHandshakeStream for ClientTlsStream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
+{
+    fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.handshake(cx, |_, _| Poll::Ready(Ok(())))
+    }
+}
+
+impl<IO> ClientTlsStream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
 {
     /// Finish the TLS handshake.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
@@ -65,9 +83,10 @@ where
     }
 }
 
-impl<IO> TlsStream<IO>
+impl<IO> ClientTlsStream<IO>
 where
-    IO: Connection + AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Clone,
 {
     /// Create a new TLS stream from the given IO, with a domain name and TLS configuration.
     pub fn new(stream: IO, domain: &str, config: Arc<ClientConfig>) -> Self {
@@ -80,7 +99,7 @@ where
     }
 }
 
-impl TlsStream<TcpStream> {
+impl ClientTlsStream<TcpStream> {
     /// Connect to the given tcp address, using the given domain name and TLS configuration.
     pub async fn connect(
         addr: impl ToSocketAddrs,
@@ -92,9 +111,9 @@ impl TlsStream<TcpStream> {
     }
 }
 
-impl<IO> TlsStream<IO>
+impl<IO> ClientTlsStream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
 {
     fn handshake<F, R>(&mut self, cx: &mut Context, action: F) -> Poll<io::Result<R>>
     where
@@ -120,9 +139,10 @@ where
     }
 }
 
-impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO>
+impl<IO> From<tokio_rustls::Connect<IO>> for ClientTlsStream<IO>
 where
-    IO: Connection,
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
 {
     fn from(accept: tokio_rustls::Connect<IO>) -> Self {
         let stream = accept.get_ref().expect("tls connect should have stream");
@@ -139,7 +159,11 @@ where
     }
 }
 
-impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<IO> {
+impl<IO> AsyncRead for ClientTlsStream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
+{
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -150,7 +174,11 @@ impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<IO> {
     }
 }
 
-impl<IO: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsStream<IO> {
+impl<IO> AsyncWrite for ClientTlsStream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
+{
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

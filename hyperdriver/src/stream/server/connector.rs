@@ -12,9 +12,11 @@ use std::{
 use futures_core::future::BoxFuture;
 use hyper::{Request, Response};
 use tower::{Layer, Service};
-use tracing::{dispatcher, Instrument};
+use tracing::Instrument;
 
-use super::{ConnectionInfoState, Stream};
+use super::ConnectionInfoState;
+use super::Stream;
+use crate::{polled_span, stream::info::HasConnectionInfo};
 
 /// A middleware which adds connection information to the request extensions.
 #[derive(Debug, Clone)]
@@ -42,11 +44,13 @@ impl<C> StartConnectionInfoService<C> {
     }
 }
 
-impl<C> Service<&Stream> for StartConnectionInfoService<C>
+impl<C, IO> Service<&Stream<IO>> for StartConnectionInfoService<C>
 where
     C: Clone + Send + 'static,
+    IO: HasConnectionInfo + Send + 'static,
+    IO::Addr: Clone,
 {
-    type Response = Connection<C>;
+    type Response = Connection<C, IO::Addr>;
 
     type Error = Infallible;
 
@@ -59,7 +63,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, stream: &Stream) -> Self::Future {
+    fn call(&mut self, stream: &Stream<IO>) -> Self::Future {
         let inner = self.inner.clone();
         let info = stream.info.clone();
         ready(Ok(Connection { inner, info }))
@@ -69,17 +73,18 @@ where
 /// Interior service which adds connection information to the request extensions.
 ///
 /// This service wraps the request/response service, not the connector service.
-pub struct Connection<S> {
+pub struct Connection<S, A> {
     inner: S,
-    info: ConnectionInfoState,
+    info: ConnectionInfoState<A>,
 }
 
-impl<S, BIn, BOut> Service<Request<BIn>> for Connection<S>
+impl<S, A, BIn, BOut> Service<Request<BIn>> for Connection<S, A>
 where
     S: Service<Request<BIn>, Response = Response<BOut>> + Clone + Send + 'static,
     S::Future: Send,
     S::Error: fmt::Display,
     BIn: Send + 'static,
+    A: Clone + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -95,12 +100,7 @@ where
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         let span = tracing::info_span!("Connection");
-        dispatcher::get_default(|dispatch| {
-            let id = span.id().expect("Missing ID; this is a bug");
-            if let Some(current) = dispatch.current_span().id() {
-                dispatch.record_follows_from(&id, current)
-            }
-        });
+        polled_span(&span);
 
         let fut = async move {
             async {
