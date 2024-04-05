@@ -12,7 +12,7 @@ use tokio::net::{TcpStream, UnixStream};
 
 use crate::stream::core::{Braid, TlsBraid};
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::{Connection as HasConnectionInfo, ConnectionInfo, SocketAddr};
+use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 use crate::stream::tls::info::TlsConnectionInfoReciever;
 use crate::stream::tls::server::TlsStream;
 
@@ -22,16 +22,20 @@ mod connector;
 pub use acceptor::Acceptor;
 pub use connector::{Connection, StartConnectionInfoLayer, StartConnectionInfoService};
 
+use super::info::BraidAddr;
 use super::tls::TlsHandshakeStream;
 
 #[derive(Debug, Clone)]
-enum ConnectionInfoState {
-    Handshake(TlsConnectionInfoReciever),
-    Connected(ConnectionInfo),
+enum ConnectionInfoState<Addr> {
+    Handshake(TlsConnectionInfoReciever<Addr>),
+    Connected(ConnectionInfo<Addr>),
 }
 
-impl ConnectionInfoState {
-    async fn recv(&self) -> io::Result<ConnectionInfo> {
+impl<Addr> ConnectionInfoState<Addr>
+where
+    Addr: Clone,
+{
+    async fn recv(&self) -> io::Result<ConnectionInfo<Addr>> {
         match self {
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
             ConnectionInfoState::Connected(info) => Ok(info.clone()),
@@ -57,8 +61,11 @@ pub trait Accept {
 /// Dispatching wrapper for potential stream connection types for servers
 #[derive(Debug)]
 #[pin_project]
-pub struct Stream<IO = Braid> {
-    info: ConnectionInfoState,
+pub struct Stream<IO = Braid>
+where
+    IO: HasConnectionInfo,
+{
+    info: ConnectionInfoState<IO::Addr>,
 
     #[pin]
     inner: TlsBraid<TlsStream<IO>, IO>,
@@ -77,12 +84,16 @@ where
     }
 }
 
-impl<IO> Stream<IO> {
+impl<IO> Stream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
     /// Get the connection info for this stream
     ///
     /// This will block until the handshake completes for
     /// TLS connections.
-    pub async fn info(&self) -> io::Result<ConnectionInfo> {
+    pub async fn info(&self) -> io::Result<ConnectionInfo<IO::Addr>> {
         match &self.info {
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
             ConnectionInfoState::Connected(info) => Ok(info.clone()),
@@ -92,7 +103,7 @@ impl<IO> Stream<IO> {
     /// Get the remote address for this stream.
     ///
     /// This can be done before the TLS handshake completes.
-    pub fn remote_addr(&self) -> &SocketAddr {
+    pub fn remote_addr(&self) -> &IO::Addr {
         match &self.info {
             ConnectionInfoState::Handshake(rx) => rx.remote_addr(),
             ConnectionInfoState::Connected(info) => info.remote_addr(),
@@ -102,7 +113,8 @@ impl<IO> Stream<IO> {
 
 impl<IO> TlsHandshakeStream for Stream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match &mut self.inner {
@@ -112,8 +124,13 @@ where
     }
 }
 
-impl<IO> HasConnectionInfo for Stream<IO> {
-    fn info(&self) -> ConnectionInfo {
+impl<IO> HasConnectionInfo for Stream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
+    type Addr = IO::Addr;
+    fn info(&self) -> ConnectionInfo<IO::Addr> {
         match &self.info {
             ConnectionInfoState::Handshake(_) => {
                 panic!("connection info is not avaialble before the handshake completes")
@@ -123,7 +140,11 @@ impl<IO> HasConnectionInfo for Stream<IO> {
     }
 }
 
-impl<IO> From<TlsStream<IO>> for Stream<IO> {
+impl<IO> From<TlsStream<IO>> for Stream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
     fn from(stream: TlsStream<IO>) -> Self {
         Stream {
             info: ConnectionInfoState::Handshake(stream.rx.clone()),
@@ -135,7 +156,9 @@ impl<IO> From<TlsStream<IO>> for Stream<IO> {
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(<TcpStream as HasConnectionInfo>::info(&stream)),
+            info: ConnectionInfoState::Connected(
+                <TcpStream as HasConnectionInfo>::info(&stream).map(Into::into),
+            ),
             inner: Braid::from(stream).into(),
         }
     }
@@ -144,9 +167,9 @@ impl From<TcpStream> for Stream {
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(<DuplexStream as HasConnectionInfo>::info(
-                &stream,
-            )),
+            info: ConnectionInfoState::Connected(
+                <DuplexStream as HasConnectionInfo>::info(&stream).map(|_| BraidAddr::Duplex),
+            ),
             inner: Braid::from(stream).into(),
         }
     }
@@ -155,7 +178,7 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(stream.info()),
+            info: ConnectionInfoState::Connected(stream.info().map(Into::into)),
             inner: Braid::from(stream).into(),
         }
     }
@@ -172,7 +195,8 @@ impl From<Braid> for Stream {
 
 impl<IO> AsyncRead for Stream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -185,7 +209,8 @@ where
 
 impl<IO> AsyncWrite for Stream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,

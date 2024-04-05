@@ -5,6 +5,7 @@ use futures_util::future::BoxFuture;
 use hyper::body::Incoming;
 use std::fmt;
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
 use crate::bridge::io::TokioIo;
@@ -12,6 +13,7 @@ use crate::bridge::rt::TokioExecutor;
 use crate::client::conn::TransportStream;
 use crate::client::conn::{Connection, HttpProtocol};
 use crate::client::pool::PoolableConnection;
+use crate::stream::info::HasConnectionInfo;
 
 /// A builder for configuring and starting HTTP connections.
 #[derive(Debug, Clone)]
@@ -42,7 +44,7 @@ impl HttpConnectionBuilder {
 impl HttpConnectionBuilder {
     async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection, ConnectionError>
     where
-        IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake");
         let (sender, conn) = self
@@ -67,7 +69,7 @@ impl HttpConnectionBuilder {
 
     async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection, ConnectionError>
     where
-        IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake h1");
         let (sender, conn) = self
@@ -92,7 +94,7 @@ impl HttpConnectionBuilder {
         transport: TransportStream<IO>,
     ) -> Result<HttpConnection, ConnectionError>
     where
-        IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         match self.protocol {
             HttpProtocol::Http2 => self.handshake_h2(transport.into_inner()).await,
@@ -126,7 +128,8 @@ impl Default for HttpConnectionBuilder {
 
 impl<IO> tower::Service<TransportStream<IO>> for HttpConnectionBuilder
 where
-    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO::Addr: Send + Sync,
 {
     type Response = HttpConnection;
 
@@ -149,7 +152,7 @@ where
 
 impl<IO> tower::Service<TransportStream<IO>> for hyper::client::conn::http1::Builder
 where
-    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Response = HttpConnection;
 
@@ -196,7 +199,7 @@ where
         + Sync
         + Clone
         + 'static,
-    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Response = HttpConnection;
 
@@ -243,8 +246,10 @@ mod future {
     use std::task::{Context, Poll};
 
     use futures_util::FutureExt;
+    use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::client::conn::TransportStream;
+    use crate::stream::info::HasConnectionInfo;
     use crate::DebugLiteral;
 
     use super::ConnectionError;
@@ -268,7 +273,8 @@ mod future {
 
     impl<IO> HttpConnectFuture<IO>
     where
-        IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        IO::Addr: Send + Sync,
     {
         pub(super) fn new(
             builder: HttpConnectionBuilder,

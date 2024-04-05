@@ -18,6 +18,7 @@ pub mod http;
 pub mod tcp;
 
 use crate::client::pool::PoolableTransport;
+use crate::stream::info::HasConnectionInfo;
 
 pub use self::http::ConnectionError;
 pub(crate) use self::tcp::TcpConnectionConfig;
@@ -26,7 +27,7 @@ pub(crate) use self::tcp::TcpConnector;
 /// A transport provides data transmission between two endpoints.
 pub trait Transport: Clone + Send {
     /// The type of IO stream used by this transport
-    type IO: AsyncRead + AsyncWrite + Send + 'static;
+    type IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + 'static;
 
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
@@ -52,7 +53,7 @@ where
     T: Clone + Send + Sync + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
-    IO: AsyncRead + AsyncWrite + Send + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + 'static,
 {
     type IO = IO;
     type Error = T::Error;
@@ -75,14 +76,20 @@ where
 /// This transport uses braid to power the underlying
 #[derive(Debug)]
 #[pin_project]
-pub struct TransportStream<IO> {
+pub struct TransportStream<IO>
+where
+    IO: HasConnectionInfo,
+{
     #[pin]
     stream: IO,
-    info: ConnectionInfo,
+    info: ConnectionInfo<IO::Addr>,
 }
 
-impl<IO> TransportStream<IO> {
-    pub(crate) fn info(&self) -> &ConnectionInfo {
+impl<IO> TransportStream<IO>
+where
+    IO: HasConnectionInfo,
+{
+    pub(crate) fn info(&self) -> &ConnectionInfo<IO::Addr> {
         &self.info
     }
 
@@ -100,7 +107,7 @@ impl TransportStream<Stream> {
     pub async fn new(mut stream: Stream) -> io::Result<Self> {
         stream.finish_handshake().await?;
 
-        let info = stream.info().await?;
+        let info = stream.info();
 
         Ok(Self { stream, info })
     }
@@ -108,7 +115,8 @@ impl TransportStream<Stream> {
 
 impl<IO> PoolableTransport for TransportStream<IO>
 where
-    IO: Unpin + Send + 'static,
+    IO: HasConnectionInfo + Unpin + Send + 'static,
+    IO::Addr: Send,
 {
     fn can_share(&self) -> bool {
         self.info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
@@ -120,7 +128,7 @@ where
 
 impl<IO> AsyncRead for TransportStream<IO>
 where
-    IO: AsyncRead,
+    IO: HasConnectionInfo + AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -133,7 +141,7 @@ where
 
 impl<IO> AsyncWrite for TransportStream<IO>
 where
-    IO: AsyncWrite,
+    IO: HasConnectionInfo + AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -173,6 +181,7 @@ where
 /// Protocols (like HTTP) define how data is sent and received over a connection.
 pub trait Protocol<IO>
 where
+    IO: HasConnectionInfo,
     Self: Service<TransportStream<IO>, Response = Self::Connection>,
 {
     /// Error returned when connection fails
@@ -198,6 +207,7 @@ where
 
 impl<T, C, IO> Protocol<IO> for T
 where
+    IO: HasConnectionInfo,
     T: Service<TransportStream<IO>, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,

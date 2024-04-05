@@ -16,7 +16,7 @@ use tracing::Instrument;
 
 use super::ConnectionInfoState;
 use super::Stream;
-use crate::{polled_span, stream::info::Connection as HasConnectionInfo};
+use crate::{polled_span, stream::info::HasConnectionInfo};
 
 /// A middleware which adds connection information to the request extensions.
 #[derive(Debug, Clone)]
@@ -48,8 +48,9 @@ impl<C, IO> Service<&Stream<IO>> for StartConnectionInfoService<C>
 where
     C: Clone + Send + 'static,
     IO: HasConnectionInfo + Send + 'static,
+    IO::Addr: Clone,
 {
-    type Response = Connection<C>;
+    type Response = Connection<C, IO::Addr>;
 
     type Error = Infallible;
 
@@ -72,17 +73,18 @@ where
 /// Interior service which adds connection information to the request extensions.
 ///
 /// This service wraps the request/response service, not the connector service.
-pub struct Connection<S> {
+pub struct Connection<S, A> {
     inner: S,
-    info: ConnectionInfoState,
+    info: ConnectionInfoState<A>,
 }
 
-impl<S, BIn, BOut> Service<Request<BIn>> for Connection<S>
+impl<S, A, BIn, BOut> Service<Request<BIn>> for Connection<S, A>
 where
     S: Service<Request<BIn>, Response = Response<BOut>> + Clone + Send + 'static,
     S::Future: Send,
     S::Error: fmt::Display,
     BIn: Send + 'static,
+    A: Clone + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;

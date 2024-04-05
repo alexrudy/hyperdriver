@@ -14,7 +14,7 @@ use tokio::net::{TcpListener, UnixListener};
 
 use super::Accept;
 use super::Stream;
-use crate::stream::info::Connection as HasConnectionInfo;
+use crate::stream::info::HasConnectionInfo;
 use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
 use crate::stream::{core::Braid, duplex::DuplexIncoming};
 
@@ -143,6 +143,7 @@ impl<A> Accept for Acceptor<A>
 where
     A: Accept,
     A::Conn: HasConnectionInfo,
+    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
 {
     type Conn = Stream<A::Conn>;
     type Error = A::Error;

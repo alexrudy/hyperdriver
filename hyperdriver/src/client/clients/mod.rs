@@ -27,6 +27,7 @@ use crate::client::pool::Connector;
 use crate::client::pool::{self, PoolableConnection, Pooled};
 use crate::client::Error;
 use crate::client::HttpConnectionBuilder;
+use crate::stream::info::HasConnectionInfo;
 
 mod builder;
 
@@ -108,6 +109,7 @@ where
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
     fn connect_to(
         &self,
@@ -179,6 +181,7 @@ where
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
     type Response = http::Response<Incoming>;
     type Error = Error;

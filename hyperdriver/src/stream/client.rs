@@ -14,7 +14,7 @@ use tokio::net::{TcpStream, UnixStream};
 
 use crate::stream::core::{Braid, TlsBraid};
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::Connection;
+use crate::stream::info::HasConnectionInfo;
 use crate::stream::tls::client::ClientTlsStream;
 use crate::stream::tls::TlsHandshakeStream as _;
 
@@ -24,7 +24,10 @@ use crate::stream::tls::TlsHandshakeStream as _;
 /// This is the client side of the Braid stream.
 #[derive(Debug)]
 #[pin_project]
-pub struct Stream<IO = Braid> {
+pub struct Stream<IO = Braid>
+where
+    IO: HasConnectionInfo,
+{
     #[pin]
     inner: TlsBraid<ClientTlsStream<IO>, IO>,
 }
@@ -41,7 +44,7 @@ impl Stream {
 
 impl<IO> Stream<IO>
 where
-    IO: Connection + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO: HasConnectionInfo,
 {
     /// Create a new client stream from an existing connection.
     pub fn new(inner: IO) -> Self {
@@ -49,7 +52,13 @@ where
             inner: TlsBraid::NoTls(inner),
         }
     }
+}
 
+impl<IO> Stream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO::Addr: Clone,
+{
     /// Add TLS to the underlying stream.
     ///
     /// # Panics
@@ -69,7 +78,13 @@ where
             inner: crate::stream::core::TlsBraid::Tls(ClientTlsStream::new(core, domain, config)),
         }
     }
+}
 
+impl<IO> Stream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO::Addr: Unpin + Clone,
+{
     /// Finish the TLS handshake.
     ///
     /// This is a no-op if TLS is not enabled. When TLS is enabled, this method
@@ -79,15 +94,23 @@ where
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
         poll_fn(|cx| self.inner.poll_handshake(cx)).await
     }
+}
+
+impl<IO> HasConnectionInfo for Stream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Unpin + Clone,
+{
+    type Addr = IO::Addr;
 
     /// Get information about the connection.
     ///
     /// This method is async because TLS information isn't available until the handshake
     /// is complete. This method will not return until the handshake is complete.
-    pub async fn info(&self) -> io::Result<crate::stream::info::ConnectionInfo> {
+    fn info(&self) -> crate::stream::info::ConnectionInfo<IO::Addr> {
         match self.inner {
-            crate::stream::core::TlsBraid::Tls(ref stream) => stream.info().await,
-            crate::stream::core::TlsBraid::NoTls(ref stream) => Ok(stream.info()),
+            crate::stream::core::TlsBraid::Tls(ref stream) => stream.info(),
+            crate::stream::core::TlsBraid::NoTls(ref stream) => stream.info(),
         }
     }
 }
@@ -118,7 +141,8 @@ impl From<UnixStream> for Stream {
 
 impl<IO> AsyncRead for Stream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -131,7 +155,8 @@ where
 
 impl<IO> AsyncWrite for Stream<IO>
 where
-    IO: AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,

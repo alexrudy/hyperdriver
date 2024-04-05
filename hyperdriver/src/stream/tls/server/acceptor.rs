@@ -8,7 +8,7 @@ use futures_core::ready;
 use pin_project::pin_project;
 use rustls::ServerConfig;
 
-use crate::stream::info::Connection;
+use crate::stream::info::HasConnectionInfo;
 use crate::stream::server::Accept;
 /// TLS Acceptor which uses a [rustls::ServerConfig] to accept connections
 /// and start a TLS handshake.
@@ -36,7 +36,8 @@ impl<A> TlsAcceptor<A> {
 impl<A> Accept for TlsAcceptor<A>
 where
     A: Accept,
-    A::Conn: Connection,
+    A::Conn: HasConnectionInfo,
+    <A::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
 {
     type Conn = TlsStream<A::Conn>;
     type Error = A::Error;

@@ -20,6 +20,7 @@ use tracing::{trace, warn, Instrument};
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
 use crate::stream::client::Stream as ClientStream;
+use crate::stream::info::HasConnectionInfo as _;
 
 /// A TCP connector for client connections.
 #[derive(Debug, Clone)]
@@ -83,10 +84,7 @@ where
                         .await
                         .map_err(TcpConnectionError::msg("TLS handshake"))?;
 
-                    let info = stream
-                        .info()
-                        .await
-                        .map_err(TcpConnectionError::msg("TLS connection info"))?;
+                    let info = stream.info();
 
                     Ok(TransportStream { stream, info })
                 } else {
@@ -96,10 +94,7 @@ where
                         .await
                         .map_err(TcpConnectionError::msg("TCP handshake (noop)"))?;
 
-                    let info = stream
-                        .info()
-                        .await
-                        .map_err(TcpConnectionError::msg("TCP connection info"))?;
+                    let info = stream.info();
 
                     Ok(TransportStream { stream, info })
                 }

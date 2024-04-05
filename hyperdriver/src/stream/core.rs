@@ -8,8 +8,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::{Connection, ConnectionInfo};
+use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
+use super::info::BraidAddr;
 use super::tls::TlsHandshakeStream;
 
 /// Dispatching wrapper for potential stream connection types
@@ -32,12 +33,15 @@ pub enum Braid {
     Unix(#[pin] UnixStream),
 }
 
-impl Connection for Braid {
-    fn info(&self) -> ConnectionInfo {
+impl HasConnectionInfo for Braid {
+    type Addr = BraidAddr;
+    fn info(&self) -> ConnectionInfo<BraidAddr> {
         match self {
-            Braid::Tcp(stream) => stream.info(),
-            Braid::Duplex(stream) => <DuplexStream as Connection>::info(stream),
-            Braid::Unix(stream) => stream.info(),
+            Braid::Tcp(stream) => stream.info().map(BraidAddr::Tcp),
+            Braid::Duplex(stream) => {
+                <DuplexStream as HasConnectionInfo>::info(stream).map(|_| BraidAddr::Duplex)
+            }
+            Braid::Unix(stream) => stream.info().map(BraidAddr::Unix),
         }
     }
 }

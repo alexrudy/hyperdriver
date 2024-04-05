@@ -103,7 +103,7 @@ fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
 /// Supports more than just network socket addresses, also support Unix socket addresses (paths)
 /// and unnamed Duplex and Unix socket connections.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SocketAddr {
+pub enum BraidAddr {
     /// A TCP socket address.
     Tcp(std::net::SocketAddr),
 
@@ -117,7 +117,7 @@ pub enum SocketAddr {
     UnixUnnamed,
 }
 
-impl std::fmt::Display for SocketAddr {
+impl std::fmt::Display for BraidAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "{}", addr),
@@ -128,7 +128,7 @@ impl std::fmt::Display for SocketAddr {
     }
 }
 
-impl SocketAddr {
+impl BraidAddr {
     /// Returns the TCP socket address, if this is a TCP socket address.
     pub fn tcp(&self) -> Option<std::net::SocketAddr> {
         match self {
@@ -154,13 +154,13 @@ impl SocketAddr {
     }
 }
 
-impl From<std::net::SocketAddr> for SocketAddr {
+impl From<std::net::SocketAddr> for BraidAddr {
     fn from(addr: std::net::SocketAddr) -> Self {
         Self::Tcp(make_canonical(addr))
     }
 }
 
-impl TryFrom<tokio::net::unix::SocketAddr> for SocketAddr {
+impl TryFrom<tokio::net::unix::SocketAddr> for BraidAddr {
     type Error = io::Error;
     fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
         let path = match addr.as_pathname() {
@@ -181,13 +181,13 @@ impl TryFrom<tokio::net::unix::SocketAddr> for SocketAddr {
     }
 }
 
-impl From<(std::net::IpAddr, u16)> for SocketAddr {
+impl From<(std::net::IpAddr, u16)> for BraidAddr {
     fn from(addr: (std::net::IpAddr, u16)) -> Self {
         Self::Tcp(std::net::SocketAddr::new(addr.0, addr.1))
     }
 }
 
-impl From<(std::net::Ipv4Addr, u16)> for SocketAddr {
+impl From<(std::net::Ipv4Addr, u16)> for BraidAddr {
     fn from(addr: (std::net::Ipv4Addr, u16)) -> Self {
         Self::Tcp(std::net::SocketAddr::new(
             std::net::IpAddr::V4(addr.0),
@@ -196,7 +196,7 @@ impl From<(std::net::Ipv4Addr, u16)> for SocketAddr {
     }
 }
 
-impl From<(std::net::Ipv6Addr, u16)> for SocketAddr {
+impl From<(std::net::Ipv6Addr, u16)> for BraidAddr {
     fn from(addr: (std::net::Ipv6Addr, u16)) -> Self {
         Self::Tcp(std::net::SocketAddr::new(
             std::net::IpAddr::V6(addr.0),
@@ -205,7 +205,7 @@ impl From<(std::net::Ipv6Addr, u16)> for SocketAddr {
     }
 }
 
-impl From<Utf8PathBuf> for SocketAddr {
+impl From<Utf8PathBuf> for BraidAddr {
     fn from(addr: Utf8PathBuf) -> Self {
         Self::Unix(addr)
     }
@@ -213,7 +213,7 @@ impl From<Utf8PathBuf> for SocketAddr {
 
 /// Information about a connection to a Braid stream.
 #[derive(Debug, Clone)]
-pub struct ConnectionInfo {
+pub struct ConnectionInfo<Addr> {
     /// The protocol used for this connection.
     pub protocol: Option<Protocol>,
 
@@ -221,10 +221,10 @@ pub struct ConnectionInfo {
     pub authority: Option<Authority>,
 
     /// The local address for this connection.
-    pub local_addr: SocketAddr,
+    pub local_addr: Addr,
 
     /// The remote address for this connection.
-    pub remote_addr: SocketAddr,
+    pub remote_addr: Addr,
 
     /// Buffer size
     pub buffer_size: Option<usize>,
@@ -233,23 +233,22 @@ pub struct ConnectionInfo {
     pub tls: Option<TlsConnectionInfo>,
 }
 
-impl ConnectionInfo {
-    pub(crate) fn duplex(
-        name: Authority,
-        protocol: Option<Protocol>,
-        buffer_size: usize,
-    ) -> ConnectionInfo {
+impl ConnectionInfo<BraidAddr> {
+    pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>, buffer_size: usize) -> Self {
         ConnectionInfo {
             protocol,
             authority: Some(name),
-            local_addr: SocketAddr::Duplex,
-            remote_addr: SocketAddr::Duplex,
+            local_addr: BraidAddr::Duplex,
+            remote_addr: BraidAddr::Duplex,
             buffer_size: Some(buffer_size),
             tls: None,
         }
     }
+}
 
-    pub(crate) fn tls(self, tls: TlsConnectionInfo) -> ConnectionInfo {
+impl<Addr> ConnectionInfo<Addr> {
+    /// Add tls info to the connection info
+    pub(crate) fn tls(self, tls: TlsConnectionInfo) -> Self {
         ConnectionInfo {
             tls: Some(tls),
             ..self
@@ -257,17 +256,35 @@ impl ConnectionInfo {
     }
 
     /// The local address for this connection
-    pub fn local_addr(&self) -> &SocketAddr {
+    pub fn local_addr(&self) -> &Addr {
         &self.local_addr
     }
 
     /// The remote address for this connection
-    pub fn remote_addr(&self) -> &SocketAddr {
+    pub fn remote_addr(&self) -> &Addr {
         &self.remote_addr
+    }
+
+    /// Map the addresses in this connection info to a new type.
+    pub fn map<T, F>(self, f: F) -> ConnectionInfo<T>
+    where
+        F: Fn(Addr) -> T,
+    {
+        ConnectionInfo {
+            protocol: self.protocol,
+            authority: self.authority,
+            local_addr: f(self.local_addr),
+            remote_addr: f(self.remote_addr),
+            buffer_size: self.buffer_size,
+            tls: self.tls,
+        }
     }
 }
 
-impl TryFrom<&TcpStream> for ConnectionInfo {
+impl<Addr> TryFrom<&TcpStream> for ConnectionInfo<Addr>
+where
+    Addr: From<std::net::SocketAddr>,
+{
     type Error = io::Error;
 
     fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
@@ -285,7 +302,11 @@ impl TryFrom<&TcpStream> for ConnectionInfo {
     }
 }
 
-impl TryFrom<&UnixStream> for ConnectionInfo {
+impl<Addr> TryFrom<&UnixStream> for ConnectionInfo<Addr>
+where
+    Addr: TryFrom<tokio::net::unix::SocketAddr>,
+    Addr::Error: std::error::Error,
+{
     type Error = io::Error;
 
     fn try_from(stream: &UnixStream) -> Result<Self, Self::Error> {
@@ -295,8 +316,8 @@ impl TryFrom<&UnixStream> for ConnectionInfo {
         Ok(Self {
             protocol: None,
             authority: None,
-            local_addr: local_addr.try_into()?,
-            remote_addr: remote_addr.try_into()?,
+            local_addr: local_addr.try_into().expect("unix socket address"),
+            remote_addr: remote_addr.try_into().expect("unix socket address"),
             buffer_size: None,
             tls: None,
         })
@@ -304,21 +325,40 @@ impl TryFrom<&UnixStream> for ConnectionInfo {
 }
 
 /// Trait for types which can provide connection information.
-pub trait Connection {
+pub trait HasConnectionInfo {
+    /// The address type for this connection.
+    type Addr: fmt::Display + fmt::Debug;
+
     /// Get the connection information for this stream.
-    fn info(&self) -> ConnectionInfo;
+    fn info(&self) -> ConnectionInfo<Self::Addr>;
 }
 
-impl Connection for TcpStream {
-    fn info(&self) -> ConnectionInfo {
+impl HasConnectionInfo for TcpStream {
+    type Addr = std::net::SocketAddr;
+
+    fn info(&self) -> ConnectionInfo<Self::Addr> {
         self.try_into()
             .expect("connection info should be available")
     }
 }
 
-impl Connection for UnixStream {
-    fn info(&self) -> ConnectionInfo {
-        self.try_into()
-            .expect("connection info should be available")
+impl HasConnectionInfo for UnixStream {
+    type Addr = Utf8PathBuf;
+
+    fn info(&self) -> ConnectionInfo<Self::Addr> {
+        ConnectionInfo {
+            protocol: None,
+            authority: None,
+            local_addr: Utf8PathBuf::from_path_buf(
+                self.local_addr().unwrap().as_pathname().unwrap().to_owned(),
+            )
+            .expect("unix socket address"),
+            remote_addr: Utf8PathBuf::from_path_buf(
+                self.peer_addr().unwrap().as_pathname().unwrap().to_owned(),
+            )
+            .expect("unix socket address"),
+            buffer_size: None,
+            tls: None,
+        }
     }
 }

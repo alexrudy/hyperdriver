@@ -9,7 +9,7 @@ use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
 use hyperdriver::stream::client::Stream;
-use hyperdriver::stream::info::Connection as HasConnectionInfo;
+use hyperdriver::stream::info::HasConnectionInfo;
 use hyperdriver::stream::server::Accept;
 use tower::MakeService;
 

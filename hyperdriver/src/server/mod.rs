@@ -13,7 +13,7 @@ use std::{fmt, io};
 pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
-use crate::stream::info::Connection as HasConnectionInfo;
+use crate::stream::info::HasConnectionInfo;
 pub use crate::stream::server::Accept;
 use futures_util::future::FutureExt as _;
 use tower::make::MakeService;
