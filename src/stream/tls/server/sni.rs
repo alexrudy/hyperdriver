@@ -137,15 +137,13 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
         .and_then(|s| s.parse().ok());
 
     // Grab the TLS connection info
+    //TODO: Fix the type of the connection info address
     let info = req
         .extensions_mut()
-        .get_mut::<ConnectionInfo>()
+        .get_mut::<ConnectionInfo<()>>()
         .expect("Missing connection info extension - misconfiguration?");
 
-    let Some(tls) = info.tls.as_mut() else {
-        return None;
-    };
-
+    let tls = info.tls.as_mut()?;
     if let Some(sni) = tls
         .server_name
         .as_ref()

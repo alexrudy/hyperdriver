@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::io;
 use std::sync::Arc;
 
+#[cfg(feature = "client")]
 use crate::client::{HttpConnectionBuilder, TransportStream};
 use crate::pidfile::PidFile;
 use crate::stream::client::Stream as ClientStream;
@@ -22,6 +23,7 @@ mod server;
 pub use server::GrpcRouter;
 
 /// Service Registry client which will connect to internal services.
+
 pub type Client = crate::client::Client<HttpConnectionBuilder, RegistryTransport>;
 
 const GRPC_PROXY_NAME: &str = "grpc-proxy";

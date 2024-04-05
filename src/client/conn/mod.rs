@@ -1,5 +1,3 @@
-use crate::stream::client::Stream;
-use crate::stream::info::ConnectionInfo;
 use ::http::Uri;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
@@ -13,15 +11,25 @@ use hyper::body::Incoming;
 use tower::Service;
 
 pub mod dns;
+
+#[cfg(feature = "stream")]
 pub mod duplex;
 pub mod http;
+
+#[cfg(feature = "stream")]
 pub mod tcp;
 
 use crate::client::pool::PoolableTransport;
+#[cfg(feature = "stream")]
+use crate::stream::client::Stream;
+use crate::stream::info::ConnectionInfo;
 use crate::stream::info::HasConnectionInfo;
 
 pub use self::http::ConnectionError;
+
+#[cfg(feature = "stream")]
 pub(crate) use self::tcp::TcpConnectionConfig;
+#[cfg(feature = "stream")]
 pub(crate) use self::tcp::TcpConnector;
 
 /// A transport provides data transmission between two endpoints.
@@ -89,6 +97,7 @@ impl<IO> TransportStream<IO>
 where
     IO: HasConnectionInfo,
 {
+    #[cfg_attr(not(feature = "tls"), allow(dead_code))]
     pub(crate) fn info(&self) -> &ConnectionInfo<IO::Addr> {
         &self.info
     }
@@ -102,9 +111,12 @@ where
     }
 }
 
+#[cfg(feature = "stream")]
 impl TransportStream<Stream> {
     /// Create a new transport from a `crate::stream::client::Stream`.
+    #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
     pub async fn new(mut stream: Stream) -> io::Result<Self> {
+        #[cfg(feature = "tls")]
         stream.finish_handshake().await?;
 
         let info = stream.info();
@@ -118,11 +130,17 @@ where
     IO: HasConnectionInfo + Unpin + Send + 'static,
     IO::Addr: Send,
 {
+    #[cfg(feature = "tls")]
     fn can_share(&self) -> bool {
         self.info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
             == Some(&crate::stream::info::Protocol::Http(
                 ::http::Version::HTTP_2,
             ))
+    }
+
+    #[cfg(not(feature = "tls"))]
+    fn can_share(&self) -> bool {
+        false
     }
 }
 

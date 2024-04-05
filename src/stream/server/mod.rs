@@ -8,12 +8,22 @@ use std::task::{Context, Poll};
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
+#[cfg(feature = "stream")]
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::stream::core::{Braid, TlsBraid};
+#[cfg(feature = "stream")]
+use crate::stream::core::Braid;
+#[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
+
+#[cfg(feature = "tls")]
 use crate::stream::tls::info::TlsConnectionInfoReciever;
+
+#[cfg(feature = "tls")]
+use crate::stream::core::TlsBraid;
+
+#[cfg(feature = "tls")]
 use crate::stream::tls::server::TlsStream;
 
 mod acceptor;
@@ -22,11 +32,15 @@ mod connector;
 pub use acceptor::Acceptor;
 pub use connector::{Connection, StartConnectionInfoLayer, StartConnectionInfoService};
 
+#[cfg(feature = "stream")]
 use super::info::BraidAddr;
+
+#[cfg(feature = "tls")]
 use super::tls::TlsHandshakeStream;
 
 #[derive(Debug, Clone)]
 enum ConnectionInfoState<Addr> {
+    #[cfg(feature = "tls")]
     Handshake(TlsConnectionInfoReciever<Addr>),
     Connected(ConnectionInfo<Addr>),
 }
@@ -37,6 +51,7 @@ where
 {
     async fn recv(&self) -> io::Result<ConnectionInfo<Addr>> {
         match self {
+            #[cfg(feature = "tls")]
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
             ConnectionInfoState::Connected(info) => Ok(info.clone()),
         }
@@ -59,6 +74,7 @@ pub trait Accept {
 }
 
 /// Dispatching wrapper for potential stream connection types for servers
+#[cfg(feature = "stream")]
 #[derive(Debug)]
 #[pin_project]
 pub struct Stream<IO = Braid>
@@ -67,8 +83,31 @@ where
 {
     info: ConnectionInfoState<IO::Addr>,
 
+    #[cfg(feature = "tls")]
     #[pin]
     inner: TlsBraid<TlsStream<IO>, IO>,
+
+    #[cfg(not(feature = "tls"))]
+    #[pin]
+    inner: IO,
+}
+
+#[cfg(not(feature = "stream"))]
+#[derive(Debug)]
+#[pin_project]
+pub struct Stream<IO>
+where
+    IO: HasConnectionInfo,
+{
+    info: ConnectionInfoState<IO::Addr>,
+
+    #[cfg(feature = "tls")]
+    #[pin]
+    inner: TlsBraid<TlsStream<IO>, IO>,
+
+    #[cfg(not(feature = "tls"))]
+    #[pin]
+    inner: IO,
 }
 
 impl<IO> Stream<IO>
@@ -79,7 +118,12 @@ where
     pub fn new(inner: IO) -> Self {
         Stream {
             info: ConnectionInfoState::Connected(inner.info()),
+
+            #[cfg(feature = "tls")]
             inner: TlsBraid::NoTls(inner),
+
+            #[cfg(not(feature = "tls"))]
+            inner,
         }
     }
 }
@@ -95,6 +139,7 @@ where
     /// TLS connections.
     pub async fn info(&self) -> io::Result<ConnectionInfo<IO::Addr>> {
         match &self.info {
+            #[cfg(feature = "tls")]
             ConnectionInfoState::Handshake(rx) => rx.recv().await,
             ConnectionInfoState::Connected(info) => Ok(info.clone()),
         }
@@ -105,12 +150,14 @@ where
     /// This can be done before the TLS handshake completes.
     pub fn remote_addr(&self) -> &IO::Addr {
         match &self.info {
+            #[cfg(feature = "tls")]
             ConnectionInfoState::Handshake(rx) => rx.remote_addr(),
             ConnectionInfoState::Connected(info) => info.remote_addr(),
         }
     }
 }
 
+#[cfg(feature = "tls")]
 impl<IO> TlsHandshakeStream for Stream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
@@ -132,6 +179,7 @@ where
     type Addr = IO::Addr;
     fn info(&self) -> ConnectionInfo<IO::Addr> {
         match &self.info {
+            #[cfg(feature = "tls")]
             ConnectionInfoState::Handshake(_) => {
                 panic!("connection info is not avaialble before the handshake completes")
             }
@@ -140,6 +188,7 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
 impl<IO> From<TlsStream<IO>> for Stream<IO>
 where
     IO: HasConnectionInfo,
@@ -153,6 +202,7 @@ where
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
@@ -164,6 +214,7 @@ impl From<TcpStream> for Stream {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
@@ -175,6 +226,7 @@ impl From<DuplexStream> for Stream {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
@@ -184,6 +236,7 @@ impl From<UnixStream> for Stream {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<Braid> for Stream {
     fn from(stream: Braid) -> Self {
         Stream {

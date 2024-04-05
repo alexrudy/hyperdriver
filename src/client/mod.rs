@@ -62,6 +62,7 @@ impl From<pool::Error<ConnectionError>> for Error {
     }
 }
 
+#[cfg(feature = "tls")]
 /// Get a default TLS client configuration by loading the platform's native certificates.
 pub fn default_tls_config() -> rustls::ClientConfig {
     let mut roots = rustls::RootCertStore::empty();

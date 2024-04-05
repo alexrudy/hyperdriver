@@ -3,19 +3,33 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+#[cfg(feature = "tls")]
 use std::future::poll_fn;
+
+#[cfg(feature = "tls")]
 use std::io;
+
 use std::net::SocketAddr;
+
+#[cfg(feature = "tls")]
 use std::sync::Arc;
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::stream::core::{Braid, TlsBraid};
+use crate::stream::core::Braid;
+
+#[cfg(feature = "tls")]
+use crate::stream::core::TlsBraid;
+
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::HasConnectionInfo;
+
+#[cfg(feature = "tls")]
 use crate::stream::tls::client::ClientTlsStream;
+
+#[cfg(feature = "tls")]
 use crate::stream::tls::TlsHandshakeStream as _;
 
 /// A stream which can handle multiple different underlying transports, and TLS
@@ -28,8 +42,13 @@ pub struct Stream<IO = Braid>
 where
     IO: HasConnectionInfo,
 {
+    #[cfg(feature = "tls")]
     #[pin]
     inner: TlsBraid<ClientTlsStream<IO>, IO>,
+
+    #[cfg(not(feature = "tls"))]
+    #[pin]
+    inner: IO,
 }
 
 impl Stream {
@@ -49,11 +68,16 @@ where
     /// Create a new client stream from an existing connection.
     pub fn new(inner: IO) -> Self {
         Stream {
+            #[cfg(feature = "tls")]
             inner: TlsBraid::NoTls(inner),
+
+            #[cfg(not(feature = "tls"))]
+            inner,
         }
     }
 }
 
+#[cfg(feature = "tls")]
 impl<IO> Stream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -80,6 +104,7 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
 impl<IO> Stream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -108,10 +133,14 @@ where
     /// This method is async because TLS information isn't available until the handshake
     /// is complete. This method will not return until the handshake is complete.
     fn info(&self) -> crate::stream::info::ConnectionInfo<IO::Addr> {
+        #[cfg(feature = "tls")]
         match self.inner {
             crate::stream::core::TlsBraid::Tls(ref stream) => stream.info(),
             crate::stream::core::TlsBraid::NoTls(ref stream) => stream.info(),
         }
+
+        #[cfg(not(feature = "tls"))]
+        self.inner.info()
     }
 }
 

@@ -14,12 +14,18 @@ use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInf
 use super::TlsHandshakeStream;
 use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
+#[cfg(all(feature = "server", feature = "stream"))]
 pub mod acceptor;
+
+#[cfg(all(feature = "server", feature = "stream"))]
 pub mod connector;
 #[cfg(feature = "sni")]
 pub mod sni;
 
+#[cfg(all(feature = "server", feature = "stream"))]
 pub use self::acceptor::TlsAcceptor;
+
+#[cfg(all(feature = "server", feature = "stream"))]
 pub use self::connector::TlsConnectLayer;
 
 /// State tracks the process of accepting a connection and turning it into a stream.

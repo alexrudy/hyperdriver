@@ -15,6 +15,8 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::stream::info::{self, HasConnectionInfo, Protocol};
+
+#[cfg(all(feature = "server", feature = "stream"))]
 use crate::stream::server::Accept;
 
 /// Address (blank) for a duplex stream
@@ -189,6 +191,7 @@ impl DuplexIncoming {
     }
 }
 
+#[cfg(all(feature = "server", feature = "stream"))]
 impl Accept for DuplexIncoming {
     type Conn = DuplexStream;
     type Error = io::Error;

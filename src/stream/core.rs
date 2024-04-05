@@ -1,6 +1,8 @@
 //! Core stream type for braid providing [AsyncRead] and [AsyncWrite].
 
 use std::pin::pin;
+
+#[cfg(feature = "tls")]
 use std::task::Poll;
 
 use pin_project::pin_project;
@@ -11,6 +13,8 @@ use crate::stream::duplex::DuplexStream;
 use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
 use super::info::BraidAddr;
+
+#[cfg(feature = "tls")]
 use super::tls::TlsHandshakeStream;
 
 /// Dispatching wrapper for potential stream connection types
@@ -110,6 +114,7 @@ impl From<UnixStream> for Braid {
 }
 
 /// Dispatching wrapper for optionally supporting TLS
+#[cfg(feature = "tls")]
 #[derive(Debug)]
 #[pin_project(project=BraidProjection)]
 pub enum TlsBraid<Tls, NoTls> {
@@ -120,6 +125,7 @@ pub enum TlsBraid<Tls, NoTls> {
     Tls(#[pin] Tls),
 }
 
+#[cfg(feature = "tls")]
 impl<Tls, NoTls> TlsHandshakeStream for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeStream + Unpin,
@@ -136,6 +142,7 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
 macro_rules! dispatch {
     ($driver:ident.$method:ident($($args:expr),+)) => {
 
@@ -146,6 +153,7 @@ macro_rules! dispatch {
     };
 }
 
+#[cfg(feature = "tls")]
 impl<Tls, NoTls> AsyncRead for TlsBraid<Tls, NoTls>
 where
     Tls: AsyncRead,
@@ -160,6 +168,7 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
 impl<Tls, NoTls> AsyncWrite for TlsBraid<Tls, NoTls>
 where
     Tls: AsyncWrite,
@@ -188,6 +197,7 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
 impl<Tls, NoTls> From<NoTls> for TlsBraid<Tls, NoTls> {
     fn from(stream: NoTls) -> Self {
         Self::NoTls(stream)

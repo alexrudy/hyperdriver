@@ -11,6 +11,8 @@ use std::time::Duration;
 
 use futures_util::FutureExt;
 use http::Uri;
+
+#[cfg(feature = "tls")]
 use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
 use tokio::net::{TcpSocket, TcpStream};
@@ -20,6 +22,8 @@ use tracing::{trace, warn, Instrument};
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
 use crate::stream::client::Stream as ClientStream;
+
+#[cfg(any(feature = "tls", feature = "stream"))]
 use crate::stream::info::HasConnectionInfo as _;
 
 /// A TCP connector for client connections.
@@ -27,16 +31,28 @@ use crate::stream::info::HasConnectionInfo as _;
 pub struct TcpConnector<R = GaiResolver> {
     config: Arc<TcpConnectionConfig>,
     resolver: R,
+
+    #[cfg(feature = "tls")]
     tls: Arc<TlsClientConfig>,
 }
 
 impl TcpConnector {
+    #[cfg(feature = "tls")]
     /// Create a new `TcpConnector` with the given configuration.
     pub fn new(config: TcpConnectionConfig, tls: TlsClientConfig) -> Self {
         Self {
             config: Arc::new(config),
             resolver: GaiResolver::new(),
             tls: Arc::new(tls),
+        }
+    }
+
+    #[cfg(not(feature = "tls"))]
+    /// Create a new `TcpConnector` with the given configuration.
+    pub fn new(config: TcpConnectionConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            resolver: GaiResolver::new(),
         }
     }
 }
@@ -76,23 +92,27 @@ where
             async move {
                 let stream = connector.connect(host.clone(), port).await?;
                 if req.scheme_str() == Some("https") {
-                    let mut stream =
-                        ClientStream::new(stream).tls(host.as_ref(), connector.tls.clone());
+                    #[cfg(not(feature = "tls"))]
+                    {
+                        panic!("TLS support is disabled");
+                    }
 
-                    stream
-                        .finish_handshake()
-                        .await
-                        .map_err(TcpConnectionError::msg("TLS handshake"))?;
+                    #[cfg(feature = "tls")]
+                    {
+                        let mut stream =
+                            ClientStream::new(stream).tls(host.as_ref(), connector.tls.clone());
 
-                    let info = stream.info();
+                        stream
+                            .finish_handshake()
+                            .await
+                            .map_err(TcpConnectionError::msg("TLS handshake"))?;
 
-                    Ok(TransportStream { stream, info })
+                        let info = stream.info();
+
+                        Ok(TransportStream { stream, info })
+                    }
                 } else {
-                    let mut stream = ClientStream::new(stream);
-                    stream
-                        .finish_handshake()
-                        .await
-                        .map_err(TcpConnectionError::msg("TCP handshake (noop)"))?;
+                    let stream = ClientStream::new(stream);
 
                     let info = stream.info();
 

@@ -4,25 +4,46 @@ use std::{
     io,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
+#[cfg(feature = "tls")]
+use std::sync::Arc;
+
 use pin_project::pin_project;
+
+#[cfg(feature = "tls")]
 use rustls::ServerConfig;
+
+#[cfg(feature = "stream")]
 use tokio::net::{TcpListener, UnixListener};
 
 use super::Accept;
 use super::Stream;
 use crate::stream::info::HasConnectionInfo;
-use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
+
+#[cfg(feature = "stream")]
 use crate::stream::{core::Braid, duplex::DuplexIncoming};
+
+#[cfg(feature = "tls")]
+use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
 
 /// Accept incoming connections for streams which might
 /// be wrapped in TLS. Use [`Acceptor::tls`] to enable TLS.
+#[cfg(feature = "stream")]
 #[derive(Debug)]
 #[pin_project]
 pub struct Acceptor<A = AcceptorCore> {
+    #[pin]
+    inner: AcceptorInner<A>,
+}
+
+/// Accept incoming connections for streams which might
+/// be wrapped in TLS. Use [`Acceptor::tls`] to enable TLS.
+#[cfg(not(feature = "stream"))]
+#[derive(Debug)]
+#[pin_project]
+pub struct Acceptor<A> {
     #[pin]
     inner: AcceptorInner<A>,
 }
@@ -40,6 +61,8 @@ impl<A> Acceptor<A> {
 #[pin_project(project = AcceptorInnerProj)]
 enum AcceptorInner<A> {
     NoTls(#[pin] A),
+
+    #[cfg(feature = "tls")]
     Tls(#[pin] RawTlsAcceptor<A>),
 }
 
@@ -48,6 +71,7 @@ enum AcceptorInner<A> {
 /// This is a wrapper around hyper's `AddrIncoming`
 /// and `TlsAcceptor` types, using enum-dispatch,
 /// for compatibility with `Stream`.
+#[cfg(feature = "stream")]
 #[derive(Debug)]
 #[pin_project(project = AcceptorProj)]
 pub enum AcceptorCore {
@@ -56,6 +80,7 @@ pub enum AcceptorCore {
     Unix(#[pin] UnixListener),
 }
 
+#[cfg(feature = "stream")]
 impl Acceptor {
     /// Bind to a TCP socket address, returning the acceptor
     /// which will product incoming connections as [`Stream`]s.
@@ -66,6 +91,7 @@ impl Acceptor {
     }
 }
 
+#[cfg(feature = "tls")]
 impl<A> Acceptor<A> {
     /// Convert this acceptor to support TLS on top of the underlying
     /// transport.
@@ -88,24 +114,28 @@ impl<A> Acceptor<A> {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<TcpListener> for AcceptorCore {
     fn from(value: TcpListener) -> Self {
         AcceptorCore::Tcp(value)
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<DuplexIncoming> for AcceptorCore {
     fn from(value: DuplexIncoming) -> Self {
         AcceptorCore::Duplex(value)
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<UnixListener> for AcceptorCore {
     fn from(value: UnixListener) -> Self {
         AcceptorCore::Unix(value)
     }
 }
 
+#[cfg(feature = "stream")]
 impl<T> From<T> for Acceptor
 where
     T: Into<AcceptorCore>,
@@ -117,6 +147,7 @@ where
     }
 }
 
+#[cfg(feature = "stream")]
 impl Accept for AcceptorCore {
     type Conn = Braid;
     type Error = io::Error;
@@ -156,6 +187,8 @@ where
             AcceptorInnerProj::NoTls(acceptor) => {
                 acceptor.poll_accept(cx).map(|r| r.map(Stream::new))
             }
+
+            #[cfg(feature = "tls")]
             AcceptorInnerProj::Tls(acceptor) => {
                 acceptor.poll_accept(cx).map(|r| r.map(|s| s.into()))
             }
@@ -163,8 +196,13 @@ where
     }
 }
 
-impl futures_core::Stream for Acceptor {
-    type Item = Result<Stream, io::Error>;
+impl<A> futures_core::Stream for Acceptor<A>
+where
+    A: Accept,
+    A::Conn: HasConnectionInfo,
+    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
+{
+    type Item = Result<Stream<A::Conn>, A::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         self.poll_accept(cx).map(Some)

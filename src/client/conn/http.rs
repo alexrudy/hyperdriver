@@ -99,6 +99,7 @@ impl HttpConnectionBuilder {
         match self.protocol {
             HttpProtocol::Http2 => self.handshake_h2(transport.into_inner()).await,
             HttpProtocol::Http1 => {
+                #[cfg(feature = "tls")]
                 if transport
                     .info()
                     .tls

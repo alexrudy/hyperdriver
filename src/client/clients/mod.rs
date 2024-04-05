@@ -14,6 +14,8 @@ use hyper::body::Incoming;
 use tracing::warn;
 
 use crate::client::conn;
+
+#[cfg(feature = "stream")]
 use crate::client::conn::tcp::TcpConnector;
 use crate::client::conn::Connection;
 use crate::client::conn::ConnectionError;
@@ -21,7 +23,6 @@ use crate::client::conn::HttpProtocol;
 use crate::client::conn::Protocol;
 use crate::client::conn::Transport;
 use crate::client::conn::TransportStream;
-use crate::client::default_tls_config;
 use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
 use crate::client::pool::{self, PoolableConnection, Pooled};
@@ -29,11 +30,30 @@ use crate::client::Error;
 use crate::client::HttpConnectionBuilder;
 use crate::stream::info::HasConnectionInfo;
 
+#[cfg(feature = "tls")]
+use crate::client::default_tls_config;
+
+#[cfg(feature = "stream")]
 mod builder;
 
+#[cfg(feature = "stream")]
 /// An HTTP client
 #[derive(Debug)]
 pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>
+where
+    T: Transport,
+    P: Protocol<T::IO>,
+    P::Connection: PoolableConnection,
+{
+    protocol: P,
+    transport: T,
+    pool: Option<pool::Pool<P::Connection>>,
+}
+
+#[cfg(not(feature = "stream"))]
+/// An HTTP client
+#[derive(Debug)]
+pub struct Client<P, T>
 where
     T: Transport,
     P: Protocol<T::IO>,
@@ -75,6 +95,7 @@ where
     }
 }
 
+#[cfg(feature = "stream")]
 impl Client<HttpConnectionBuilder, TcpConnector> {
     /// A client builder for configuring the client.
     pub fn builder() -> builder::Builder {
@@ -88,15 +109,22 @@ impl Client<HttpConnectionBuilder, TcpConnector> {
                 idle_timeout: Some(std::time::Duration::from_secs(90)),
                 max_idle_per_host: 32,
             })),
+
+            #[cfg(feature = "tls")]
             transport: TcpConnector::new(
                 crate::client::conn::TcpConnectionConfig::default(),
                 default_tls_config(),
             ),
+
+            #[cfg(not(feature = "tls"))]
+            transport: TcpConnector::new(crate::client::conn::TcpConnectionConfig::default()),
+
             protocol: conn::http::HttpConnectionBuilder::default(),
         }
     }
 }
 
+#[cfg(feature = "stream")]
 impl Default for Client<HttpConnectionBuilder> {
     fn default() -> Self {
         Self::new_tcp_http()

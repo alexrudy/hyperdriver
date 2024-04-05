@@ -10,6 +10,7 @@ use http::uri::Authority;
 use thiserror::Error;
 use tokio::net::{TcpStream, UnixStream};
 
+#[cfg(feature = "tls")]
 use crate::stream::tls::info::TlsConnectionInfo;
 
 /// The transport protocol used for a connection.
@@ -229,8 +230,27 @@ pub struct ConnectionInfo<Addr> {
     /// Buffer size
     pub buffer_size: Option<usize>,
 
+    #[cfg(feature = "tls")]
     /// Transport Layer Security information for this connection.
     pub tls: Option<TlsConnectionInfo>,
+}
+
+impl<Addr> Default for ConnectionInfo<Addr>
+where
+    Addr: Default,
+{
+    fn default() -> Self {
+        Self {
+            protocol: None,
+            authority: None,
+            local_addr: Addr::default(),
+            remote_addr: Addr::default(),
+            buffer_size: None,
+
+            #[cfg(feature = "tls")]
+            tls: None,
+        }
+    }
 }
 
 impl ConnectionInfo<BraidAddr> {
@@ -241,12 +261,15 @@ impl ConnectionInfo<BraidAddr> {
             local_addr: BraidAddr::Duplex,
             remote_addr: BraidAddr::Duplex,
             buffer_size: Some(buffer_size),
+
+            #[cfg(feature = "tls")]
             tls: None,
         }
     }
 }
 
 impl<Addr> ConnectionInfo<Addr> {
+    #[cfg(feature = "tls")]
     /// Add tls info to the connection info
     pub(crate) fn tls(self, tls: TlsConnectionInfo) -> Self {
         ConnectionInfo {
@@ -276,6 +299,8 @@ impl<Addr> ConnectionInfo<Addr> {
             local_addr: f(self.local_addr),
             remote_addr: f(self.remote_addr),
             buffer_size: self.buffer_size,
+
+            #[cfg(feature = "tls")]
             tls: self.tls,
         }
     }
@@ -297,6 +322,8 @@ where
             local_addr: local_addr.into(),
             remote_addr: remote_addr.into(),
             buffer_size: None,
+
+            #[cfg(feature = "tls")]
             tls: None,
         })
     }
@@ -319,6 +346,8 @@ where
             local_addr: local_addr.try_into().expect("unix socket address"),
             remote_addr: remote_addr.try_into().expect("unix socket address"),
             buffer_size: None,
+
+            #[cfg(feature = "tls")]
             tls: None,
         })
     }
@@ -347,8 +376,6 @@ impl HasConnectionInfo for UnixStream {
 
     fn info(&self) -> ConnectionInfo<Self::Addr> {
         ConnectionInfo {
-            protocol: None,
-            authority: None,
             local_addr: Utf8PathBuf::from_path_buf(
                 self.local_addr().unwrap().as_pathname().unwrap().to_owned(),
             )
@@ -357,8 +384,7 @@ impl HasConnectionInfo for UnixStream {
                 self.peer_addr().unwrap().as_pathname().unwrap().to_owned(),
             )
             .expect("unix socket address"),
-            buffer_size: None,
-            tls: None,
+            ..Default::default()
         }
     }
 }

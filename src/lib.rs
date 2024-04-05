@@ -4,11 +4,23 @@ use tracing::dispatcher;
 
 pub mod body;
 pub mod bridge;
+
+#[cfg(feature = "client")]
 pub mod client;
+
+#[cfg(feature = "discovery")]
 pub mod discovery;
+
+#[cfg(feature = "client")]
 mod lazy;
+
+#[cfg(feature = "pidfile")]
 pub mod pidfile;
+
+#[cfg(feature = "server")]
 mod rewind;
+
+#[cfg(feature = "server")]
 pub mod server;
 pub mod stream;
 
