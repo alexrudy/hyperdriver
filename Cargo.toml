@@ -1,10 +1,10 @@
 [package]
 name = "hyperdriver"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Helpful tools for hyper"
 license = "MIT"
-repository = "https://github.com/linode-sokka/hyperdrive"
+repository = "https://github.com/alexrudy/hyperdriver"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
