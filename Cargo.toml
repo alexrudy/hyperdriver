@@ -15,7 +15,7 @@ http-body = { version = "1" }
 http-body-util = { version = "0.1" }
 humantime-serde = "1.1.1"
 hyper = { version = "1", features = ["full"] }
-libc = { version = "*" }
+libc = { version = "0.2" }
 ouroboros = "0.18"
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pin-project = { version = "1" }
@@ -31,4 +31,3 @@ tokio-rustls = "0.26"
 tower = { version = "0.4" }
 tracing = { version = "^0.1" }
 tracing-subscriber = { version = "^0.2" }
-tracing-test = { version = "*" }
