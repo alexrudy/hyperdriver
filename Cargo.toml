@@ -1,12 +1,17 @@
-[workspace]
-members = ["hyperdriver"]
-resolver = "2"
+[package]
+name = "hyperdriver"
+version = "0.1.0"
+edition = "2021"
+description = "Helpful tools for hyper"
+license = "MIT"
+repository = "https://github.com/linode-sokka/hyperdrive"
 
-[workspace.dependencies]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies]
 axum = "0.7"
 bytes = "1"
-camino = { version = "1", default-features = false }
+camino = { version = "1", default-features = false, features = ["serde1"] }
 dashmap = "5"
 futures-core = "0.3"
 futures-util = "0.3"
@@ -23,11 +28,24 @@ rustls = "^0.23"
 rustls-native-certs = "0.7.0"
 serde = { version = "1" }
 socket2 = "0.5"
-static-assertions = { version = "1", package = "static_assertions" }
-tempfile = "3"
 thiserror = { version = "1" }
-tokio = { version = "1" }
+tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26"
-tower = { version = "0.4" }
+tower = { version = "0.4", features = [
+    "make",
+    "util",
+], default-features = false }
 tracing = { version = "^0.1" }
-tracing-subscriber = { version = "^0.2" }
+
+[dev-dependencies]
+static-assertions = { version = "1", package = "static_assertions" }
+tracing-subscriber = "0.2"
+tempfile = "3"
+
+[features]
+default = []
+docs = []
+incoming = []
+
+[package.metadata.cargo-machete]
+ignored = ["humantime-serde"]
