@@ -114,6 +114,18 @@ where
     }
 }
 
+impl<IO> HasConnectionInfo for TlsStream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
+    type Addr = IO::Addr;
+
+    fn info(&self) -> ConnectionInfo<Self::Addr> {
+        self.rx.info()
+    }
+}
+
 impl<IO> AsyncRead for TlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,

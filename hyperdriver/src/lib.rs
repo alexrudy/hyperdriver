@@ -28,3 +28,7 @@ pub(crate) fn polled_span(span: &tracing::Span) {
         }
     });
 }
+
+pub(crate) mod private {
+    pub trait Sealed {}
+}

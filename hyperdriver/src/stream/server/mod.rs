@@ -46,7 +46,7 @@ where
 /// An async generator of new connections
 pub trait Accept {
     /// The connection type for this acceptor
-    type Conn: AsyncRead + AsyncWrite + Send + Unpin + 'static;
+    type Conn: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static;
 
     /// The error type for this acceptor
     type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
