@@ -39,7 +39,7 @@ tracing = { version = "^0.1" }
 
 [dev-dependencies]
 static-assertions = { version = "1", package = "static_assertions" }
-tracing-subscriber = "0.2"
+tracing-subscriber = "0.3"
 tempfile = "3"
 
 [features]
