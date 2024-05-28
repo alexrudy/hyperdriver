@@ -214,7 +214,7 @@ impl From<Utf8PathBuf> for BraidAddr {
 
 /// Information about a connection to a Braid stream.
 #[derive(Debug, Clone)]
-pub struct ConnectionInfo<Addr> {
+pub struct ConnectionInfo<Addr = BraidAddr> {
     /// The protocol used for this connection.
     pub protocol: Option<Protocol>,
 
