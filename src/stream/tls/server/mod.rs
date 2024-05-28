@@ -14,18 +14,18 @@ use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInf
 use super::TlsHandshakeStream;
 use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 pub mod acceptor;
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 pub mod connector;
 #[cfg(feature = "sni")]
 pub mod sni;
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 pub use self::acceptor::TlsAcceptor;
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 pub use self::connector::TlsConnectLayer;
 
 /// State tracks the process of accepting a connection and turning it into a stream.
@@ -101,7 +101,10 @@ where
     IO: HasConnectionInfo,
     IO::Addr: Clone,
 {
-    pub(crate) fn new(accept: Accept<IO>) -> Self {
+    /// Create a new `TlsStream` from an `Accept` future.
+    ///
+    /// This adapts the underlying `rustls` stream to provide connection information.
+    pub fn new(accept: Accept<IO>) -> Self {
         // We don't expect these to panic because we assume that the handshake has not finished when
         // this implementation is called. As long as no-one manually polls the future and then
         // does this after the future has returned ready, we should be okay.
@@ -117,6 +120,13 @@ where
             tx,
             rx,
         }
+    }
+
+    /// Receive the TLS connection info, which will become available when the handshake completes.
+    ///
+    /// If you are not actively polling the stream, this will block.
+    pub async fn recv_info(&self) -> io::Result<ConnectionInfo<IO::Addr>> {
+        self.rx.recv().await
     }
 }
 

@@ -24,6 +24,7 @@ mod rewind;
 pub mod server;
 pub mod stream;
 
+#[allow(unused)]
 pub(crate) struct DebugLiteral<T: fmt::Display>(T);
 
 impl<T: fmt::Display> fmt::Debug for DebugLiteral<T> {
@@ -32,6 +33,7 @@ impl<T: fmt::Display> fmt::Debug for DebugLiteral<T> {
     }
 }
 
+#[allow(unused)]
 pub(crate) fn polled_span(span: &tracing::Span) {
     dispatcher::get_default(|dispatch| {
         let id = span.id().expect("Missing ID; this is a bug");
@@ -42,5 +44,7 @@ pub(crate) fn polled_span(span: &tracing::Span) {
 }
 
 pub(crate) mod private {
+
+    #[allow(unused)]
     pub trait Sealed {}
 }

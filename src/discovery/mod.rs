@@ -12,7 +12,9 @@ use std::sync::Arc;
 #[cfg(feature = "client")]
 use crate::client::{HttpConnectionBuilder, TransportStream};
 use crate::pidfile::PidFile;
+#[cfg(feature = "client")]
 use crate::stream::client::Stream as ClientStream;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
@@ -219,8 +221,6 @@ impl ServiceRegistry {
     }
 
     /// Get an acceptor which will be bound to a service with this name.
-    ///
-    /// Prefer using `server` instead of this method.
     #[tracing::instrument(skip_all, fields(service=%service))]
     pub async fn bind(
         &self,

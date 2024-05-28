@@ -10,6 +10,7 @@ use tokio::io::AsyncWrite;
 use hyper::body::Incoming;
 use tower::Service;
 
+#[cfg(feature = "stream")]
 pub mod dns;
 
 #[cfg(feature = "stream")]
