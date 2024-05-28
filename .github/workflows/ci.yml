@@ -86,7 +86,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: rustfmt, clippy, rustdoc
+          components: rustfmt, clippy
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
