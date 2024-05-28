@@ -6,6 +6,9 @@ on:
 
 name: CI
 
+env:
+  RUSTDOCFLAGS: "-Dwarnings"
+
 jobs:
   build:
     name: Build
@@ -31,6 +34,16 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        steps:
+          - name: cargo check
+            run: cargo check --all-targets --all-features
+          - name: cargo hack check
+            run: cargo hack check --no-private --each-feature --no-dev-deps
+            hack: true
+          - name: cargo doc
+            run: cargo doc --all-features --no-deps
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -39,10 +52,9 @@ jobs:
         with:
           toolchain: stable
       - uses: taiki-e/install-action@cargo-hack
-      - name: Run cargo check
-        run: cargo check --all-targets --all-features
-      - name: Run cargo hack check
-        run: cargo hack check --no-private --each-feature --no-dev-deps
+        if: matrix.steps.hack
+      - name: ${{ matrix.steps.name }}
+        run: ${{ matrix.steps.run }}
 
   msrv:
     name: MSRV 1.74
@@ -60,6 +72,12 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+          - beta
+
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -67,7 +85,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.toolchain }}
 
       - name: Build cargo tests
         run: cargo test --all-features --no-run
@@ -101,23 +119,3 @@ jobs:
       - name: Run cargo clippy
         if: github.repository_owner != 'linode-sokka'
         run: cargo clippy --all-features -- -D warnings
-
-      - name: Run cargo doc
-        run: cargo doc --all-features --no-deps
-
-  docs:
-    name: Docs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-
-      - name: cargo doc
-        env:
-          RUSTDOCFLAGS: "-Dwarnings"
-        run: cargo doc --all-features --no-deps
