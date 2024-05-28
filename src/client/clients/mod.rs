@@ -202,12 +202,13 @@ where
     }
 }
 
-impl<P, C, T> tower::Service<http::Request<crate::body::Body>> for Client<P, T>
+impl<P, C, T, B> tower::Service<http::Request<B>> for Client<P, T>
 where
     C: Connection + PoolableConnection,
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
+    B: Into<crate::body::Body>,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
     type Response = http::Response<Incoming>;
@@ -218,8 +219,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: http::Request<crate::body::Body>) -> Self::Future {
-        self.request(req)
+    fn call(&mut self, req: http::Request<B>) -> Self::Future {
+        self.request(req.map(|b| b.into()))
     }
 }
 
