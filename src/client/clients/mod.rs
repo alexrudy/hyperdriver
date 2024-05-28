@@ -13,8 +13,8 @@ use http::Version;
 use hyper::body::Incoming;
 use tracing::warn;
 
-use crate::client::conn;
-
+#[cfg(feature = "stream")]
+use crate::client::conn::tcp::TcpConnectionConfig;
 #[cfg(feature = "stream")]
 use crate::client::conn::tcp::TcpConnector;
 use crate::client::conn::Connection;
@@ -27,6 +27,8 @@ use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
 use crate::client::pool::{self, PoolableConnection, Pooled};
 use crate::client::Error;
+
+#[cfg(feature = "stream")]
 use crate::client::HttpConnectionBuilder;
 use crate::stream::info::HasConnectionInfo;
 
@@ -111,15 +113,12 @@ impl Client<HttpConnectionBuilder, TcpConnector> {
             })),
 
             #[cfg(feature = "tls")]
-            transport: TcpConnector::new(
-                crate::client::conn::TcpConnectionConfig::default(),
-                default_tls_config(),
-            ),
+            transport: TcpConnector::new(TcpConnectionConfig::default(), default_tls_config()),
 
             #[cfg(not(feature = "tls"))]
-            transport: TcpConnector::new(crate::client::conn::TcpConnectionConfig::default()),
+            transport: TcpConnector::new(TcpConnectionConfig::default()),
 
-            protocol: conn::http::HttpConnectionBuilder::default(),
+            protocol: HttpConnectionBuilder::default(),
         }
     }
 }

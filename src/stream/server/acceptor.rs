@@ -1,11 +1,11 @@
 //! Accept incoming connections for Braid streams.
 
-use std::{
-    io,
-    net::SocketAddr,
-    pin::Pin,
-    task::{Context, Poll},
-};
+#[cfg(feature = "stream")]
+use std::io;
+#[cfg(feature = "stream")]
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 #[cfg(feature = "tls")]
 use std::sync::Arc;

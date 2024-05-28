@@ -5,6 +5,9 @@ edition = "2021"
 description = "Helpful tools for hyper"
 license = "MIT"
 repository = "https://github.com/alexrudy/hyperdriver"
+rust-version = "1.74"
+readme = "README.md"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -22,7 +25,6 @@ humantime-serde = { version = "1.1.1", optional = true }
 hyper = { version = "1", features = ["full"] }
 libc = { version = "0.2", optional = true }
 ouroboros = { version = "0.18", optional = true }
-pem-rfc7468 = { version = "0.7", features = ["alloc"], optional = true }
 pin-project = { version = "1" }
 rustls = { version = "0.23", optional = true }
 rustls-native-certs = { version = "0.7.0", optional = true }
@@ -41,6 +43,9 @@ tracing = { version = "^0.1" }
 static-assertions = { version = "1", package = "static_assertions" }
 tracing-subscriber = "0.3"
 tempfile = "3"
+clap = { version = "4.5.4" }
+pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+
 
 [features]
 axum = ["dep:axum"]
@@ -62,15 +67,33 @@ discovery = [
 pidfile = ["dep:libc"]
 sni = []
 stream = []
-tls = [
-    "dep:rustls-native-certs",
-    "dep:rustls",
-    "dep:tokio-rustls",
-    "dep:pem-rfc7468",
-]
+tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
+
+[[example]]
+name = "google"
+path = "examples/client/google.rs"
+required-features = ["client"]
+
+[[example]]
+name = "hello"
+path = "examples/client/hello.rs"
+required-features = ["client"]
+
+[[example]]
+name = "httpbin"
+path = "examples/client/httpbin.rs"
+required-features = ["client"]
+
+[[example]]
+name = "h2-server"
+path = "examples/server/h2.rs"
+required-features = ["server"]
 
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["rustls-native-certs"]
 
 
 [[test]]

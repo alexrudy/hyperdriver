@@ -7,6 +7,7 @@
 
 #[cfg(all(feature = "client", feature = "stream"))]
 pub mod client;
+#[cfg(feature = "stream")]
 mod core;
 pub mod duplex;
 pub mod info;
@@ -17,7 +18,8 @@ pub mod server;
 #[cfg(feature = "tls")]
 pub mod tls;
 
+#[cfg(feature = "stream")]
 pub use core::Braid;
 
-#[cfg(feature = "tls")]
+#[cfg(all(feature = "tls", feature = "stream"))]
 pub use core::TlsBraid;

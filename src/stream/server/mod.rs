@@ -92,6 +92,7 @@ where
     inner: IO,
 }
 
+/// Dispatching wrapper for potential stream connection types for servers
 #[cfg(not(feature = "stream"))]
 #[derive(Debug)]
 #[pin_project]

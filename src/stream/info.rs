@@ -4,12 +4,15 @@ use std::fmt;
 use std::io;
 use std::str::FromStr;
 
+#[cfg(feature = "stream")]
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use http::uri::Authority;
 use thiserror::Error;
 use tokio::net::{TcpStream, UnixStream};
 
+#[cfg(not(feature = "stream"))]
+use crate::stream::duplex::DuplexAddr;
 #[cfg(feature = "tls")]
 use crate::stream::tls::info::TlsConnectionInfo;
 
@@ -86,6 +89,7 @@ impl FromStr for Protocol {
 
 /// Canonicalize a socket address, converting IPv4 addresses which are
 /// mapped into IPv6 addresses into standard IPv4 addresses.
+#[cfg(feature = "stream")]
 fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
     match addr.ip() {
         std::net::IpAddr::V4(_) => addr,
@@ -103,6 +107,7 @@ fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
 ///
 /// Supports more than just network socket addresses, also support Unix socket addresses (paths)
 /// and unnamed Duplex and Unix socket connections.
+#[cfg(feature = "stream")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BraidAddr {
     /// A TCP socket address.
@@ -118,6 +123,7 @@ pub enum BraidAddr {
     UnixUnnamed,
 }
 
+#[cfg(feature = "stream")]
 impl std::fmt::Display for BraidAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -129,6 +135,7 @@ impl std::fmt::Display for BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
 impl BraidAddr {
     /// Returns the TCP socket address, if this is a TCP socket address.
     pub fn tcp(&self) -> Option<std::net::SocketAddr> {
@@ -155,12 +162,14 @@ impl BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<std::net::SocketAddr> for BraidAddr {
     fn from(addr: std::net::SocketAddr) -> Self {
         Self::Tcp(make_canonical(addr))
     }
 }
 
+#[cfg(feature = "stream")]
 impl TryFrom<tokio::net::unix::SocketAddr> for BraidAddr {
     type Error = io::Error;
     fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
@@ -182,12 +191,14 @@ impl TryFrom<tokio::net::unix::SocketAddr> for BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<(std::net::IpAddr, u16)> for BraidAddr {
     fn from(addr: (std::net::IpAddr, u16)) -> Self {
         Self::Tcp(std::net::SocketAddr::new(addr.0, addr.1))
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<(std::net::Ipv4Addr, u16)> for BraidAddr {
     fn from(addr: (std::net::Ipv4Addr, u16)) -> Self {
         Self::Tcp(std::net::SocketAddr::new(
@@ -197,6 +208,7 @@ impl From<(std::net::Ipv4Addr, u16)> for BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<(std::net::Ipv6Addr, u16)> for BraidAddr {
     fn from(addr: (std::net::Ipv6Addr, u16)) -> Self {
         Self::Tcp(std::net::SocketAddr::new(
@@ -206,15 +218,41 @@ impl From<(std::net::Ipv6Addr, u16)> for BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<Utf8PathBuf> for BraidAddr {
     fn from(addr: Utf8PathBuf) -> Self {
         Self::Unix(addr)
     }
 }
 
-/// Information about a connection to a Braid stream.
+/// Information about a connection to a stream.
+#[cfg(feature = "stream")]
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo<Addr = BraidAddr> {
+    /// The protocol used for this connection.
+    pub protocol: Option<Protocol>,
+
+    /// The authority name for the server.
+    pub authority: Option<Authority>,
+
+    /// The local address for this connection.
+    pub local_addr: Addr,
+
+    /// The remote address for this connection.
+    pub remote_addr: Addr,
+
+    /// Buffer size
+    pub buffer_size: Option<usize>,
+
+    #[cfg(feature = "tls")]
+    /// Transport Layer Security information for this connection.
+    pub tls: Option<TlsConnectionInfo>,
+}
+
+/// Information about a connection to a stream.
+#[cfg(not(feature = "stream"))]
+#[derive(Debug, Clone)]
+pub struct ConnectionInfo<Addr> {
     /// The protocol used for this connection.
     pub protocol: Option<Protocol>,
 
@@ -253,6 +291,7 @@ where
     }
 }
 
+#[cfg(feature = "stream")]
 impl ConnectionInfo<BraidAddr> {
     pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>, buffer_size: usize) -> Self {
         ConnectionInfo {
@@ -260,6 +299,22 @@ impl ConnectionInfo<BraidAddr> {
             authority: Some(name),
             local_addr: BraidAddr::Duplex,
             remote_addr: BraidAddr::Duplex,
+            buffer_size: Some(buffer_size),
+
+            #[cfg(feature = "tls")]
+            tls: None,
+        }
+    }
+}
+
+#[cfg(not(feature = "stream"))]
+impl ConnectionInfo<DuplexAddr> {
+    pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>, buffer_size: usize) -> Self {
+        ConnectionInfo {
+            protocol,
+            authority: Some(name),
+            local_addr: DuplexAddr,
+            remote_addr: DuplexAddr,
             buffer_size: Some(buffer_size),
 
             #[cfg(feature = "tls")]

@@ -28,6 +28,35 @@ jobs:
       - name: Run cargo build
         run: cargo build --release --target ${{ matrix.target }}
 
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Run cargo check
+        run: cargo check --all-targets --all-features
+      - name: Run cargo hack check
+        run: cargo hack check --no-private --each-feature --no-dev-deps
+
+  msrv:
+    name: MSRV 1.74
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.74.0
+      - name: Run cargo build
+        run: cargo check --all-targets --all-features
+
   test:
     name: Tests
     runs-on: ubuntu-latest
@@ -57,7 +86,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rustdoc
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
@@ -68,6 +97,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features -- -D warnings
+
+      - name: Run cargo clippy
+        if: github.repository_owner != 'linode-sokka'
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: Run cargo doc
+        run: cargo doc --all-features --no-deps
 
   docs:
     name: Docs
@@ -80,7 +116,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: rustfmt, clippy
 
       - name: cargo doc
         env:
