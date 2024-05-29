@@ -425,7 +425,7 @@ mod tests {
         let (tx, rx) = tokio::try_join!(
             async {
                 let stream = client.connect(1024, None).await?;
-                Ok::<_, BoxError>(TransportStream::new(stream.into()).await?)
+                Ok::<_, BoxError>(TransportStream::new_stream(stream.into()).await?)
             },
             async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }
         )?;

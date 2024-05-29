@@ -98,6 +98,12 @@ impl<IO> TransportStream<IO>
 where
     IO: HasConnectionInfo,
 {
+    /// Create a new transport from an IO stream.
+    pub fn new(stream: IO) -> Self {
+        let info = stream.info();
+        Self { stream, info }
+    }
+
     #[cfg_attr(not(feature = "tls"), allow(dead_code))]
     pub(crate) fn info(&self) -> &ConnectionInfo<IO::Addr> {
         &self.info
@@ -116,7 +122,7 @@ where
 impl TransportStream<Stream> {
     /// Create a new transport from a `crate::stream::client::Stream`.
     #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
-    pub async fn new(mut stream: Stream) -> io::Result<Self> {
+    pub async fn new_stream(mut stream: Stream) -> io::Result<Self> {
         #[cfg(feature = "tls")]
         stream.finish_handshake().await?;
 
