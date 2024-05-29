@@ -1,6 +1,7 @@
-use std::{fmt, future::Future, time::Duration};
+use std::{fmt, future::Future, marker::PhantomData, time::Duration};
 
-use tokio::task::JoinSet;
+use futures_util::stream::FuturesUnordered;
+use futures_util::StreamExt;
 use tracing::trace;
 
 /// Implements the Happy Eyeballs algorithm for connecting to a set of addresses.
@@ -12,23 +13,25 @@ use tracing::trace;
 /// one address at a time.
 ///
 /// To connect to all addresses simultaneously, set the `timeout` to zero.
-pub struct EyeballSet<T, E> {
-    tasks: JoinSet<Result<T, E>>,
+pub struct EyeballSet<F, T, E> {
+    tasks: FuturesUnordered<F>,
     timeout: Option<Duration>,
     error: Option<BoxError>,
+    result: PhantomData<Result<T, E>>,
 }
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-impl<T, E> EyeballSet<T, E> {
+impl<F, T, E> EyeballSet<F, T, E> {
     /// Create a new `EyeballSet` with an optional timeout.
     ///
     /// The timeout is the amount of time between individual connection attempts.
     pub fn new(timeout: Option<Duration>) -> Self {
         Self {
-            tasks: JoinSet::new(),
+            tasks: FuturesUnordered::new(),
             timeout,
             error: None,
+            result: PhantomData,
         }
     }
 
@@ -43,44 +46,35 @@ impl<T, E> EyeballSet<T, E> {
     }
 
     /// Spawn a future into the set of tasks.
-    pub fn spawn<F>(&mut self, future: F)
+    pub fn spawn(&mut self, future: F)
     where
-        F: Future<Output = Result<T, E>> + Send + 'static,
-        T: Send + 'static,
-        E: Send + 'static,
+        F: Future<Output = Result<T, E>>,
     {
-        self.tasks.spawn(future);
+        self.tasks.push(future);
     }
 }
 
-impl<T, E> EyeballSet<T, E>
+impl<F, T, E> EyeballSet<F, T, E>
 where
-    T: 'static,
-    E: fmt::Display + Into<BoxError> + 'static,
+    E: fmt::Display + Into<BoxError>,
+    F: Future<Output = Result<T, E>>,
 {
     async fn join_next(&mut self) -> Option<Result<T, BoxError>> {
-        match self.tasks.join_next().await {
-            Some(Ok(Ok(stream))) => {
-                self.tasks.abort_all();
+        match self.tasks.next().await {
+            Some(Ok(stream)) => {
+                // self.tasks.abort_all();
                 return Some(Ok(stream));
             }
-            Some(Ok(Err(e))) if self.error.is_none() => {
-                trace!("attempt error: {}", e);
-                self.error = Some(e.into());
-            }
-            Some(Ok(Err(e))) => {
-                trace!("attempt error: {}", e);
-            }
             Some(Err(e)) if self.error.is_none() => {
-                trace!("attempt panic: {}", e);
+                trace!("attempt error: {}", e);
                 self.error = Some(e.into());
             }
             Some(Err(e)) => {
-                trace!("attempt panic: {}", e);
+                trace!("attempt error: {}", e);
             }
             None => {
                 trace!("exhausted attempts");
-                self.tasks.abort_all();
+                // self.tasks.abort_all();
                 return self.error.take().map(Err);
             }
         }
@@ -111,13 +105,12 @@ where
     /// the error from the first task is returned.
     pub async fn next(&mut self) -> Option<Result<T, BoxError>> {
         if let Some(timeout) = self.timeout {
-            trace!( timeout = %timeout.as_millis(), "using happy eyeballs");
             match tokio::time::timeout(timeout, self.join_next()).await {
                 Ok(Some(Ok(stream))) => Some(Ok(stream)),
                 Ok(Some(Err(e))) => Some(Err(e)),
                 Ok(None) => None,
                 Err(_) => {
-                    tracing::trace!("future timeout, trying next future");
+                    tracing::trace!(timeout.ms=%timeout.as_millis(), "happy eyeballs timeout");
                     None
                 }
             }
@@ -131,15 +124,10 @@ where
     ///
     /// This function will resolve the futures in the order they are provided,
     /// with a delay between spawning each future. The first successful future is returned.
-    pub async fn from_iterator<F>(
+    pub async fn from_iterator(
         &mut self,
         iter: impl IntoIterator<Item = F>,
-    ) -> Result<T, BoxError>
-    where
-        F: Future<Output = Result<T, E>> + Send + 'static,
-        T: Send + 'static,
-        E: Send + 'static,
-    {
+    ) -> Result<T, BoxError> {
         for future in iter.into_iter() {
             self.spawn(future);
             if let Some(outcome) = self.next().await {
@@ -159,17 +147,13 @@ where
 
         self.finalize().await
     }
-
-    /// Abort all tasks in the set.
-    pub fn abort_all(&mut self) {
-        self.tasks.abort_all();
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::future::pending;
     use std::future::ready;
+    use std::future::Pending;
 
     use super::*;
 
@@ -187,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_future_error() {
-        let mut eyeballs: EyeballSet<(), &str> = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs: EyeballSet<_, (), &str> = EyeballSet::new(Some(Duration::ZERO));
 
         let future = async { Err::<(), _>("error") };
 
@@ -199,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_future_timeout() {
-        let mut eyeballs: EyeballSet<(), &str> = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs: EyeballSet<_, (), &str> = EyeballSet::new(Some(Duration::ZERO));
 
         let future = pending();
         eyeballs.spawn(future);
@@ -210,7 +194,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_set() {
-        let mut eyeballs: EyeballSet<(), &str> = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs: EyeballSet<Pending<Result<(), &str>>, (), &str> =
+            EyeballSet::new(Some(Duration::ZERO));
 
         let result = eyeballs.finalize().await;
         assert_eq!(result.unwrap_err().to_string(), "timed out");

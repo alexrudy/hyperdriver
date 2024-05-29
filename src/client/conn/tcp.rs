@@ -180,7 +180,6 @@ impl<'c> TcpConnecting<'c> {
         Self { addresses, config }
     }
 
-    #[tracing::instrument(skip(self), fields(addrs=%self.addresses.len()), level = "debug")]
     async fn connect(mut self) -> Result<TcpStream, TcpConnectionError> {
         let delay = self
             .config
@@ -189,9 +188,9 @@ impl<'c> TcpConnecting<'c> {
         let mut attempts = EyeballSet::new(delay);
 
         while let Some(address) = self.addresses.pop() {
-            trace!("tcp connect to {}", address);
-            let attempt = TcpConnectionAttempt::new(address, self.config.clone());
-            attempts.spawn(async move { attempt.connect().await });
+            let span = tracing::trace_span!("connect", %address);
+            let attempt = TcpConnectionAttempt::new(address, self.config);
+            attempts.spawn(async move { attempt.connect().instrument(span).await });
 
             if attempts.len() < 2 {
                 continue;
@@ -219,20 +218,20 @@ impl<'c> TcpConnecting<'c> {
 }
 
 /// Represents a single attempt to connect to a remote address.
-struct TcpConnectionAttempt {
+struct TcpConnectionAttempt<'c> {
     address: SocketAddr,
-    config: TcpConnectionConfig,
+    config: &'c TcpConnectionConfig,
 }
 
-impl TcpConnectionAttempt {
+impl<'c> TcpConnectionAttempt<'c> {
     async fn connect(self) -> Result<TcpStream, TcpConnectionError> {
-        let connect = connect(&self.address, self.config.connect_timeout, &self.config)?;
+        let connect = connect(&self.address, self.config.connect_timeout, self.config)?;
         connect.await
     }
 }
 
-impl TcpConnectionAttempt {
-    fn new(address: SocketAddr, config: TcpConnectionConfig) -> Self {
+impl<'c> TcpConnectionAttempt<'c> {
+    fn new(address: SocketAddr, config: &'c TcpConnectionConfig) -> Self {
         Self { address, config }
     }
 }
