@@ -1,3 +1,5 @@
+//! Simple PID lock file management.
+
 use std::io;
 
 use camino::{Utf8Path, Utf8PathBuf};
