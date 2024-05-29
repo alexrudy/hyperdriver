@@ -13,7 +13,7 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 
 use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
-use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use super::info::TlsConnectionInfo;
 use super::TlsHandshakeStream;
 
 #[cfg(feature = "connector")]
@@ -47,8 +47,7 @@ where
     IO: HasConnectionInfo,
 {
     state: State<IO>,
-    tx: TlsConnectionInfoSender<IO::Addr>,
-    rx: TlsConnectionInfoReciever<IO::Addr>,
+    info: ConnectionInfo<IO::Addr>,
 }
 
 impl<IO> HasConnectionInfo for ClientTlsStream<IO>
@@ -59,7 +58,7 @@ where
     type Addr = IO::Addr;
 
     fn info(&self) -> ConnectionInfo<Self::Addr> {
-        self.rx.info()
+        self.info.clone()
     }
 }
 
@@ -120,12 +119,12 @@ where
         F: FnOnce(&mut tokio_rustls::client::TlsStream<IO>, &mut Context) -> Poll<io::Result<R>>,
     {
         match self.state {
-            State::Handshake(ref mut accept) => match ready!(Pin::new(accept).poll(cx)) {
+            State::Handshake(ref mut connect) => match ready!(Pin::new(connect).poll(cx)) {
                 Ok(mut stream) => {
                     // Take some action here when the handshake happens
                     let (_, client_info) = stream.get_ref();
                     let info = TlsConnectionInfo::client(client_info);
-                    self.tx.send(info.clone());
+                    self.info.tls = Some(info);
 
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
@@ -149,12 +148,9 @@ where
 
         let info = stream.info();
 
-        let (tx, rx) = TlsConnectionInfo::channel(info);
-
         Self {
             state: State::Handshake(accept),
-            tx,
-            rx,
+            info,
         }
     }
 }
