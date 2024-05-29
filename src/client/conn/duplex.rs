@@ -50,7 +50,7 @@ impl tower::Service<Uri> for DuplexTransport {
         let protocol = self.protocol.clone();
         let fut = async move {
             let stream = client.connect(max_buf_size, protocol).await?;
-            TransportStream::new(stream.into()).await
+            TransportStream::new_stream(stream.into()).await
         };
 
         Box::pin(fut)

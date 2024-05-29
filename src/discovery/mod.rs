@@ -302,7 +302,7 @@ impl tower::Service<Uri> for RegistryTransport {
                 (async move {
                     let service = req.host().unwrap_or_default();
                     let stream = inner.connect(&config, service.into()).await?;
-                    Ok(TransportStream::new(stream)
+                    Ok(TransportStream::new_stream(stream)
                         .await
                         .expect("transport failed to handshake"))
                 })
@@ -317,7 +317,7 @@ impl tower::Service<Uri> for RegistryTransport {
                 (async move {
                     let stream =
                         connect_to_handle(&config, &inner.proxy, GRPC_PROXY_NAME.into()).await?;
-                    Ok(TransportStream::new(stream)
+                    Ok(TransportStream::new_stream(stream)
                         .await
                         .expect("transport failed to handshake"))
                 })

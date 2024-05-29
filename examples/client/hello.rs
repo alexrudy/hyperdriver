@@ -46,13 +46,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = config.with_root_certificates(roots).with_no_client_auth();
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         client.with_tls(config);
-
-        if args.get_flag("protocol") {
-            client.conn().set_protocol(HttpProtocol::Http1);
-        } else {
-            client.conn().set_protocol(HttpProtocol::Http2);
-        }
     }
+
+    let version: HttpProtocol = if args.get_flag("protocol") {
+        HttpProtocol::Http1
+    } else {
+        HttpProtocol::Http2
+    };
 
     let client = client.build();
 
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("uri argument must be present")
         .parse()?;
     for _ in 1usize..=n {
-        tokio::spawn(send(client.clone(), uri.clone(), dtx.clone()));
+        tokio::spawn(send(client.clone(), uri.clone(), version, dtx.clone()));
     }
 
     drop(dtx);
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (dtx, mut drx) = tokio::sync::mpsc::channel(n);
     for _ in 1usize..=n {
-        tokio::spawn(send(client.clone(), uri.clone(), dtx.clone()));
+        tokio::spawn(send(client.clone(), uri.clone(), version, dtx.clone()));
     }
 
     drop(dtx);
@@ -81,8 +81,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn send(mut client: Client, uri: Uri, done: tokio::sync::mpsc::Sender<()>) {
-    let res = match client.get(uri).await {
+async fn send(
+    client: Client,
+    uri: Uri,
+    version: HttpProtocol,
+    done: tokio::sync::mpsc::Sender<()>,
+) {
+    let req = http::Request::builder()
+        .uri(uri.clone())
+        .method("GET")
+        .version(version.version())
+        .body(hyperdriver::body::Body::empty())
+        .unwrap();
+
+    let res = match client.request(req).await {
         Ok(res) => res,
         Err(err) => {
             println!("Error: {}", err);

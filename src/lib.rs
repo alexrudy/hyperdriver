@@ -11,6 +11,8 @@ pub mod client;
 #[cfg(feature = "discovery")]
 pub mod discovery;
 
+pub mod happy_eyeballs;
+
 #[cfg(feature = "client")]
 mod lazy;
 

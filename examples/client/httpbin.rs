@@ -13,6 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             arg!(-X --method [METHOD] "HTTP method to use").default_value("GET"),
             arg!(-d --body [BODY] "HTTP body to send"),
             arg!(-H --header [HEADER]... "HTTP headers to send"),
+            arg!(--http2 "Use HTTP/2"),
         ])
         .get_matches();
 
@@ -39,8 +40,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .uri(uri)
         .body(body)?;
 
+    if args.get_flag("http2") {
+        *req.version_mut() = http::Version::HTTP_2;
+    }
+
     let hdrs = req.headers_mut();
-    hdrs.append(http::header::USER_AGENT, "patron/0.1.0".parse()?);
+    hdrs.append(
+        http::header::USER_AGENT,
+        concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse()?,
+    );
 
     if let Some(headers) = args.get_many::<String>("header") {
         for header in headers {
@@ -51,7 +59,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("Request: {} {}", req.method(), req.uri());
+    println!(
+        "Request: {} {} {:?}",
+        req.method(),
+        req.uri(),
+        req.version()
+    );
     for (name, value) in req.headers() {
         if let Ok(value) = value.to_str() {
             println!("  {}: {}", name, value);
