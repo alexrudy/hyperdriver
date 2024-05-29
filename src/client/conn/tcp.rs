@@ -91,7 +91,13 @@ where
         Box::pin(
             async move {
                 let stream = connector.connect(host.clone(), port).await?;
-                trace!(addr=%stream.peer_addr().expect("io error getting peer address"), "tcp connected");
+
+                if let Ok(peer_addr) = stream.peer_addr() {
+                    trace!(peer.addr = %peer_addr, "tcp connected");
+                } else {
+                    trace!("tcp connected");
+                }
+
                 if req.scheme_str() == Some("https") {
                     #[cfg(not(feature = "tls"))]
                     {
@@ -100,8 +106,14 @@ where
 
                     #[cfg(feature = "tls")]
                     {
-                        let mut stream =
-                            ClientStream::new(stream).tls(host.as_ref(), connector.tls.clone());
+                        let mut tls = connector.tls.clone();
+                        {
+                            let config = Arc::make_mut(&mut tls);
+                            config.alpn_protocols.push(b"h2".to_vec());
+                            config.alpn_protocols.push(b"http/1.1".to_vec());
+                        }
+
+                        let mut stream = ClientStream::new(stream).tls(host.as_ref(), tls);
 
                         stream
                             .finish_handshake()

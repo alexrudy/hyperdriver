@@ -141,7 +141,7 @@ where
     fn connect_to(
         &self,
         uri: http::Uri,
-        http_protocol: &HttpProtocol,
+        http_protocol: HttpProtocol,
     ) -> Checkout<P::Connection, TransportStream<T::IO>, ConnectionError> {
         let key: pool::Key = uri.clone().into();
 
@@ -164,7 +164,7 @@ where
                         .await
                         .map_err(|error| ConnectionError::Handshake(error.into()))?;
                     protocol
-                        .connect(transport)
+                        .connect(transport, http_protocol)
                         .await
                         .map_err(|error| ConnectionError::Handshake(error.into()))
                 }) as _
@@ -187,7 +187,7 @@ where
 
         let protocol: HttpProtocol = request.version().into();
 
-        let checkout = self.connect_to(uri, &protocol);
+        let checkout = self.connect_to(uri, protocol);
         ResponseFuture::new(checkout, request)
     }
 
@@ -327,20 +327,7 @@ async fn execute_request<C: Connection + PoolableConnection>(
         }
 
         //TODO: Configure set host header?
-        let uri = request.uri().clone();
-        request
-            .headers_mut()
-            .entry(http::header::HOST)
-            .or_insert_with(|| {
-                let hostname = uri.host().expect("authority implies host");
-                if let Some(port) = get_non_default_port(&uri) {
-                    let s = format!("{}:{}", hostname, port);
-                    HeaderValue::from_str(&s)
-                } else {
-                    HeaderValue::from_str(hostname)
-                }
-                .expect("uri host is valid header value")
-            });
+        set_host_header(&mut request);
 
         if request.method() == http::Method::CONNECT {
             authority_form(request.uri_mut());
@@ -351,9 +338,11 @@ async fn execute_request<C: Connection + PoolableConnection>(
         }
     } else if request.method() == http::Method::CONNECT {
         return Err(Error::InvalidMethod(http::Method::CONNECT));
-    } else {
-        absolute_form(request.uri_mut());
+    } else if conn.version() == Version::HTTP_2 {
+        set_host_header(&mut request);
     }
+
+    tracing::trace!(request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
 
     let response = conn
         .send_request(request)
@@ -426,4 +415,21 @@ fn is_schema_secure(uri: &Uri) -> bool {
     uri.scheme_str()
         .map(|scheme_str| matches!(scheme_str, "wss" | "https"))
         .unwrap_or_default()
+}
+
+fn set_host_header<B>(request: &mut http::Request<B>) {
+    let uri = request.uri().clone();
+    request
+        .headers_mut()
+        .entry(http::header::HOST)
+        .or_insert_with(|| {
+            let hostname = uri.host().expect("authority implies host");
+            if let Some(port) = get_non_default_port(&uri) {
+                let s = format!("{}:{}", hostname, port);
+                HeaderValue::from_str(&s)
+            } else {
+                HeaderValue::from_str(hostname)
+            }
+            .expect("uri host is valid header value")
+        });
 }

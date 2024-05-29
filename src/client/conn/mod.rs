@@ -203,11 +203,22 @@ where
     }
 }
 
+/// A request to establish a connection using a specific HTTP protocol
+/// over a given transport.
+#[derive(Debug)]
+pub struct ProtocolRequest<IO: HasConnectionInfo> {
+    /// The transport to use for the connection
+    pub transport: TransportStream<IO>,
+
+    /// The HTTP protocol to use for the connection
+    pub version: HttpProtocol,
+}
+
 /// Protocols (like HTTP) define how data is sent and received over a connection.
 pub trait Protocol<IO>
 where
     IO: HasConnectionInfo,
-    Self: Service<TransportStream<IO>, Response = Self::Connection>,
+    Self: Service<ProtocolRequest<IO>, Response = Self::Connection>,
 {
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
@@ -221,7 +232,11 @@ where
         + 'static;
 
     /// Connect to a remote server and return a connection.
-    fn connect(&mut self, transport: TransportStream<IO>) -> <Self as Protocol<IO>>::Future;
+    fn connect(
+        &mut self,
+        transport: TransportStream<IO>,
+        version: HttpProtocol,
+    ) -> <Self as Protocol<IO>>::Future;
 
     /// Poll the protocol to see if it is ready to accept a new connection.
     fn poll_ready(
@@ -233,7 +248,7 @@ where
 impl<T, C, IO> Protocol<IO> for T
 where
     IO: HasConnectionInfo,
-    T: Service<TransportStream<IO>, Response = C> + Send + 'static,
+    T: Service<ProtocolRequest<IO>, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
     C: Connection,
@@ -242,8 +257,12 @@ where
     type Connection = C;
     type Future = T::Future;
 
-    fn connect(&mut self, transport: TransportStream<IO>) -> <Self as Protocol<IO>>::Future {
-        self.call(transport)
+    fn connect(
+        &mut self,
+        transport: TransportStream<IO>,
+        version: HttpProtocol,
+    ) -> <Self as Protocol<IO>>::Future {
+        self.call(ProtocolRequest { transport, version })
     }
 
     fn poll_ready(

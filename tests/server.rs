@@ -8,6 +8,7 @@ use hyper::body::Incoming;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
+use hyperdriver::client::HttpProtocol;
 use hyperdriver::stream::client::Stream;
 use hyperdriver::stream::info::HasConnectionInfo;
 use hyperdriver::stream::server::Accept;
@@ -33,7 +34,10 @@ async fn connection<P: hyperdriver::client::Protocol<Stream>>(
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
     let stream = client.connect(1024, None).await?;
     let conn = protocol
-        .connect(hyperdriver::client::TransportStream::new(stream.into()).await?)
+        .connect(
+            hyperdriver::client::TransportStream::new_stream(stream.into()).await?,
+            HttpProtocol::Http1,
+        )
         .await?;
     Ok(conn)
 }

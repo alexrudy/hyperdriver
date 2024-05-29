@@ -15,21 +15,16 @@ use crate::client::conn::{Connection, HttpProtocol};
 use crate::client::pool::PoolableConnection;
 use crate::stream::info::HasConnectionInfo;
 
+use super::ProtocolRequest;
+
 /// A builder for configuring and starting HTTP connections.
 #[derive(Debug, Clone)]
 pub struct HttpConnectionBuilder {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
-    pub(crate) protocol: HttpProtocol,
 }
 
 impl HttpConnectionBuilder {
-    /// Set the default protocol for the connection.
-    pub fn set_protocol(&mut self, protocol: HttpProtocol) -> &mut Self {
-        self.protocol = protocol;
-        self
-    }
-
     /// Get the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
         &mut self.http1
@@ -46,7 +41,7 @@ impl HttpConnectionBuilder {
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
-        trace!("handshake");
+        trace!("handshake h2");
         let (sender, conn) = self
             .http2
             .handshake(TokioIo::new(stream))
@@ -88,15 +83,16 @@ impl HttpConnectionBuilder {
         })
     }
 
-    #[tracing::instrument(skip_all, fields(protocol = ?self.protocol))]
+    #[tracing::instrument(name = "tls", skip_all)]
     pub(crate) async fn handshake<IO>(
         &self,
         transport: TransportStream<IO>,
+        protocol: HttpProtocol,
     ) -> Result<HttpConnection, ConnectionError>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
-        match self.protocol {
+        match protocol {
             HttpProtocol::Http2 => self.handshake_h2(transport.into_inner()).await,
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
@@ -111,6 +107,9 @@ impl HttpConnectionBuilder {
                     return self.handshake_h2(transport.into_inner()).await;
                 }
 
+                #[cfg(feature = "tls")]
+                trace!(tls=?transport.info().tls, "no alpn h2 switching");
+
                 self.handshake_h1(transport.into_inner()).await
             }
         }
@@ -122,12 +121,11 @@ impl Default for HttpConnectionBuilder {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
             http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
-            protocol: HttpProtocol::Http1,
         }
     }
 }
 
-impl<IO> tower::Service<TransportStream<IO>> for HttpConnectionBuilder
+impl<IO> tower::Service<ProtocolRequest<IO>> for HttpConnectionBuilder
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Send + Sync,
@@ -145,13 +143,13 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.host().unwrap_or("-")))]
-    fn call(&mut self, req: TransportStream<IO>) -> Self::Future {
-        future::HttpConnectFuture::new(self.clone(), req)
+    #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.transport.host().unwrap_or("-")))]
+    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
+        future::HttpConnectFuture::new(self.clone(), req.transport, req.version)
     }
 }
 
-impl<IO> tower::Service<TransportStream<IO>> for hyper::client::conn::http1::Builder
+impl<IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http1::Builder
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
@@ -167,9 +165,9 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: TransportStream<IO>) -> Self::Future {
+    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
         let builder = self.clone();
-        let stream = req.into_inner();
+        let stream = req.transport.into_inner();
 
         Box::pin(async move {
             let (sender, conn) = builder
@@ -192,7 +190,7 @@ where
     }
 }
 
-impl<E, IO> tower::Service<TransportStream<IO>> for hyper::client::conn::http2::Builder<E>
+impl<E, IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http2::Builder<E>
 where
     E: hyper::rt::bounds::Http2ClientConnExec<crate::body::Body, TokioIo<IO>>
         + Unpin
@@ -214,9 +212,9 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: TransportStream<IO>) -> Self::Future {
+    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
         let builder = self.clone();
-        let stream = req.into_inner();
+        let stream = req.transport.into_inner();
 
         Box::pin(async move {
             let (sender, conn) = builder
@@ -250,6 +248,7 @@ mod future {
     use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::client::conn::TransportStream;
+    use crate::client::HttpProtocol;
     use crate::stream::info::HasConnectionInfo;
     use crate::DebugLiteral;
 
@@ -280,8 +279,9 @@ mod future {
         pub(super) fn new(
             builder: HttpConnectionBuilder,
             stream: TransportStream<IO>,
+            protocol: HttpProtocol,
         ) -> HttpConnectFuture<IO> {
-            let future = Box::pin(async move { builder.handshake(stream).await });
+            let future = Box::pin(async move { builder.handshake(stream, protocol).await });
 
             Self {
                 future,
@@ -406,7 +406,7 @@ mod tests {
 
     use super::*;
 
-    use crate::client::Error;
+    use crate::client::{Error, Protocol};
     use crate::stream::client::Stream;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};
@@ -416,7 +416,7 @@ mod tests {
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-    assert_impl_all!(HttpConnectionBuilder: Service<TransportStream<Stream>, Response = HttpConnection, Error = ConnectionError, Future = future::HttpConnectFuture<Stream>>, Debug, Clone);
+    assert_impl_all!(HttpConnectionBuilder: Service<ProtocolRequest<Stream>, Response = HttpConnection, Error = ConnectionError, Future = future::HttpConnectFuture<Stream>>, Debug, Clone);
     assert_impl_all!(future::HttpConnectFuture<Stream>: Future<Output = Result<HttpConnection, ConnectionError>>, Debug, Send);
 
     async fn transport() -> Result<(TransportStream<Stream>, Stream), BoxError> {
@@ -441,7 +441,7 @@ mod tests {
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = builder.call(stream).await.unwrap();
+        let mut conn = builder.connect(stream, HttpProtocol::Http1).await.unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(!conn.can_share());
@@ -483,11 +483,10 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut builder = HttpConnectionBuilder::default();
-        builder.set_protocol(HttpProtocol::Http2);
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = builder.call(stream).await.unwrap();
+        let mut conn = builder.connect(stream, HttpProtocol::Http2).await.unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(conn.can_share());
