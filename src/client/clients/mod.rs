@@ -192,7 +192,7 @@ where
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<Incoming>, Error> {
+    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<Incoming>, Error> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();

@@ -288,6 +288,14 @@ impl HttpProtocol {
     pub fn multiplex(&self) -> bool {
         matches!(self, Self::Http2)
     }
+
+    /// HTTP Version
+    pub fn version(&self) -> ::http::Version {
+        match self {
+            Self::Http1 => ::http::Version::HTTP_11,
+            Self::Http2 => ::http::Version::HTTP_2,
+        }
+    }
 }
 
 impl From<::http::Version> for HttpProtocol {
