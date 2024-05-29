@@ -1,7 +1,7 @@
 //! DNS resolution utilities.
 
+use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
@@ -12,54 +12,77 @@ use tokio::task::JoinHandle;
 
 /// A collection of socket addresses.
 #[derive(Debug, Clone, Default)]
-pub struct SocketAddrs(Vec<SocketAddr>);
+pub struct SocketAddrs(VecDeque<SocketAddr>);
 
 impl SocketAddrs {
-    fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    fn push(&mut self, addr: SocketAddr) {
-        self.0.push(addr)
-    }
-
     pub(crate) fn set_port(&mut self, port: u16) {
         for addr in &mut self.0 {
             addr.set_port(port)
         }
     }
 
-    pub(crate) fn split_prefered(self, prefer: Option<IpVersion>) -> (Self, Self) {
-        if let Some(version) = prefer {
-            let mut v4 = Self::new();
-            let mut v6 = Self::new();
-            for addr in self.0 {
-                match addr {
-                    SocketAddr::V4(_) => v4.push(addr),
-                    SocketAddr::V6(_) => v6.push(addr),
+    pub(crate) fn pop(&mut self) -> Option<SocketAddr> {
+        self.0.pop_front()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn sort_preferred(&mut self, prefer: Option<IpVersion>) {
+        let mut v4_idx = None;
+        let mut v6_idx = None;
+
+        for (idx, addr) in self.0.iter().enumerate() {
+            match (addr.version(), v4_idx, v6_idx) {
+                (IpVersion::V4, None, _) => {
+                    v4_idx = Some(idx);
                 }
+                (IpVersion::V6, _, None) => {
+                    v6_idx = Some(idx);
+                }
+                (_, Some(_), Some(_)) => break,
+                _ => {}
             }
-            match version {
-                IpVersion::V4 => (v4, v6),
-                IpVersion::V6 => (v6, v4),
-            }
-        } else {
-            (self, Self::new())
         }
-    }
-}
 
-impl Deref for SocketAddrs {
-    type Target = [SocketAddr];
+        let v4: Option<SocketAddr>;
+        let v6: Option<SocketAddr>;
+        if v4_idx.zip(v6_idx).map_or(false, |(v4, v6)| v4 > v6) {
+            v4 = v4_idx.and_then(|idx| self.0.remove(idx));
+            v6 = v6_idx.and_then(|idx| self.0.remove(idx));
+        } else {
+            v6 = v6_idx.and_then(|idx| self.0.remove(idx));
+            v4 = v4_idx.and_then(|idx| self.0.remove(idx));
+        }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+        match (prefer, v4, v6) {
+            (Some(IpVersion::V4), Some(addr_v4), Some(addr_v6)) => {
+                self.0.push_front(addr_v6);
+                self.0.push_front(addr_v4);
+            }
+            (Some(IpVersion::V6), Some(addr_v4), Some(addr_v6)) => {
+                self.0.push_front(addr_v4);
+                self.0.push_front(addr_v6);
+            }
 
-impl DerefMut for SocketAddrs {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+            (_, Some(addr_v4), Some(addr_v6)) => {
+                self.0.push_front(addr_v4);
+                self.0.push_front(addr_v6);
+            }
+            (_, Some(addr_v4), None) => {
+                self.0.push_front(addr_v4);
+            }
+            (_, None, Some(addr_v6)) => {
+                self.0.push_front(addr_v6);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -71,7 +94,7 @@ impl FromIterator<SocketAddr> for SocketAddrs {
 
 impl<'a> IntoIterator for &'a SocketAddrs {
     type Item = &'a SocketAddr;
-    type IntoIter = std::slice::Iter<'a, SocketAddr>;
+    type IntoIter = std::collections::vec_deque::Iter<'a, SocketAddr>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -100,7 +123,8 @@ impl IpVersion {
         ip_v6_address: Option<Ipv6Addr>,
     ) -> Option<Self> {
         match (ip_v4_address, ip_v6_address) {
-            (Some(_), Some(_)) => None,
+            // Prefer IPv6 if both are available.
+            (Some(_), Some(_)) => Some(Self::V6),
             (Some(_), None) => Some(Self::V4),
             (None, Some(_)) => Some(Self::V6),
             (None, None) => None,

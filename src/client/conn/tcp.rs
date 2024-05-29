@@ -9,18 +9,18 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures_util::FutureExt;
 use http::Uri;
-
 #[cfg(feature = "tls")]
 use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
 use tokio::net::{TcpSocket, TcpStream};
+use tokio::task::JoinError;
 use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
+use crate::happy_eyeballs::EyeballSet;
 use crate::stream::client::Stream as ClientStream;
 
 #[cfg(any(feature = "tls", feature = "stream"))]
@@ -91,6 +91,7 @@ where
         Box::pin(
             async move {
                 let stream = connector.connect(host.clone(), port).await?;
+                trace!(addr=%stream.peer_addr().expect("io error getting peer address"), "tcp connected");
                 if req.scheme_str() == Some("https") {
                     #[cfg(not(feature = "tls"))]
                     {
@@ -140,122 +141,87 @@ where
         connecting.connect().await
     }
 
-    fn connecting(&self, addrs: SocketAddrs) -> TcpConnecting<'_> {
-        if let Some(fallback_delay) = self.config.happy_eyeballs_timeout.as_ref() {
-            let (prefered, fallback) = addrs.split_prefered(IpVersion::from_binding(
+    fn connecting(&self, mut addrs: SocketAddrs) -> TcpConnecting<'_> {
+        if self.config.happy_eyeballs_timeout.is_some() {
+            addrs.sort_preferred(IpVersion::from_binding(
                 self.config.local_address_ipv4,
                 self.config.local_address_ipv6,
             ));
-
-            let prefered = TcpConnectingSet::new(prefered, self.config.connect_timeout);
-            if fallback.is_empty() {
-                return TcpConnecting {
-                    prefered,
-                    fallback: None,
-                    config: &self.config,
-                };
-            }
-
-            let fallback = TcpConnectingSet::new(fallback, self.config.connect_timeout);
-            let fallback = TcpFallback {
-                connect: fallback,
-                delay: *fallback_delay,
-                config: &self.config,
-            };
-
-            return TcpConnecting {
-                prefered,
-                fallback: Some(fallback),
-                config: &self.config,
-            };
         }
-        let prefered = TcpConnectingSet::new(addrs, self.config.connect_timeout);
-        TcpConnecting {
-            prefered,
-            fallback: None,
-            config: &self.config,
-        }
+
+        TcpConnecting::new(addrs, &self.config)
     }
 }
 
-/// Future which combines a primary and fallback connection set.
+/// Future which implements the happy eyeballs algorithm for connecting to a remote address.
+///
+/// This follows the algorithm described in [RFC8305](https://tools.ietf.org/html/rfc8305),
+/// which allows for faster connection times by trying multiple addresses in parallel,
+/// regardless of whether they are IPv4 or IPv6.
 pub(crate) struct TcpConnecting<'c> {
-    prefered: TcpConnectingSet,
-    fallback: Option<TcpFallback<'c>>,
+    addresses: SocketAddrs,
     config: &'c TcpConnectionConfig,
 }
 
 impl<'c> TcpConnecting<'c> {
-    async fn connect(self) -> Result<TcpStream, TcpConnectionError> {
-        let mut fallback_delay = if let Some(fallback) = self.fallback {
-            futures_util::future::Either::Left(async move {
-                tokio::time::sleep(fallback.delay).await;
-                trace!("tcp starting connection fallback");
-                fallback.connect.connect(fallback.config).await
-            })
-        } else {
-            futures_util::future::Either::Right(futures_util::future::pending())
-        };
+    pub(crate) fn new(addresses: SocketAddrs, config: &'c TcpConnectionConfig) -> Self {
+        Self { addresses, config }
+    }
 
-        let mut fallback = std::pin::pin!(fallback_delay);
-        let mut primary = std::pin::pin!(self.prefered.connect(self.config).fuse());
-        let mut primary_error = None;
+    #[tracing::instrument(skip(self), fields(addrs=%self.addresses.len()), level = "debug")]
+    async fn connect(mut self) -> Result<TcpStream, TcpConnectionError> {
+        let delay = self
+            .config
+            .happy_eyeballs_timeout
+            .map(|duration| duration / (self.addresses.len() + 1) as u32);
+        let mut attempts = EyeballSet::new(delay);
 
-        loop {
-            tokio::select! {
-                biased;
-                res = &mut primary => match res {
+        while let Some(address) = self.addresses.pop() {
+            trace!("tcp connect to {}", address);
+            let attempt = TcpConnectionAttempt::new(address, self.config.clone());
+            attempts.spawn(async move { attempt.connect().await });
+
+            if attempts.len() < 2 {
+                continue;
+            }
+
+            if let Some(outcome) = attempts.next().await {
+                return match outcome {
                     Ok(stream) => return Ok(stream),
-                    Err(e) => primary_error = Some(e),
-                },
-                Ok(stream) = &mut fallback => return Ok(stream),
-                else => break,
-            };
-        }
-
-        // If we got here, both the primary and fallback failed. Return the error from the primary
-        Err(primary_error.expect("primary connection attempt should have failed"))
-    }
-}
-
-/// Wraps a connector with a delay as a fallback.
-struct TcpFallback<'c> {
-    connect: TcpConnectingSet,
-    delay: Duration,
-    config: &'c TcpConnectionConfig,
-}
-
-/// A connector which will try to connect to addresses in sequence.
-struct TcpConnectingSet {
-    addrs: SocketAddrs,
-    timeout: Option<Duration>,
-}
-
-impl TcpConnectingSet {
-    fn new(addrs: SocketAddrs, timeout: Option<Duration>) -> Self {
-        let per_connection_timeout = timeout.and_then(|t| t.checked_div(addrs.len() as u32));
-        Self {
-            addrs,
-            timeout: per_connection_timeout,
-        }
-    }
-
-    async fn connect(&self, config: &TcpConnectionConfig) -> Result<TcpStream, TcpConnectionError> {
-        let mut last_err = None;
-        for addr in &self.addrs {
-            match connect(addr, self.timeout, config)?.await {
-                Ok(stream) => {
-                    trace!("connected to {}", addr);
-                    return Ok(stream);
-                }
-                Err(e) => {
-                    trace!("connection to {} failed: {}", addr, e);
-                    last_err = Some(e)
-                }
+                    Err(e) => match e.downcast::<TcpConnectionError>() {
+                        Ok(e) => Err(*e),
+                        Err(e) => Err(TcpConnectionError::boxed("panic", e)),
+                    },
+                };
             }
         }
 
-        Err(last_err.unwrap_or_else(|| TcpConnectionError::new("no addresses to connect to")))
+        attempts
+            .finalize()
+            .await
+            .map_err(|err| match err.downcast::<TcpConnectionError>() {
+                Ok(e) => *e,
+                Err(e) => TcpConnectionError::boxed("panic", e),
+            })
+    }
+}
+
+/// Represents a single attempt to connect to a remote address.
+struct TcpConnectionAttempt {
+    address: SocketAddr,
+    config: TcpConnectionConfig,
+}
+
+impl TcpConnectionAttempt {
+    async fn connect(self) -> Result<TcpStream, TcpConnectionError> {
+        let connect = connect(&self.address, self.config.connect_timeout, &self.config)?;
+        connect.await
+    }
+}
+
+impl TcpConnectionAttempt {
+    fn new(address: SocketAddr, config: TcpConnectionConfig) -> Self {
+        Self { address, config }
     }
 }
 
@@ -288,6 +254,33 @@ impl TcpConnectionError {
             source: Some(error.into()),
         }
     }
+
+    pub(super) fn build<S, E>(message: S, error: E) -> Self
+    where
+        S: Into<String>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self {
+            message: message.into(),
+            source: Some(Box::new(error)),
+        }
+    }
+
+    pub(super) fn boxed<S>(message: S, error: Box<dyn std::error::Error + Send + Sync>) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            message: message.into(),
+            source: Some(error),
+        }
+    }
+}
+
+impl From<JoinError> for TcpConnectionError {
+    fn from(value: JoinError) -> Self {
+        Self::build("tcp connection panic", value)
+    }
 }
 
 impl fmt::Display for TcpConnectionError {
@@ -301,7 +294,7 @@ impl fmt::Display for TcpConnectionError {
 }
 
 /// Configuration for TCP connections.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TcpConnectionConfig {
     /// The timeout for connecting to a remote address.
     pub connect_timeout: Option<Duration>,
