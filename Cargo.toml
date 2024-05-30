@@ -105,9 +105,9 @@ normal = ["rustls-native-certs"]
 [[test]]
 name = "server"
 path = "tests/server.rs"
-required-features = ["server"]
+required-features = ["server", "client", "stream"]
 
 [[test]]
 name = "client"
 path = "tests/client.rs"
-required-features = ["client"]
+required-features = ["server", "client", "stream"]
