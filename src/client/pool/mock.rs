@@ -11,10 +11,10 @@ use super::{PoolableConnection, PoolableTransport};
 static IDENT: AtomicU16 = AtomicU16::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct ConnectionId(u16);
+pub(crate) struct ConnectionId(u16);
 
 impl ConnectionId {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(IDENT.fetch_add(1, Ordering::SeqCst))
     }
 }
@@ -26,7 +26,7 @@ impl fmt::Display for ConnectionId {
 }
 
 #[derive(Debug)]
-pub(super) struct MockTransport {
+pub(crate) struct MockTransport {
     reuse: bool,
 }
 
@@ -37,33 +37,33 @@ impl PoolableTransport for MockTransport {
 }
 
 impl MockTransport {
-    pub(super) fn new(reuse: bool) -> Self {
+    pub(crate) fn new(reuse: bool) -> Self {
         Self { reuse }
     }
 
-    pub(super) async fn single() -> Result<Self, Infallible> {
+    pub(crate) async fn single() -> Result<Self, Infallible> {
         Ok(Self::new(false))
     }
 
-    pub(super) async fn reusable() -> Result<Self, Infallible> {
+    pub(crate) async fn reusable() -> Result<Self, Infallible> {
         Ok(Self::new(true))
     }
 
-    pub(super) fn handshake(self) -> BoxFuture<'static, Result<MockConnection, Infallible>> {
+    pub(crate) fn handshake(self) -> BoxFuture<'static, Result<MockConnection, Infallible>> {
         let reuse = self.reuse;
         Box::pin(async move { Ok(MockConnection::new(reuse)) })
     }
 }
 
 #[derive(Debug)]
-pub(super) struct MockConnection {
+pub(crate) struct MockConnection {
     open: Arc<AtomicBool>,
     reuse: bool,
     ident: ConnectionId,
 }
 
 impl MockConnection {
-    pub(super) fn id(&self) -> ConnectionId {
+    pub(crate) fn id(&self) -> ConnectionId {
         self.ident
     }
 
@@ -77,16 +77,16 @@ impl MockConnection {
         conn
     }
 
-    pub(super) fn single() -> Self {
+    pub(crate) fn single() -> Self {
         Self::new(false)
     }
 
     #[allow(dead_code)]
-    pub(super) fn reusable() -> Self {
+    pub(crate) fn reusable() -> Self {
         Self::new(true)
     }
 
-    pub(super) fn close(&self) {
+    pub(crate) fn close(&self) {
         self.open.store(false, Ordering::SeqCst);
     }
 }

@@ -39,7 +39,18 @@ use crate::client::default_tls_config;
 mod builder;
 
 #[cfg(feature = "stream")]
-/// An HTTP client
+/// A simple async HTTP client.
+///
+/// This client is built on top of the `tokio` runtime and the `hyper` HTTP library.
+/// It combines a connection pool with a transport layer to provide a simple API for
+/// sending HTTP requests.
+///
+/// # Example
+/// ```no_run
+/// let client = Client::new_tcp_http();
+/// let response = client.get("http://example.com".parse().unwrap()).await.unwrap();
+/// println!("Response: {:?}", response);
+/// ```
 #[derive(Debug)]
 pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>
 where
@@ -332,6 +343,13 @@ async fn execute_request<C: Connection + PoolableConnection>(
 
         if request.method() == http::Method::CONNECT {
             authority_form(request.uri_mut());
+
+            // If the URI is to HTTPS, and the connector claimed to be a proxy,
+            // then it *should* have tunneled, and so we don't want to send
+            // absolute-form in that case.
+            if request.uri().scheme() == Some(&Scheme::HTTPS) {
+                origin_form(request.uri_mut());
+            }
         } else if request.uri().scheme().is_none() || request.uri().authority().is_none() {
             absolute_form(request.uri_mut());
         } else {
@@ -362,6 +380,10 @@ async fn execute_request<C: Connection + PoolableConnection>(
     Ok(response)
 }
 
+/// Convert the URI to authority-form, if it is not already.
+///
+/// This is the form of the URI with just the authority and a default
+/// path and scheme. This is used in HTTP/1 CONNECT requests.
 fn authority_form(uri: &mut Uri) {
     *uri = match uri.authority() {
         Some(auth) => {
@@ -381,14 +403,12 @@ fn absolute_form(uri: &mut Uri) {
         uri.authority().is_some(),
         "absolute_form needs an authority"
     );
-    // If the URI is to HTTPS, and the connector claimed to be a proxy,
-    // then it *should* have tunneled, and so we don't want to send
-    // absolute-form in that case.
-    if uri.scheme() == Some(&Scheme::HTTPS) {
-        origin_form(uri);
-    }
 }
 
+/// Convert the URI to origin-form, if it is not already.
+///
+/// This form of the URI has no scheme or authority, and contains just
+/// the path, usually used in HTTP/1 requests.
 fn origin_form(uri: &mut Uri) {
     let path = match uri.path_and_query() {
         Some(path) if path.as_str() != "/" => {
@@ -404,6 +424,7 @@ fn origin_form(uri: &mut Uri) {
     *uri = path
 }
 
+/// Returns the port if it is not the default port for the scheme.
 fn get_non_default_port(uri: &Uri) -> Option<Port<&str>> {
     match (uri.port().map(|p| p.as_u16()), is_schema_secure(uri)) {
         (Some(443), true) => None,
@@ -412,12 +433,15 @@ fn get_non_default_port(uri: &Uri) -> Option<Port<&str>> {
     }
 }
 
+/// Returns true if the URI scheme is presumed secure.
 fn is_schema_secure(uri: &Uri) -> bool {
     uri.scheme_str()
         .map(|scheme_str| matches!(scheme_str, "wss" | "https"))
         .unwrap_or_default()
 }
 
+/// Set the Host header on the request if it is not already set,
+/// using the authority from the URI.
 fn set_host_header<B>(request: &mut http::Request<B>) {
     let uri = request.uri().clone();
     request

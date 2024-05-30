@@ -1,4 +1,13 @@
 //! TCP transport implementation for client connections.
+//!
+//! This module contains the [`TcpConnector`] type, which is a [`tower::Service`] that connects to
+//! remote addresses using TCP. It also contains the [`TcpConnectionConfig`] type, which is used to
+//! configure TCP connections.
+//!
+//! Normally, you will not need to use this module directly. Instead, you can use the [`Client`][crate::client::Client]
+//! type from the [`client`][crate::client] module, which uses the [`TcpConnector`] internally by default.
+//!
+//! See [`Client::new_http_tcp`][crate::client::Client::new_tcp_http] for the default constructor which uses the TCP transport.
 
 use std::fmt;
 use std::future::Future;
@@ -27,6 +36,34 @@ use crate::stream::client::Stream as ClientStream;
 use crate::stream::info::HasConnectionInfo as _;
 
 /// A TCP connector for client connections.
+///
+/// This type is a [`tower::Service`] that connects to remote addresses using TCP.
+/// It requires a resolver `R`, which is by default [`GaiResolver`], which uses
+/// the system's DNS resolver to resolve hostnames to IP addresses.
+///
+/// The connector can be configured with a [`TcpConnectionConfig`] to control
+/// various aspects of the TCP connection, such as timeouts, buffer sizes, and
+/// local addresses to bind to.
+///
+/// If the `tls` feature is enabled, the connector can also be configured with
+/// a [`TlsClientConfig`] to enable TLS support.
+///
+/// This connector implements the happy-eyeballs algorithm for connecting to
+/// remote addresses, which allows for faster connection times by trying
+/// multiple addresses in parallel, regardless of whether they are IPv4 or IPv6.
+///
+/// # Example
+/// ```no_run
+/// # use hyperdriver::client::conn::tcp::TcpConnector;
+/// # use hyperdriver::client::conn::TcpConnectionConfig;
+///
+/// let config = TcpConnectionConfig::default();
+/// let connector = TcpConnector::new(config);
+///
+/// let uri = "http://example.com".parse().unwrap();
+/// let stream = connector.call(uri).await.unwrap();
+///
+/// ```
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
     config: Arc<TcpConnectionConfig>,
