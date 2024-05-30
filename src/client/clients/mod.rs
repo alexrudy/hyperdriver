@@ -434,3 +434,122 @@ fn set_host_header<B>(request: &mut http::Request<B>) {
             .expect("uri host is valid header value")
         });
 }
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_set_host_header() {
+        let mut request = http::Request::new(());
+        *request.uri_mut() = "http://example.com".parse().unwrap();
+        set_host_header(&mut request);
+        assert_eq!(
+            request.headers().get(http::header::HOST).unwrap(),
+            "example.com"
+        );
+
+        let mut request = http::Request::new(());
+        *request.uri_mut() = "http://example.com:8080".parse().unwrap();
+        set_host_header(&mut request);
+        assert_eq!(
+            request.headers().get(http::header::HOST).unwrap(),
+            "example.com:8080"
+        );
+
+        let mut request = http::Request::new(());
+        *request.uri_mut() = "https://example.com".parse().unwrap();
+        set_host_header(&mut request);
+        assert_eq!(
+            request.headers().get(http::header::HOST).unwrap(),
+            "example.com"
+        );
+
+        let mut request = http::Request::new(());
+        *request.uri_mut() = "https://example.com:8443".parse().unwrap();
+        set_host_header(&mut request);
+        assert_eq!(
+            request.headers().get(http::header::HOST).unwrap(),
+            "example.com:8443"
+        );
+    }
+
+    #[test]
+    fn test_is_schema_secure() {
+        let uri = "http://example.com".parse().unwrap();
+        assert!(!is_schema_secure(&uri));
+
+        let uri = "https://example.com".parse().unwrap();
+        assert!(is_schema_secure(&uri));
+
+        let uri = "ws://example.com".parse().unwrap();
+        assert!(!is_schema_secure(&uri));
+
+        let uri = "wss://example.com".parse().unwrap();
+        assert!(is_schema_secure(&uri));
+    }
+
+    #[test]
+    fn test_get_non_default_port() {
+        let uri = "http://example.com".parse().unwrap();
+        assert_eq!(get_non_default_port(&uri).map(|p| p.as_u16()), None);
+
+        let uri = "http://example.com:8080".parse().unwrap();
+        assert_eq!(get_non_default_port(&uri).map(|p| p.as_u16()), Some(8080));
+
+        let uri = "https://example.com".parse().unwrap();
+        assert_eq!(get_non_default_port(&uri).map(|p| p.as_u16()), None);
+
+        let uri = "https://example.com:8443".parse().unwrap();
+        assert_eq!(get_non_default_port(&uri).map(|p| p.as_u16()), Some(8443));
+    }
+
+    #[test]
+    fn test_origin_form() {
+        let mut uri = "http://example.com".parse().unwrap();
+        origin_form(&mut uri);
+        assert_eq!(uri, "/");
+
+        let mut uri = "/some/path/here".parse().unwrap();
+        origin_form(&mut uri);
+        assert_eq!(uri, "/some/path/here");
+
+        let mut uri = "http://example.com:8080/some/path?query#fragment"
+            .parse()
+            .unwrap();
+        origin_form(&mut uri);
+        assert_eq!(uri, "/some/path?query");
+
+        let mut uri = "/".parse().unwrap();
+        origin_form(&mut uri);
+        assert_eq!(uri, "/");
+    }
+
+    #[test]
+    fn test_absolute_form() {
+        let mut uri = "http://example.com".parse().unwrap();
+        absolute_form(&mut uri);
+        assert_eq!(uri, "http://example.com");
+
+        let mut uri = "http://example.com:8080".parse().unwrap();
+        absolute_form(&mut uri);
+        assert_eq!(uri, "http://example.com:8080");
+
+        let mut uri = "https://example.com/some/path?query".parse().unwrap();
+        absolute_form(&mut uri);
+        assert_eq!(uri, "https://example.com/some/path?query");
+
+        let mut uri = "https://example.com:8443".parse().unwrap();
+        absolute_form(&mut uri);
+        assert_eq!(uri, "https://example.com:8443");
+
+        let mut uri = "http://example.com:443".parse().unwrap();
+        absolute_form(&mut uri);
+        assert_eq!(uri, "http://example.com:443");
+
+        let mut uri = "https://example.com:80".parse().unwrap();
+        absolute_form(&mut uri);
+        assert_eq!(uri, "https://example.com:80");
+    }
+}

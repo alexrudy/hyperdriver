@@ -20,7 +20,7 @@ use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
-use crate::happy_eyeballs::EyeballSet;
+use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 use crate::stream::client::Stream as ClientStream;
 
 #[cfg(any(feature = "tls", feature = "stream"))]
@@ -54,6 +54,38 @@ impl TcpConnector {
             config: Arc::new(config),
             resolver: GaiResolver::new(),
         }
+    }
+}
+
+impl<R> TcpConnector<R> {
+    #[cfg(feature = "tls")]
+    /// Create a new `TcpConnector` with the given configuration, resolver, and TLS configuration.
+    pub fn with_resolver(config: TcpConnectionConfig, resolver: R, tls: TlsClientConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            resolver,
+            tls: Arc::new(tls),
+        }
+    }
+
+    #[cfg(not(feature = "tls"))]
+    /// Create a new `TcpConnector` with the given configuration and resolver.
+    pub fn with_resolver(resolver: R) -> Self {
+        Self {
+            config: Arc::new(TcpConnectionConfig::default()),
+            resolver,
+        }
+    }
+
+    /// Get the configuration for the TCP connector.
+    pub fn config(&self) -> &Arc<TcpConnectionConfig> {
+        &self.config
+    }
+
+    #[cfg(feature = "tls")]
+    /// Get the TLS configuration for the TCP connector.
+    pub fn tls(&self) -> &Arc<TlsClientConfig> {
+        &self.tls
     }
 }
 
@@ -198,22 +230,17 @@ impl<'c> TcpConnecting<'c> {
 
             if let Some(outcome) = attempts.next().await {
                 return match outcome {
-                    Ok(stream) => return Ok(stream),
-                    Err(e) => match e.downcast::<TcpConnectionError>() {
-                        Ok(e) => Err(*e),
-                        Err(e) => Err(TcpConnectionError::boxed("panic", e)),
-                    },
+                    Ok(stream) => Ok(stream),
+                    Err(HappyEyeballsError::Error(e)) => Err(e),
+                    Err(error) => Err(TcpConnectionError::build("happy eyeballs", error)),
                 };
             }
         }
 
-        attempts
-            .finalize()
-            .await
-            .map_err(|err| match err.downcast::<TcpConnectionError>() {
-                Ok(e) => *e,
-                Err(e) => TcpConnectionError::boxed("panic", e),
-            })
+        attempts.finalize().await.map_err(|err| match err {
+            HappyEyeballsError::Error(err) => err,
+            err => TcpConnectionError::build("happy eyeballs", err),
+        })
     }
 }
 
@@ -274,16 +301,6 @@ impl TcpConnectionError {
         Self {
             message: message.into(),
             source: Some(Box::new(error)),
-        }
-    }
-
-    pub(super) fn boxed<S>(message: S, error: Box<dyn std::error::Error + Send + Sync>) -> Self
-    where
-        S: Into<String>,
-    {
-        Self {
-            message: message.into(),
-            source: Some(error),
         }
     }
 }
