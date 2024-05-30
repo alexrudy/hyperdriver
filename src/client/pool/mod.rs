@@ -17,7 +17,7 @@ mod key;
 mod weakopt;
 
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 
 pub(crate) use self::checkout::Checkout;
 pub(crate) use self::checkout::Connector;
@@ -68,6 +68,12 @@ impl<T: PoolableConnection> Pool<T> {
     }
 }
 
+impl<T: PoolableConnection> Default for Pool<T> {
+    fn default() -> Self {
+        Self::new(Config::default())
+    }
+}
+
 impl<C: PoolableConnection> Pool<C> {
     #[tracing::instrument(skip_all, fields(key = %key), level="debug")]
     pub(crate) fn checkout<T, E>(
@@ -109,16 +115,16 @@ impl<C: PoolableConnection> Pool<C> {
 }
 
 #[derive(Debug)]
-struct PoolInner<T: PoolableConnection> {
+struct PoolInner<C: PoolableConnection> {
     config: Config,
 
     connecting: HashSet<key::Key>,
-    waiting: HashMap<key::Key, VecDeque<Sender<Pooled<T>>>>,
+    waiting: HashMap<key::Key, VecDeque<Sender<Pooled<C>>>>,
 
-    idle: HashMap<key::Key, IdleConnections<T>>,
+    idle: HashMap<key::Key, IdleConnections<C>>,
 }
 
-impl<T: PoolableConnection> PoolInner<T> {
+impl<C: PoolableConnection> PoolInner<C> {
     fn new(config: Config) -> Self {
         Self {
             config,
@@ -144,8 +150,8 @@ impl<T: PoolableConnection> PoolInner<T> {
     }
 }
 
-impl<T: PoolableConnection> PoolInner<T> {
-    fn push(&mut self, key: key::Key, mut connection: T, pool_ref: WeakOpt<Mutex<Self>>) {
+impl<C: PoolableConnection> PoolInner<C> {
+    fn push(&mut self, key: key::Key, mut connection: C, pool_ref: WeakOpt<Mutex<Self>>) {
         self.connecting.remove(&key);
 
         if let Some(waiters) = self.waiting.get_mut(&key) {
@@ -184,7 +190,7 @@ impl<T: PoolableConnection> PoolInner<T> {
         self.idle.entry(key).or_default().push(connection);
     }
 
-    fn pop(&mut self, key: &key::Key) -> Option<T> {
+    fn pop(&mut self, key: &key::Key) -> Option<C> {
         let mut empty = false;
         let mut idle_entry = None;
 
@@ -228,11 +234,14 @@ pub trait PoolableTransport: Unpin + Send + Sized + 'static {
     /// Returns `true` if the transport can be re-used, usually
     /// because it has used ALPN to negotiate a protocol that can
     /// be multiplexed.
+    ///
+    /// This is effectively speculative, so should only return `true`
+    /// when we are sure that the connection on this transport
+    /// will be able to multiplex.
     fn can_share(&self) -> bool;
 }
 
 /// A [`crate::client::Protocol`] that can be pooled.
-
 pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     /// Returns `true` if the connection is open.
     fn is_open(&self) -> bool;
@@ -248,34 +257,34 @@ pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     fn reuse(&mut self) -> Option<Self>;
 }
 
-pub(crate) struct Pooled<T: PoolableConnection> {
-    connection: Option<T>,
+pub(crate) struct Pooled<C: PoolableConnection> {
+    connection: Option<C>,
     is_reused: bool,
     key: key::Key,
-    pool: weakopt::WeakOpt<Mutex<PoolInner<T>>>,
+    pool: weakopt::WeakOpt<Mutex<PoolInner<C>>>,
 }
 
-impl<T: fmt::Debug + PoolableConnection> fmt::Debug for Pooled<T> {
+impl<C: fmt::Debug + PoolableConnection> fmt::Debug for Pooled<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Pooled").field(&self.connection).finish()
     }
 }
 
-impl<T: PoolableConnection> Deref for Pooled<T> {
-    type Target = T;
+impl<C: PoolableConnection> Deref for Pooled<C> {
+    type Target = C;
 
     fn deref(&self) -> &Self::Target {
         self.connection.as_ref().unwrap()
     }
 }
 
-impl<T: PoolableConnection> DerefMut for Pooled<T> {
+impl<C: PoolableConnection> DerefMut for Pooled<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.connection.as_mut().unwrap()
     }
 }
 
-impl<T: PoolableConnection> Drop for Pooled<T> {
+impl<C: PoolableConnection> Drop for Pooled<C> {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
             if connection.is_open() && !self.is_reused {

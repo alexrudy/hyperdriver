@@ -9,7 +9,6 @@ use tracing::warn;
 
 mod clients;
 
-/// Connection utilities.
 pub mod conn;
 /// Connection pooling
 pub mod pool;

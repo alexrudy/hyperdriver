@@ -254,7 +254,7 @@ where
         // Try to connect while we also wait for a checkout to be ready.
         loop {
             let this = self.as_mut().project();
-            let connection: T = match this.inner {
+            let transport: T = match this.inner {
                 InnerCheckoutConnecting::Waiting => {
                     // We're waiting on a connection to be ready.
                     return Poll::Ready(Err(Error::Unavailable));
@@ -278,7 +278,7 @@ where
                 }
             };
 
-            if connection.can_share() {
+            if transport.can_share() {
                 trace!(key=%this.key, "connection can be shared");
                 if let Some(pool) = this.pool.upgrade() {
                     if let Ok(mut inner) = pool.lock() {
@@ -295,7 +295,7 @@ where
                 unreachable!()
             };
 
-            *this.inner = InnerCheckoutConnecting::Handshaking(Box::pin(handshake(connection)));
+            *this.inner = InnerCheckoutConnecting::Handshaking(Box::pin(handshake(transport)));
         }
     }
 }

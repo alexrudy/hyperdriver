@@ -1,4 +1,13 @@
 //! TCP transport implementation for client connections.
+//!
+//! This module contains the [`TcpConnector`] type, which is a [`tower::Service`] that connects to
+//! remote addresses using TCP. It also contains the [`TcpConnectionConfig`] type, which is used to
+//! configure TCP connections.
+//!
+//! Normally, you will not need to use this module directly. Instead, you can use the [`Client`][crate::client::Client]
+//! type from the [`client`][crate::client] module, which uses the [`TcpConnector`] internally by default.
+//!
+//! See [`Client::new_http_tcp`][crate::client::Client::new_tcp_http] for the default constructor which uses the TCP transport.
 
 use std::fmt;
 use std::future::Future;
@@ -20,13 +29,43 @@ use tracing::{trace, warn, Instrument};
 
 use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
-use crate::happy_eyeballs::EyeballSet;
+use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 use crate::stream::client::Stream as ClientStream;
 
 #[cfg(any(feature = "tls", feature = "stream"))]
 use crate::stream::info::HasConnectionInfo as _;
 
 /// A TCP connector for client connections.
+///
+/// This type is a [`tower::Service`] that connects to remote addresses using TCP.
+/// It requires a resolver `R`, which is by default [`GaiResolver`], which uses
+/// the system's DNS resolver to resolve hostnames to IP addresses.
+///
+/// The connector can be configured with a [`TcpConnectionConfig`] to control
+/// various aspects of the TCP connection, such as timeouts, buffer sizes, and
+/// local addresses to bind to.
+///
+/// If the `tls` feature is enabled, the connector can also be configured with
+/// a [`TlsClientConfig`] to enable TLS support.
+///
+/// This connector implements the happy-eyeballs algorithm for connecting to
+/// remote addresses, which allows for faster connection times by trying
+/// multiple addresses in parallel, regardless of whether they are IPv4 or IPv6.
+///
+/// # Example
+/// ```no_run
+/// # use hyperdriver::client::conn::tcp::TcpConnector;
+/// # use hyperdriver::client::conn::TcpConnectionConfig;
+/// # use tower::ServiceExt as _;
+///
+/// # async fn run() {
+/// let config = TcpConnectionConfig::default();
+/// let connector = TcpConnector::new_with_config(config);
+///
+/// let uri = "http://example.com".parse().unwrap();
+/// let stream = connector.oneshot(uri).await.unwrap();
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
     config: Arc<TcpConnectionConfig>,
@@ -34,6 +73,21 @@ pub struct TcpConnector<R = GaiResolver> {
 
     #[cfg(feature = "tls")]
     tls: Arc<TlsClientConfig>,
+}
+
+impl Default for TcpConnector {
+    #[cfg(feature = "tls")]
+    fn default() -> Self {
+        Self::new(
+            TcpConnectionConfig::default(),
+            crate::client::default_tls_config(),
+        )
+    }
+
+    #[cfg(not(feature = "tls"))]
+    fn default() -> Self {
+        Self::new(TcpConnectionConfig::default())
+    }
 }
 
 impl TcpConnector {
@@ -54,6 +108,78 @@ impl TcpConnector {
             config: Arc::new(config),
             resolver: GaiResolver::new(),
         }
+    }
+
+    /// Create a new `TcpConnector` with the given configuration, and a default resolver and
+    /// TLS configuration.
+    pub fn new_with_config(config: TcpConnectionConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            ..Self::default()
+        }
+    }
+}
+
+impl<R> TcpConnector<R> {
+    #[cfg(feature = "tls")]
+    /// Create a new `TcpConnector` with the given configuration, resolver, and TLS configuration.
+    pub fn new_with_resolver(
+        config: TcpConnectionConfig,
+        resolver: R,
+        tls: TlsClientConfig,
+    ) -> Self {
+        Self {
+            config: Arc::new(config),
+            resolver,
+            tls: Arc::new(tls),
+        }
+    }
+
+    #[cfg(not(feature = "tls"))]
+    /// Create a new `TcpConnector` with the given configuration and resolver.
+    pub fn new_with_resolver(resolver: R) -> Self {
+        Self {
+            config: Arc::new(TcpConnectionConfig::default()),
+            resolver,
+        }
+    }
+
+    /// Set the resolver for the TCP connector.
+    pub fn with_resolver(self, resolver: R) -> Self {
+        Self { resolver, ..self }
+    }
+
+    /// Set the configuration for the TCP connector.
+    pub fn with_config(self, config: TcpConnectionConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            ..self
+        }
+    }
+
+    #[cfg(feature = "tls")]
+    /// Set the TLS configuration for the TCP connector.
+    pub fn with_tls(self, tls: TlsClientConfig) -> Self {
+        Self {
+            tls: Arc::new(tls),
+            ..self
+        }
+    }
+
+    /// Get the configuration for the TCP connector.
+    pub fn config(&self) -> &TcpConnectionConfig {
+        &self.config
+    }
+
+    /// Get a mutable reference to the configuration for the TCP connector.
+    pub fn config_mut(&mut self) -> &mut TcpConnectionConfig {
+        Arc::make_mut(&mut self.config)
+    }
+
+    #[cfg(feature = "tls")]
+    /// Get the TLS configuration for the TCP connector.
+    pub fn tls(&self) -> &Arc<TlsClientConfig> {
+        &self.tls
     }
 }
 
@@ -198,22 +324,17 @@ impl<'c> TcpConnecting<'c> {
 
             if let Some(outcome) = attempts.next().await {
                 return match outcome {
-                    Ok(stream) => return Ok(stream),
-                    Err(e) => match e.downcast::<TcpConnectionError>() {
-                        Ok(e) => Err(*e),
-                        Err(e) => Err(TcpConnectionError::boxed("panic", e)),
-                    },
+                    Ok(stream) => Ok(stream),
+                    Err(HappyEyeballsError::Error(e)) => Err(e),
+                    Err(error) => Err(TcpConnectionError::build("happy eyeballs", error)),
                 };
             }
         }
 
-        attempts
-            .finalize()
-            .await
-            .map_err(|err| match err.downcast::<TcpConnectionError>() {
-                Ok(e) => *e,
-                Err(e) => TcpConnectionError::boxed("panic", e),
-            })
+        attempts.finalize().await.map_err(|err| match err {
+            HappyEyeballsError::Error(err) => err,
+            err => TcpConnectionError::build("happy eyeballs", err),
+        })
     }
 }
 
@@ -274,16 +395,6 @@ impl TcpConnectionError {
         Self {
             message: message.into(),
             source: Some(Box::new(error)),
-        }
-    }
-
-    pub(super) fn boxed<S>(message: S, error: Box<dyn std::error::Error + Send + Sync>) -> Self
-    where
-        S: Into<String>,
-    {
-        Self {
-            message: message.into(),
-            source: Some(error),
         }
     }
 }

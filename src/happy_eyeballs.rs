@@ -2,7 +2,53 @@ use std::{fmt, future::Future, marker::PhantomData, time::Duration};
 
 use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
+use tokio::time::error::Elapsed;
 use tracing::trace;
+
+#[non_exhaustive]
+#[derive(Debug, PartialEq, Eq)]
+pub enum HappyEyeballsError<T> {
+    /// No progress can be made.
+    NoProgress,
+    /// Timeout reached.
+    Timeout(Elapsed),
+    /// An error occurred during the underlying future.
+    Error(T),
+}
+
+impl<T> fmt::Display for HappyEyeballsError<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoProgress => write!(f, "no progress can be made"),
+            Self::Timeout(e) => write!(f, "timeout: {}", e),
+            Self::Error(e) => write!(f, "error: {}", e),
+        }
+    }
+}
+
+impl<T> From<Elapsed> for HappyEyeballsError<T> {
+    fn from(e: Elapsed) -> Self {
+        Self::Timeout(e)
+    }
+}
+
+impl<T> std::error::Error for HappyEyeballsError<T>
+where
+    T: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Timeout(e) => Some(e),
+            Self::Error(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+type HappyEyeballsResult<T, E> = Result<T, HappyEyeballsError<E>>;
 
 /// Implements the Happy Eyeballs algorithm for connecting to a set of addresses.
 ///
@@ -16,8 +62,8 @@ use tracing::trace;
 pub struct EyeballSet<F, T, E> {
     tasks: FuturesUnordered<F>,
     timeout: Option<Duration>,
-    error: Option<BoxError>,
-    result: PhantomData<Result<T, E>>,
+    error: Option<HappyEyeballsError<E>>,
+    result: PhantomData<T>,
 }
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -48,7 +94,7 @@ impl<F, T, E> EyeballSet<F, T, E> {
     /// Spawn a future into the set of tasks.
     pub fn spawn(&mut self, future: F)
     where
-        F: Future<Output = Result<T, E>>,
+        F: Future<Output = std::result::Result<T, E>>,
     {
         self.tasks.push(future);
     }
@@ -56,46 +102,31 @@ impl<F, T, E> EyeballSet<F, T, E> {
 
 impl<F, T, E> EyeballSet<F, T, E>
 where
-    E: fmt::Display + Into<BoxError>,
+    E: fmt::Display,
     F: Future<Output = Result<T, E>>,
 {
-    async fn join_next(&mut self) -> Option<Result<T, BoxError>> {
+    async fn join_next(&mut self) -> Option<HappyEyeballsResult<T, E>> {
         match self.tasks.next().await {
             Some(Ok(stream)) => {
-                // self.tasks.abort_all();
                 return Some(Ok(stream));
             }
             Some(Err(e)) if self.error.is_none() => {
                 trace!("attempt error: {}", e);
-                self.error = Some(e.into());
+                self.error = Some(HappyEyeballsError::Error(e));
             }
             Some(Err(e)) => {
                 trace!("attempt error: {}", e);
             }
             None => {
                 trace!("exhausted attempts");
-                // self.tasks.abort_all();
-                return self.error.take().map(Err);
+                if self.error.is_none() {
+                    self.error = Some(HappyEyeballsError::NoProgress);
+                }
+                return Some(Err(HappyEyeballsError::NoProgress));
             }
         }
 
         None
-    }
-
-    /// Finalize the set of futures, returning the first successful future,
-    /// or an error if all futures failed.
-    ///
-    /// This function will block until a future is resolved. If no future is available,
-    /// this function will panic.
-    pub async fn finalize(&mut self) -> Result<T, BoxError> {
-        if let Some(outcome) = self.next().await {
-            outcome
-        } else if let Some(error) = self.error.take() {
-            trace!("finalizing with error: {}", error);
-            Err(error)
-        } else {
-            Err("timed out".into())
-        }
     }
 
     /// Resolve the next future in the set of tasks.
@@ -103,13 +134,17 @@ where
     /// This function will return `None` if the timeout is reached, or if a task returns an error.
     /// If a task returns a successful result, that result is returned. If all tasks are exhausted,
     /// the error from the first task is returned.
-    pub async fn next(&mut self) -> Option<Result<T, BoxError>> {
+    pub async fn next(&mut self) -> Option<HappyEyeballsResult<T, E>> {
         if let Some(timeout) = self.timeout {
             match tokio::time::timeout(timeout, self.join_next()).await {
                 Ok(Some(Ok(stream))) => Some(Ok(stream)),
                 Ok(Some(Err(e))) => Some(Err(e)),
                 Ok(None) => None,
-                Err(_) => {
+                Err(elapsed) => {
+                    if self.error.is_none() {
+                        self.error = Some(HappyEyeballsError::Timeout(elapsed));
+                    }
+
                     tracing::trace!(timeout.ms=%timeout.as_millis(), "happy eyeballs timeout");
                     None
                 }
@@ -127,7 +162,7 @@ where
     pub async fn from_iterator(
         &mut self,
         iter: impl IntoIterator<Item = F>,
-    ) -> Result<T, BoxError> {
+    ) -> HappyEyeballsResult<T, E> {
         for future in iter.into_iter() {
             self.spawn(future);
             if let Some(outcome) = self.next().await {
@@ -138,14 +173,24 @@ where
         self.finalize().await
     }
 
-    pub async fn until_finished(&mut self) -> Result<T, BoxError> {
-        while let Some(outcome) = self.next().await {
-            if let Ok(outcome) = outcome {
+    /// Finalize the set of futures, returning the first successful future,
+    /// or an error if all futures failed.
+    ///
+    /// This function will block until a future is resolved. If no future is available,
+    /// this function will panic.
+    pub async fn finalize(&mut self) -> HappyEyeballsResult<T, E> {
+        for _ in 0..self.tasks.len() {
+            if let Some(Ok(outcome)) = self.next().await {
                 return Ok(outcome);
             }
         }
 
-        self.finalize().await
+        if let Some(error) = self.error.take() {
+            trace!("finalizing with error: {}", error);
+            Err(error)
+        } else {
+            Err(HappyEyeballsError::NoProgress)
+        }
     }
 }
 
@@ -165,6 +210,8 @@ mod tests {
 
         eyeballs.spawn(future);
 
+        assert!(!eyeballs.is_empty());
+
         let result = eyeballs.finalize().await;
         assert_eq!(result.unwrap(), 5);
     }
@@ -178,7 +225,10 @@ mod tests {
         eyeballs.spawn(future);
 
         let result = eyeballs.finalize().await;
-        assert_eq!(result.unwrap_err().to_string(), "error");
+        assert!(matches!(
+            result.unwrap_err(),
+            HappyEyeballsError::Error("error")
+        ));
     }
 
     #[tokio::test]
@@ -189,7 +239,10 @@ mod tests {
         eyeballs.spawn(future);
 
         let result = eyeballs.finalize().await;
-        assert_eq!(result.unwrap_err().to_string(), "timed out");
+        assert!(matches!(
+            result.unwrap_err(),
+            HappyEyeballsError::Timeout(_)
+        ));
     }
 
     #[tokio::test]
@@ -197,8 +250,22 @@ mod tests {
         let mut eyeballs: EyeballSet<Pending<Result<(), &str>>, (), &str> =
             EyeballSet::new(Some(Duration::ZERO));
 
+        assert!(eyeballs.is_empty());
         let result = eyeballs.finalize().await;
-        assert_eq!(result.unwrap_err().to_string(), "timed out");
+        assert!(matches!(
+            result.unwrap_err(),
+            HappyEyeballsError::NoProgress
+        ));
+    }
+
+    #[tokio::test]
+    async fn empty_set_next() {
+        let mut eyeballs: EyeballSet<Pending<Result<(), &str>>, (), &str> =
+            EyeballSet::new(Some(Duration::ZERO));
+
+        assert!(eyeballs.is_empty());
+        let result = eyeballs.next().await;
+        assert!(result.unwrap().is_err());
     }
 
     #[tokio::test]
@@ -228,7 +295,9 @@ mod tests {
         eyeballs.spawn(future2);
         eyeballs.spawn(future3);
 
-        let result = eyeballs.until_finished().await;
+        assert_eq!(eyeballs.len(), 3);
+
+        let result = eyeballs.finalize().await;
 
         assert_eq!(result.unwrap(), 5);
     }
@@ -237,29 +306,35 @@ mod tests {
     async fn multiple_futures_error() {
         let mut eyeballs = EyeballSet::new(Some(Duration::ZERO));
 
-        let future1 = ready(Err::<u32, String>("error 1".into()));
-        let future2 = ready(Err::<u32, String>("error 2".into()));
-        let future3 = ready(Err::<u32, String>("error 3".into()));
+        let future1 = ready(Err::<u32, &str>("error 1"));
+        let future2 = ready(Err::<u32, &str>("error 2"));
+        let future3 = ready(Err::<u32, &str>("error 3"));
 
         let result = eyeballs
             .from_iterator(vec![future1, future2, future3])
             .await;
 
-        assert_eq!(result.unwrap_err().to_string(), "error 1");
+        assert!(matches!(
+            result.unwrap_err(),
+            HappyEyeballsError::Error("error 1")
+        ));
     }
 
     #[tokio::test]
     async fn no_timeout() {
         let mut eyeballs = EyeballSet::new(None);
 
-        let future1 = ready(Err::<u32, String>("error 1".into()));
-        let future2 = ready(Err::<u32, String>("error 2".into()));
-        let future3 = ready(Err::<u32, String>("error 3".into()));
+        let future1 = ready(Err::<u32, &str>("error 1"));
+        let future2 = ready(Err::<u32, &str>("error 2"));
+        let future3 = ready(Err::<u32, &str>("error 3"));
 
         let result = eyeballs
             .from_iterator(vec![future1, future2, future3])
             .await;
 
-        assert_eq!(result.unwrap_err().to_string(), "error 1");
+        assert!(matches!(
+            result.unwrap_err(),
+            HappyEyeballsError::Error("error 1")
+        ));
     }
 }

@@ -66,3 +66,36 @@ impl Builder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builder() {
+        let client = Builder::default().build();
+        assert!(client.pool.is_some());
+    }
+
+    #[cfg(feature = "stream")]
+    #[test]
+    fn test_builder_tcp() {
+        let mut builder = Builder::default();
+        builder.tcp().nodelay = true;
+
+        let client = builder.build();
+        assert!(client.transport.config().nodelay)
+    }
+
+    #[cfg(feature = "tls")]
+    #[test]
+    fn test_builder_tls() {
+        let mut builder = Builder::default();
+        let mut tls = super::default_tls_config();
+        tls.alpn_protocols.push(b"a1".to_vec());
+        builder.with_tls(tls);
+
+        let client = builder.build();
+        assert_eq!(client.transport.tls().alpn_protocols, vec![b"a1".to_vec()]);
+    }
+}

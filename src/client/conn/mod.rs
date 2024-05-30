@@ -1,3 +1,37 @@
+//! Client connection types.
+//!
+//! A client connection is composed of a transport, a protocol, and a connection, which each serve a
+//! different purpose in the client connection lifecycle.
+//!
+//! ## Transport
+//!
+//! The transport is responsible for establishing a connection to a remote server, shuffling bytes back
+//! and forth, and handling the low-level details of the connection. Transports implement the [`Transport`]
+//! trait, effecitively making them a service which accepts a URI and returns a bidirectional stream.
+//!
+//! Two builtin transports are provided:
+//! - [`TcpConnector`]: Connects to a remote server over TCP/IP. This is the default transport, and what
+//!     usually powers HTTP connections.
+//! - [`DuplexTransport`][duplex::DuplexTransport]: Connects to a remote server over a duplex stream, which
+//!     is an in-memory stream that can be used for testing or other purposes.
+//!
+//! ## Protocol
+//!
+//! The protocol is responsible for encoding and decoding request and response objects. Usually, this means
+//! HTTP/1.1 or HTTP/2, but it could be any protocol which sends and receives data over a connection.
+//!
+//! Protocols implement the [`Protocol`] trait, which is a service that accepts a [`ProtocolRequest`] and
+//! returns a connection. The connection is responsible for sending and receiving HTTP requests and responses.
+//!
+//! ## Connection
+//!
+//! The connection is responsible for sending and receiving HTTP requests and responses. It is the highest
+//! level of abstraction in the client connection stack, and is the  part of the stack which accepts requests.
+//!
+//! Connections implement the [`Connection`] trait, which is a service that accepts a request and returns a
+//! future which resolves to a response. The connection is responsible for encoding and decoding the request
+//! and response objects, and for sending and receiving the data over the transport.
+
 use ::http::Uri;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
@@ -29,11 +63,16 @@ use crate::stream::info::HasConnectionInfo;
 pub use self::http::ConnectionError;
 
 #[cfg(feature = "stream")]
-pub(crate) use self::tcp::TcpConnectionConfig;
+pub use self::tcp::TcpConnectionConfig;
 #[cfg(feature = "stream")]
-pub(crate) use self::tcp::TcpConnector;
+pub use self::tcp::TcpConnector;
 
 /// A transport provides data transmission between two endpoints.
+///
+/// To implement a transport stream, implement a [`tower::Service`] which accepts a URI and returns a
+/// [`TransportStream`]. [`TransportStream`] is a wrapper around an IO stream which provides additional
+/// information about the connection, such as the remote address and the protocol being used. The underlying
+/// IO stream must implement [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`].
 pub trait Transport: Clone + Send {
     /// The type of IO stream used by this transport
     type IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + 'static;
@@ -80,9 +119,10 @@ where
     }
 }
 
-/// A transport provides data transmission between two endpoints.
+/// A wrapper around an IO stream which provides additional information about the connection.
 ///
-/// This transport uses braid to power the underlying
+/// This is used to attach [`ConnectionInfo`] to an arbitrary IO stream. IO streams must implement
+/// [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`] to be functional.
 #[derive(Debug)]
 #[pin_project]
 pub struct TransportStream<IO>
@@ -215,6 +255,14 @@ pub struct ProtocolRequest<IO: HasConnectionInfo> {
 }
 
 /// Protocols (like HTTP) define how data is sent and received over a connection.
+///
+/// A protocol is a service which accepts a [`ProtocolRequest`] and returns a connection.
+///
+/// The request contains a transport stream and the HTTP protocol to use for the connection.
+///
+/// The connection is responsible for sending and receiving HTTP requests and responses.
+///
+///
 pub trait Protocol<IO>
 where
     IO: HasConnectionInfo,
@@ -232,6 +280,8 @@ where
         + 'static;
 
     /// Connect to a remote server and return a connection.
+    ///
+    /// The protocol version is provided to facilitate the correct handshake procedure.
     fn connect(
         &mut self,
         transport: TransportStream<IO>,
@@ -274,6 +324,10 @@ where
 }
 
 /// The HTTP protocol to use for a connection.
+///
+/// This differs from the HTTP version in that it is constrained to the two flavors of HTTP
+/// protocol, HTTP/1.1 and HTTP/2. HTTP/3 is not yet supported. HTTP/0.9 and HTTP/1.0 are
+/// supported by HTTP/1.1.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum HttpProtocol {
     /// Connect using HTTP/1.1
@@ -290,6 +344,11 @@ impl HttpProtocol {
     }
 
     /// HTTP Version
+    ///
+    /// Convert the protocol to an HTTP version.
+    ///
+    /// For HTTP/1.1, this returns `::http::Version::HTTP_11`.
+    /// For HTTP/2, this returns `::http::Version::HTTP_2`.
     pub fn version(&self) -> ::http::Version {
         match self {
             Self::Http1 => ::http::Version::HTTP_11,
