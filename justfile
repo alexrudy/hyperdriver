@@ -45,6 +45,10 @@ msrv:
 test:
     cargo +{{rust}} test --all-features
 
+# Run coverage tests
+coverage:
+    cargo +{{rust}} tarpaulin -o html --all-features
+
 # Run deny checks
 deny:
     cargo +{{rust}} deny check
