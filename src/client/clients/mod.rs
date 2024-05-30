@@ -47,9 +47,13 @@ mod builder;
 ///
 /// # Example
 /// ```no_run
+/// # use hyperdriver::client::Client;
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new_tcp_http();
 /// let response = client.get("http://example.com".parse().unwrap()).await.unwrap();
 /// println!("Response: {:?}", response);
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>

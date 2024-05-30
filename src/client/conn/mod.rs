@@ -63,9 +63,9 @@ use crate::stream::info::HasConnectionInfo;
 pub use self::http::ConnectionError;
 
 #[cfg(feature = "stream")]
-pub(crate) use self::tcp::TcpConnectionConfig;
+pub use self::tcp::TcpConnectionConfig;
 #[cfg(feature = "stream")]
-pub(crate) use self::tcp::TcpConnector;
+pub use self::tcp::TcpConnector;
 
 /// A transport provides data transmission between two endpoints.
 ///

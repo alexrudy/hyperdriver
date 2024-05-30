@@ -56,13 +56,15 @@ use crate::stream::info::HasConnectionInfo as _;
 /// ```no_run
 /// # use hyperdriver::client::conn::tcp::TcpConnector;
 /// # use hyperdriver::client::conn::TcpConnectionConfig;
+/// # use tower::ServiceExt as _;
 ///
+/// # async fn run() {
 /// let config = TcpConnectionConfig::default();
-/// let connector = TcpConnector::new(config);
+/// let connector = TcpConnector::new_with_config(config);
 ///
 /// let uri = "http://example.com".parse().unwrap();
-/// let stream = connector.call(uri).await.unwrap();
-///
+/// let stream = connector.oneshot(uri).await.unwrap();
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct TcpConnector<R = GaiResolver> {
@@ -71,6 +73,21 @@ pub struct TcpConnector<R = GaiResolver> {
 
     #[cfg(feature = "tls")]
     tls: Arc<TlsClientConfig>,
+}
+
+impl Default for TcpConnector {
+    #[cfg(feature = "tls")]
+    fn default() -> Self {
+        Self::new(
+            TcpConnectionConfig::default(),
+            crate::client::default_tls_config(),
+        )
+    }
+
+    #[cfg(not(feature = "tls"))]
+    fn default() -> Self {
+        Self::new(TcpConnectionConfig::default())
+    }
 }
 
 impl TcpConnector {
@@ -92,12 +109,25 @@ impl TcpConnector {
             resolver: GaiResolver::new(),
         }
     }
+
+    /// Create a new `TcpConnector` with the given configuration, and a default resolver and
+    /// TLS configuration.
+    pub fn new_with_config(config: TcpConnectionConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            ..Self::default()
+        }
+    }
 }
 
 impl<R> TcpConnector<R> {
     #[cfg(feature = "tls")]
     /// Create a new `TcpConnector` with the given configuration, resolver, and TLS configuration.
-    pub fn with_resolver(config: TcpConnectionConfig, resolver: R, tls: TlsClientConfig) -> Self {
+    pub fn new_with_resolver(
+        config: TcpConnectionConfig,
+        resolver: R,
+        tls: TlsClientConfig,
+    ) -> Self {
         Self {
             config: Arc::new(config),
             resolver,
@@ -107,16 +137,43 @@ impl<R> TcpConnector<R> {
 
     #[cfg(not(feature = "tls"))]
     /// Create a new `TcpConnector` with the given configuration and resolver.
-    pub fn with_resolver(resolver: R) -> Self {
+    pub fn new_with_resolver(resolver: R) -> Self {
         Self {
             config: Arc::new(TcpConnectionConfig::default()),
             resolver,
         }
     }
 
+    /// Set the resolver for the TCP connector.
+    pub fn with_resolver(self, resolver: R) -> Self {
+        Self { resolver, ..self }
+    }
+
+    /// Set the configuration for the TCP connector.
+    pub fn with_config(self, config: TcpConnectionConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            ..self
+        }
+    }
+
+    #[cfg(feature = "tls")]
+    /// Set the TLS configuration for the TCP connector.
+    pub fn with_tls(self, tls: TlsClientConfig) -> Self {
+        Self {
+            tls: Arc::new(tls),
+            ..self
+        }
+    }
+
     /// Get the configuration for the TCP connector.
-    pub fn config(&self) -> &Arc<TcpConnectionConfig> {
+    pub fn config(&self) -> &TcpConnectionConfig {
         &self.config
+    }
+
+    /// Get a mutable reference to the configuration for the TCP connector.
+    pub fn config_mut(&mut self) -> &mut TcpConnectionConfig {
+        Arc::make_mut(&mut self.config)
     }
 
     #[cfg(feature = "tls")]
