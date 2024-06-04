@@ -9,26 +9,30 @@ use std::borrow::Cow;
 use std::io;
 use std::sync::Arc;
 
+use crate::bridge::rt::TokioExecutor;
 #[cfg(feature = "client")]
-use crate::client::{HttpConnectionBuilder, TransportStream};
+use crate::client::HttpConnectionBuilder;
 use crate::pidfile::PidFile;
+use crate::server::AutoBuilder;
 #[cfg(feature = "client")]
 use crate::stream::client::Stream as ClientStream;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
-use futures_util::{future::BoxFuture, FutureExt};
 use hyper::Uri;
+use tower::make::Shared;
 
-mod server;
-pub use server::GrpcRouter;
+mod transport;
+
+pub use transport::GrpcScheme;
+pub use transport::RegistryTransport;
+pub use transport::Scheme;
+pub use transport::SvcScheme;
 
 /// Service Registry client which will connect to internal services.
 
-pub type Client = crate::client::Client<HttpConnectionBuilder, RegistryTransport>;
-
-const GRPC_PROXY_NAME: &str = "grpc-proxy";
+pub type Client = crate::client::Client<HttpConnectionBuilder, transport::RegistryTransport>;
 
 /// An error occured while connecting to a service.
 #[derive(Debug, thiserror::Error)]
@@ -48,6 +52,10 @@ pub enum ConnectionError {
     /// The service URI is not a valid URI.
     #[error("Invalid URI: {0}")]
     InvalidUri(Uri),
+
+    /// An IO error occured while connecting to the service.
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 /// Internal error when something goes wrong during Bind.
@@ -215,9 +223,8 @@ impl ServiceRegistry {
     }
 
     /// Check if a service is available, by name.
-    pub fn is_available<'r, S: Into<Cow<'r, str>>>(&'r self, service: S) -> bool {
-        self.inner
-            .is_available(&self.config, service.into().as_ref())
+    pub fn is_available<S: AsRef<str>>(&self, service: S) -> bool {
+        self.inner.is_available(&self.config, service.as_ref())
     }
 
     /// Get an acceptor which will be bound to a service with this name.
@@ -227,8 +234,32 @@ impl ServiceRegistry {
         service: Cow<'_, str>,
     ) -> Result<crate::stream::server::Acceptor, BindError> {
         self.inner
-            .bind(&self.config, service.clone())
+            .bind(&self.config, &service)
             .map_err(|err| BindError::new(service.into_owned(), err))
+    }
+
+    /// Create a server which will bind to a service by name.
+    pub async fn server<'a, M, S>(
+        &'a self,
+        make_service: M,
+        name: S,
+    ) -> Result<
+        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::stream::server::Acceptor>,
+        BindError,
+    >
+    where
+        S: Into<Cow<'a, str>>,
+    {
+        let acceptor = self.bind(name.into()).await?;
+        Ok(crate::server::Server::new(acceptor, make_service))
+    }
+
+    /// Create a server which will use a registry transport to proxy requests to services.
+    pub fn router<A>(
+        &self,
+        acceptor: A,
+    ) -> crate::server::Server<Shared<Client>, AutoBuilder<TokioExecutor>, A> {
+        crate::server::Server::new(acceptor, Shared::new(self.client()))
     }
 
     /// Connect to a service by name.
@@ -239,92 +270,26 @@ impl ServiceRegistry {
         self.inner.connect(&self.config, service).await
     }
 
-    /// Provide a transport for internal services.
-    pub fn transport(&self) -> RegistryTransport {
-        RegistryTransport::new(self.clone())
+    /// Create a transport for internal services, with default schemes.
+    ///
+    /// The default schemes are `grpc` and `svc`. `svc` uses the host to determine the service, and `grpc` uses the
+    /// first path component, and is suitable for gRPC services.
+    pub fn default_transport(&self) -> transport::RegistryTransport {
+        transport::RegistryTransport::with_default_schemes(self.clone())
+    }
+
+    /// Create a transport builder for internal services.
+    pub fn transport_builder(&self) -> transport::TransportBuilder {
+        transport::RegistryTransport::builder(self.clone())
     }
 
     /// Create a client which will connect to internal services.
     pub fn client(&self) -> Client {
-        Client::new(Default::default(), self.transport(), Default::default())
-    }
-
-    /// Create a router which will multiplex GRPC services.
-    pub fn router(&self) -> GrpcRouter {
-        GrpcRouter::new(self.clone())
-    }
-}
-
-/// A connection transport which uses roomservice's internal service registry.
-#[derive(Debug, Clone)]
-pub struct RegistryTransport {
-    registry: ServiceRegistry,
-}
-
-impl RegistryTransport {
-    fn new(registry: ServiceRegistry) -> Self {
-        Self { registry }
-    }
-
-    /// The inner service registry
-    pub fn registry(&self) -> &ServiceRegistry {
-        &self.registry
-    }
-}
-
-impl Default for RegistryTransport {
-    fn default() -> Self {
-        Self::new(ServiceRegistry::new())
-    }
-}
-
-impl tower::Service<Uri> for RegistryTransport {
-    type Response = TransportStream<ClientStream>;
-
-    type Error = ConnectionError;
-
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Uri) -> Self::Future {
-        match req.scheme_str() {
-            // SVC proxy support, where the service name is in the host.
-            // Exposing this to the internet could expose the list of hosts.
-            Some("svc") => {
-                let inner = self.registry.inner.clone();
-                let config = self.registry.config.clone();
-                (async move {
-                    let service = req.host().unwrap_or_default();
-                    let stream = inner.connect(&config, service.into()).await?;
-                    Ok(TransportStream::new_stream(stream)
-                        .await
-                        .expect("transport failed to handshake"))
-                })
-                .boxed()
-            }
-
-            // GRPC proxy support, where we ignore the host and use the GRPC path to multiplex to the
-            // correct upstream service.
-            Some("grpc") => {
-                let inner = self.registry.inner.clone();
-                let config = self.registry.config.clone();
-                (async move {
-                    let stream =
-                        connect_to_handle(&config, &inner.proxy, GRPC_PROXY_NAME.into()).await?;
-                    Ok(TransportStream::new_stream(stream)
-                        .await
-                        .expect("transport failed to handshake"))
-                })
-                .boxed()
-            }
-            _ => futures_util::future::ready(Err(ConnectionError::InvalidUri(req))).boxed(),
-        }
+        Client::new(
+            Default::default(),
+            self.default_transport(),
+            Default::default(),
+        )
     }
 }
 
@@ -332,14 +297,12 @@ impl tower::Service<Uri> for RegistryTransport {
 #[derive(Debug)]
 struct InnerRegistry {
     services: DashMap<String, ServiceHandle>,
-    proxy: ServiceHandle,
 }
 
 impl Default for InnerRegistry {
     fn default() -> Self {
         Self {
             services: DashMap::new(),
-            proxy: ServiceHandle::duplex(GRPC_PROXY_NAME),
         }
     }
 }
@@ -367,6 +330,7 @@ impl InnerRegistry {
         handle.is_available()
     }
 
+    /// Connect to a service by name.
     #[tracing::instrument(skip(self, config))]
     async fn connect(
         &self,
@@ -378,19 +342,21 @@ impl InnerRegistry {
         connect_to_handle(config, handle.value(), service).await
     }
 
+    /// Bind to a service by name.
     fn bind(
         &self,
         config: &RegistryConfig,
-        service: Cow<'_, str>,
+        service: &str,
     ) -> Result<crate::stream::server::Acceptor, InternalBindError> {
-        let mut handle = self.get_mut(config, service.as_ref());
+        let mut handle = self.get_mut(config, service);
 
         handle.acceptor()
     }
 }
 
+/// Represents a discovered service which uses a PID file to lock binding the service.
 #[derive(Debug)]
-pub(crate) enum PidLock {
+enum PidLock {
     Path(Utf8PathBuf),
 
     #[allow(dead_code)]
@@ -413,7 +379,7 @@ impl PidLock {
 ///
 /// This is the type held internally by the registry for a service.
 #[derive(Debug)]
-pub(crate) enum ServiceHandle {
+enum ServiceHandle {
     Duplex {
         acceptor: Option<crate::stream::server::Acceptor>,
         connector: crate::stream::duplex::DuplexClient,
@@ -464,6 +430,7 @@ impl ServiceHandle {
         }
     }
 
+    /// Create an acceptor for this service.
     fn acceptor(&mut self) -> Result<crate::stream::server::Acceptor, InternalBindError> {
         match self {
             ServiceHandle::Duplex { acceptor, .. } => {
@@ -524,12 +491,20 @@ async fn connect_to_handle(
 
     let stream = if let Some(timeout) = &config.connect_timeout {
         tracing::trace!("Waiting for connection to {name} with timeout");
-        tokio::time::timeout(*timeout, request)
-            .await
-            .map_err(|err| {
-                tracing::warn!("failed to complete connection: {}", err);
-                ConnectionError::ConnectionTimeout(name.clone().into_owned(), err)
-            })?
+        match tokio::time::timeout(*timeout, request).await {
+            Ok(outcome) => outcome,
+            Err(elapsed) => {
+                tracing::warn!(
+                    "Connection to {name} timed out after {timeout:?}",
+                    name = name,
+                    timeout = elapsed
+                );
+                return Err(ConnectionError::ConnectionTimeout(
+                    name.into_owned(),
+                    elapsed,
+                ));
+            }
+        }
     } else {
         tracing::trace!("Waiting for connection to {name} without timeout");
 
@@ -553,7 +528,7 @@ async fn connect_to_handle(
     }
     .map_err(|err| {
         tracing::warn!("failed to complete connection: {}", err);
-        ConnectionError::ServiceClosed(name.clone().into_owned())
+        ConnectionError::ServiceClosed(name.into_owned())
     })?;
 
     Ok(stream)
