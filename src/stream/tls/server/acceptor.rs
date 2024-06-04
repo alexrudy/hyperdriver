@@ -15,7 +15,7 @@ use crate::stream::server::Accept;
 ///
 /// The actual handshake is handled in the [super::TlsStream] type.
 ///
-/// The TLS acceptor implements the [Accept] trait from hyper.
+/// The TLS acceptor implements the [Accept] trait from hyperdriver.
 #[derive(Debug)]
 #[pin_project]
 pub struct TlsAcceptor<A> {
@@ -61,3 +61,16 @@ where
         }
     }
 }
+
+/// Extension trait for the [Accept] trait to add a method to wrap the acceptor in a TLS acceptor.
+pub trait TlsAcceptExt: Accept {
+    /// Wrap the acceptor in a TLS acceptor using the given [rustls::ServerConfig].
+    fn tls(self, config: Arc<ServerConfig>) -> TlsAcceptor<Self>
+    where
+        Self: Sized,
+    {
+        TlsAcceptor::new(config, self)
+    }
+}
+
+impl<A> TlsAcceptExt for A where A: Accept {}
