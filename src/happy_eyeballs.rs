@@ -16,6 +16,12 @@ use futures_util::StreamExt;
 use tokio::time::error::Elapsed;
 use tracing::trace;
 
+/// Error returned when the happy eyeballs algorithm finishes.
+///
+/// It contains the inner error if an underlying future errored
+/// (this will always be the first error)
+///
+/// Otherwsie, the enum indicates what went wrong.
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq)]
 pub enum HappyEyeballsError<T> {
@@ -78,8 +84,6 @@ pub struct EyeballSet<F, T, E> {
     error: Option<HappyEyeballsError<E>>,
     result: PhantomData<T>,
 }
-
-pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 impl<F, T, E> EyeballSet<F, T, E> {
     /// Create a new `EyeballSet` with an optional timeout.
