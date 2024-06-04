@@ -106,7 +106,7 @@ where
         + Send
         + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Connection = Connecting<S, IO>;
@@ -128,8 +128,7 @@ where
     state: ConnectionState<'b, I, S, E>,
 }
 
-impl<'b, I, S, E, B> Connection<Box<dyn std::error::Error + Send + Sync + 'static>>
-    for UpgradableConnection<'b, I, S, E>
+impl<'b, I, S, Executor, B> Connection for UpgradableConnection<'b, I, S, Executor>
 where
     S: hyper::service::HttpService<body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
@@ -137,7 +136,7 @@ where
     B: Body + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     I: Read + Write + Unpin + Send + 'static,
-    E: Http2ServerConnExec<S::Future, B>,
+    Executor: Http2ServerConnExec<S::Future, B>,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
         let this = self.project();
