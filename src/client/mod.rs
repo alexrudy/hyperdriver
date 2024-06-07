@@ -34,9 +34,7 @@ use crate::stream::info::HasConnectionInfo;
 #[cfg(feature = "stream")]
 mod builder;
 
-/// Connection constructors
 pub mod conn;
-/// Connection pooling
 pub mod pool;
 
 pub use conn::http::HttpConnectionBuilder;
