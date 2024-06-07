@@ -23,7 +23,7 @@ where
         + Send
         + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
 {
     protocol: Builder<TokioExecutor>,
 
@@ -39,7 +39,7 @@ where
         + Send
         + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     pub(crate) fn build(protocol: Builder<TokioExecutor>, service: S, stream: IO) -> Self {
@@ -52,14 +52,14 @@ where
     }
 }
 
-impl<S, IO> crate::server::Connection<BoxError> for Connecting<S, IO>
+impl<S, IO> crate::server::Connection for Connecting<S, IO>
 where
     S: tower::Service<http::Request<Incoming>, Response = crate::body::Response>
         + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(mut self: Pin<&mut Self>) {
@@ -74,7 +74,7 @@ where
         + Send
         + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Output = Result<(), BoxError>;

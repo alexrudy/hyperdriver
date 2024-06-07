@@ -14,6 +14,7 @@ use std::pin::pin;
 use std::pin::Pin;
 
 use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
@@ -40,6 +41,17 @@ pub struct Body {
 }
 
 impl Body {
+    /// Create a new `Body` that wraps another [`http_body::Body`].
+    pub fn new<B>(body: B) -> Self
+    where
+        B: http_body::Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
+        try_downcast(body).unwrap_or_else(|body| Self {
+            inner: InnerBody::Boxed(Box::pin(body.map_err(Into::into))),
+        })
+    }
+
     /// Create a new empty body.
     pub fn empty() -> Self {
         Self {
@@ -112,14 +124,49 @@ impl From<axum::body::Body> for Body {
     }
 }
 
-impl<E> From<UnsyncBoxBody<Bytes, E>> for Body
-where
-    E: Into<BoxError> + 'static,
-{
-    fn from(body: UnsyncBoxBody<Bytes, E>) -> Self {
+#[cfg(feature = "axum")]
+impl From<Body> for axum::body::Body {
+    fn from(body: Body) -> Self {
+        axum::body::Body::new(body)
+    }
+}
+
+impl From<UnsyncBoxBody<Bytes, BoxError>> for Body {
+    fn from(body: UnsyncBoxBody<Bytes, BoxError>) -> Self {
         Self {
-            inner: InnerBody::Boxed(Box::pin(body.map_err(Into::into))),
+            inner: InnerBody::Http(body),
         }
+    }
+}
+
+impl From<BoxBody<Bytes, BoxError>> for Body {
+    fn from(body: BoxBody<Bytes, BoxError>) -> Self {
+        Self {
+            inner: InnerBody::HttpSync(body),
+        }
+    }
+}
+
+impl From<Box<dyn http_body::Body<Data = Bytes, Error = BoxError> + Send + 'static>> for Body {
+    fn from(
+        body: Box<dyn http_body::Body<Data = Bytes, Error = BoxError> + Send + 'static>,
+    ) -> Self {
+        try_downcast(body).unwrap_or_else(|body| Self {
+            inner: InnerBody::Boxed(Box::into_pin(body)),
+        })
+    }
+}
+
+fn try_downcast<T, K>(k: K) -> Result<T, K>
+where
+    T: 'static,
+    K: Send + 'static,
+{
+    let mut k = Some(k);
+    if let Some(k) = <dyn std::any::Any>::downcast_mut::<Option<T>>(&mut k) {
+        Ok(k.take().unwrap())
+    } else {
+        Err(k.unwrap())
     }
 }
 
@@ -128,6 +175,8 @@ enum InnerBody {
     Empty,
     Full(#[pin] Full<Bytes>),
     Boxed(#[pin] Pin<Box<dyn http_body::Body<Data = Bytes, Error = BoxError> + Send + 'static>>),
+    Http(#[pin] UnsyncBoxBody<Bytes, BoxError>),
+    HttpSync(#[pin] BoxBody<Bytes, BoxError>),
 
     #[cfg(feature = "incoming")]
     Incoming(#[pin] hyper::body::Incoming),
@@ -146,6 +195,14 @@ impl From<String> for InnerBody {
     }
 }
 
+macro_rules! poll_frame {
+    ($body:ident, $cx:ident) => {
+        $body
+            .poll_frame($cx)
+            .map(|opt| opt.map(|res| res.map_err(Into::into)))
+    };
+}
+
 impl http_body::Body for Body {
     type Data = Bytes;
     type Error = BoxError;
@@ -157,21 +214,15 @@ impl http_body::Body for Body {
         let this = self.project();
         match this.inner.project() {
             InnerBodyProj::Empty => std::task::Poll::Ready(None),
-            InnerBodyProj::Full(body) => body
-                .poll_frame(cx)
-                .map(|opt| opt.map(|res| res.map_err(Into::into))),
-            InnerBodyProj::Boxed(body) => body
-                .poll_frame(cx)
-                .map(|opt| opt.map(|res| res.map_err(Into::into))),
+            InnerBodyProj::Full(body) => poll_frame!(body, cx),
+            InnerBodyProj::Boxed(body) => poll_frame!(body, cx),
+            InnerBodyProj::Http(body) => poll_frame!(body, cx),
+            InnerBodyProj::HttpSync(body) => poll_frame!(body, cx),
             #[cfg(feature = "incoming")]
-            InnerBodyProj::Incoming(body) => body
-                .poll_frame(cx)
-                .map(|opt| opt.map(|res| res.map_err(Into::into))),
+            InnerBodyProj::Incoming(body) => poll_frame!(body, cx),
 
             #[cfg(feature = "axum")]
-            InnerBodyProj::AxumBody(body) => body
-                .poll_frame(cx)
-                .map(|opt| opt.map(|res| res.map_err(Into::into))),
+            InnerBodyProj::AxumBody(body) => poll_frame!(body, cx),
         }
     }
 
@@ -180,6 +231,8 @@ impl http_body::Body for Body {
             InnerBody::Empty => true,
             InnerBody::Full(ref body) => body.is_end_stream(),
             InnerBody::Boxed(ref body) => body.is_end_stream(),
+            InnerBody::Http(ref body) => body.is_end_stream(),
+            InnerBody::HttpSync(ref body) => body.is_end_stream(),
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(ref body) => body.is_end_stream(),
             #[cfg(feature = "axum")]
@@ -192,6 +245,8 @@ impl http_body::Body for Body {
             InnerBody::Empty => http_body::SizeHint::with_exact(0),
             InnerBody::Full(ref body) => body.size_hint(),
             InnerBody::Boxed(ref body) => body.size_hint(),
+            InnerBody::Http(ref body) => body.size_hint(),
+            InnerBody::HttpSync(ref body) => body.size_hint(),
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(ref body) => body.size_hint(),
             #[cfg(feature = "axum")]
@@ -206,6 +261,8 @@ impl fmt::Debug for InnerBody {
             InnerBody::Empty => f.debug_struct("Empty").finish(),
             InnerBody::Full(_) => f.debug_struct("Full").finish(),
             InnerBody::Boxed(_) => f.debug_struct("Boxed").finish(),
+            InnerBody::Http(_) => f.debug_struct("Http").finish(),
+            InnerBody::HttpSync(_) => f.debug_struct("HttpSync").finish(),
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(_) => f.debug_struct("Incoming").finish(),
             #[cfg(feature = "axum")]

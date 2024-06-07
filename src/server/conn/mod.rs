@@ -1,6 +1,5 @@
 //! Server-side connection builders for the HTTP2 protocol and the HTTP1 protocol.
 
-use std::future::Future;
 use std::pin::Pin;
 
 use crate::bridge::io::TokioIo;
@@ -18,13 +17,12 @@ pub mod auto;
 mod connecting;
 
 /// A connection that can be gracefully shutdown.
-pub trait Connection<E>: Future<Output = Result<(), E>> {
+pub trait Connection {
     /// Gracefully shutdown the connection.
     fn graceful_shutdown(self: Pin<&mut Self>);
 }
 
-impl<S, IO> Connection<hyper::Error>
-    for http1::UpgradeableConnection<TokioIo<IO>, TowerHyperService<S>>
+impl<S, IO> Connection for http1::UpgradeableConnection<TokioIo<IO>, TowerHyperService<S>>
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone
@@ -61,8 +59,7 @@ where
     }
 }
 
-impl<S, IO> Connection<hyper::Error>
-    for http2::Connection<TokioIo<IO>, TowerHyperService<S>, TokioExecutor>
+impl<S, IO> Connection for http2::Connection<TokioIo<IO>, TowerHyperService<S>, TokioExecutor>
 where
     S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
         + Clone

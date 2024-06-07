@@ -314,24 +314,12 @@ impl<'c> TcpConnecting<'c> {
         let mut attempts = EyeballSet::new(delay);
 
         while let Some(address) = self.addresses.pop() {
-            let span = tracing::trace_span!("connect", %address);
+            let span: tracing::Span = tracing::trace_span!("connect", %address);
             let attempt = TcpConnectionAttempt::new(address, self.config);
-            attempts.spawn(async move { attempt.connect().instrument(span).await });
-
-            if attempts.len() < 2 {
-                continue;
-            }
-
-            if let Some(outcome) = attempts.next().await {
-                return match outcome {
-                    Ok(stream) => Ok(stream),
-                    Err(HappyEyeballsError::Error(e)) => Err(e),
-                    Err(error) => Err(TcpConnectionError::build("happy eyeballs", error)),
-                };
-            }
+            attempts.push(async { attempt.connect().instrument(span).await });
         }
 
-        attempts.finalize().await.map_err(|err| match err {
+        attempts.finish().await.map_err(|err| match err {
             HappyEyeballsError::Error(err) => err,
             err => TcpConnectionError::build("happy eyeballs", err),
         })

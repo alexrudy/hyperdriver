@@ -16,7 +16,9 @@ use self::service::ServingMakeService;
 use crate::bridge::rt::TokioExecutor;
 use crate::stream::info::HasConnectionInfo;
 pub use crate::stream::server::Accept;
+use crate::stream::server::Acceptor;
 use futures_util::future::FutureExt as _;
+use tower::make::Shared;
 use tracing::instrument::Instrumented;
 use tracing::{debug, trace, Instrument};
 
@@ -92,7 +94,7 @@ pub trait Protocol<S, IO> {
     type Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>;
 
     /// The connection future, used to drive a connection IO to completion.
-    type Connection: Connection<Self::Error> + Send + 'static;
+    type Connection: Connection + Future<Output = Result<(), Self::Error>> + Send + 'static;
 
     /// Serve a connection with upgrades.
     ///
@@ -153,6 +155,26 @@ impl<S, A> Server<S, AutoBuilder<TokioExecutor>, A> {
         Self {
             incoming,
             make_service,
+            protocol: AutoBuilder::new(TokioExecutor::new()),
+        }
+    }
+}
+
+impl<S> Server<S, AutoBuilder<TokioExecutor>, Acceptor<tokio::net::TcpListener>> {
+    /// Bind a new server to the given address.
+    pub async fn bind(addr: std::net::SocketAddr, make_service: S) -> io::Result<Self> {
+        let incoming = tokio::net::TcpListener::bind(addr).await?;
+        let accept = Acceptor::new(incoming);
+        Ok(Server::new(accept, make_service))
+    }
+}
+
+impl<S, A> Server<Shared<S>, AutoBuilder<TokioExecutor>, A> {
+    /// Create a new server with the given `Service` and `Acceptor`. The service will be cloned for each connection.
+    pub fn new_shared(incoming: A, service: S) -> Self {
+        Self {
+            incoming,
+            make_service: Shared::new(service),
             protocol: AutoBuilder::new(TokioExecutor::new()),
         }
     }
