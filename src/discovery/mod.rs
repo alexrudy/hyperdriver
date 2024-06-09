@@ -29,6 +29,7 @@ pub use transport::GrpcScheme;
 pub use transport::RegistryTransport;
 pub use transport::Scheme;
 pub use transport::SvcScheme;
+pub use transport::TransportBuilder;
 
 /// Service Registry client which will connect to internal services.
 

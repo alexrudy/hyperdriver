@@ -1,9 +1,9 @@
+use std::convert::Infallible;
 use std::future::IntoFuture as _;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::pin::pin;
 use std::sync::Arc;
 
-use hyper::body::Incoming;
 use hyper::server::conn::http2;
 use hyperdriver::bridge::rt::TokioExecutor;
 
@@ -44,12 +44,12 @@ async fn main() {
     let server = hyperdriver::server::Server::new(
         acceptor,
         tower::service_fn(|_| async {
-            Ok::<_, hyper::Error>(tower::service_fn(|req: http::Request<Incoming>| async {
+            Ok::<_, Infallible>(tower::service_fn(|req: hyperdriver::body::Request| async {
                 let body = req.into_body();
-                let data = body.collect().await?;
-                Ok::<_, hyper::Error>(hyper::Response::new(hyperdriver::body::Body::from(
-                    data.to_bytes(),
-                )))
+                let data = body.collect().await.unwrap();
+                Ok::<_, Infallible>(hyperdriver::body::Response::new(
+                    hyperdriver::body::Body::from(data.to_bytes()),
+                ))
             }))
         }),
     )

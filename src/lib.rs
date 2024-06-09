@@ -1,3 +1,10 @@
+//! Hyperdriver
+//!
+//! Building the missing middle for network services in Rust.
+
+#![deny(missing_docs)]
+#![deny(missing_debug_implementations)]
+
 use core::fmt;
 
 use tracing::dispatcher;

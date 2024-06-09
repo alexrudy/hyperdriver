@@ -73,6 +73,7 @@ where
 /// Interior service which adds connection information to the request extensions.
 ///
 /// This service wraps the request/response service, not the connector service.
+#[derive(Debug)]
 pub struct Connection<S, A> {
     inner: S,
     info: ConnectionInfoState<A>,

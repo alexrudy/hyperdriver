@@ -76,6 +76,7 @@ type HappyEyeballsResult<T, E> = Result<T, HappyEyeballsError<E>>;
 /// one address at a time.
 ///
 /// To connect to all addresses simultaneously, set the `timeout` to zero.
+#[derive(Debug)]
 pub struct EyeballSet<F, T, E> {
     queue: VecDeque<F>,
     tasks: FuturesUnordered<F>,
@@ -160,6 +161,7 @@ where
         }
     }
 
+    /// Finish the happy eyeballs algorithm, returning the first successful connection.
     pub async fn finish(&mut self) -> HappyEyeballsResult<T, E> {
         for _ in 0..self.initial_concurrency.unwrap_or(self.queue.len()) {
             if let Some(future) = self.queue.pop_front() {

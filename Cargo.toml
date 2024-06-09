@@ -58,8 +58,8 @@ axum = ["dep:axum"]
 default = ["client", "server", "discovery", "stream"]
 docs = []
 incoming = []
-client = ["dep:socket2"]
-server = ["dep:ouroboros"]
+client = ["incoming", "dep:socket2"]
+server = ["incoming", "dep:ouroboros"]
 discovery = [
     "server",
     "client",
@@ -78,22 +78,22 @@ tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
 [[example]]
 name = "google"
 path = "examples/client/google.rs"
-required-features = ["client"]
+required-features = ["client", "tls"]
 
 [[example]]
 name = "hello"
 path = "examples/client/hello.rs"
-required-features = ["client"]
+required-features = ["client", "tls"]
 
 [[example]]
 name = "httpbin"
 path = "examples/client/httpbin.rs"
-required-features = ["client"]
+required-features = ["client", "tls"]
 
 [[example]]
 name = "h2-server"
 path = "examples/server/h2.rs"
-required-features = ["server"]
+required-features = ["server", "tls"]
 
 [[test]]
 name = "server"

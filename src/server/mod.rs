@@ -33,7 +33,7 @@ mod service {
     use tower::make::MakeService;
     use tower::Service;
 
-    type Request = http::Request<hyper::body::Incoming>;
+    type Request = http::Request<crate::body::Body>;
 
     /// A trait alias to provide common bounds for the MakeService and Service types
     /// which can be used with the server.
@@ -59,7 +59,7 @@ mod service {
 
     impl<T> ServingMakeService for T
     where
-        T: MakeService<(), Request, Response = crate::body::Response>,
+        T: MakeService<(), Request>,
         T::Service: Service<Request> + Clone + Send + 'static,
         T::Future: 'static,
         <T as MakeService<(), Request>>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -91,14 +91,15 @@ mod service {
 /// management and serving part.
 pub trait Protocol<S, IO> {
     /// The error when a connection has a problem.
-    type Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>;
+    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     /// The connection future, used to drive a connection IO to completion.
     type Connection: Connection + Future<Output = Result<(), Self::Error>> + Send + 'static;
 
-    /// Serve a connection with upgrades.
+    /// Serve a connection with possible upgrades.
     ///
-    /// Implementing this method i
+    /// Implementing this method does not guarantee that a protocol can be upgraded,
+    /// just that we can serve the connection.
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection;
 }
 
@@ -440,6 +441,8 @@ where
                             _ = shutdown => {
                                 debug!("connection received shutdown signal");
                                 conn.inner_pin_mut().graceful_shutdown();
+                                //TODO: "connection should continued to be polled until it is finished"
+                                // conn.await;
                             },
                         }
                         finished_tx.send();

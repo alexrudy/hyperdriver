@@ -6,12 +6,14 @@ use std::{
 
 use tower::{util::Oneshot, ServiceExt as _};
 
+/// A hyper service that wraps a tower service.
 #[derive(Debug, Clone)]
 pub struct TowerHyperService<S> {
     service: S,
 }
 
 impl<S> TowerHyperService<S> {
+    /// Create a new `TowerHyperService` around a tower::Service.
     pub fn new(inner: S) -> Self {
         Self { service: inner }
     }
@@ -32,7 +34,9 @@ where
     }
 }
 
+/// A future returned by `TowerHyperService`.
 #[pin_project::pin_project]
+#[derive(Debug)]
 pub struct TowerHyperFuture<S, R>
 where
     S: tower::Service<R>,
