@@ -99,7 +99,7 @@ impl tower::Service<Uri> for RegistryTransport {
                 let service = scheme.service(&req).map(|s| s.to_owned());
                 if let Some(service) = service {
                     (async move {
-                        let stream = registry.connect(service.into()).await?;
+                        let stream = registry.connect(service).await?;
                         Ok(TransportStream::new_stream(stream).await?)
                     })
                     .boxed()

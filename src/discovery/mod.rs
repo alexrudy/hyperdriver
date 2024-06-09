@@ -229,14 +229,21 @@ impl ServiceRegistry {
     }
 
     /// Get an acceptor which will be bound to a service with this name.
-    #[tracing::instrument(skip_all, fields(service=%service))]
-    pub async fn bind(
-        &self,
-        service: Cow<'_, str>,
-    ) -> Result<crate::stream::server::Acceptor, BindError> {
+    #[tracing::instrument(skip_all, fields(service=tracing::field::Empty))]
+    pub async fn bind<'a, S>(
+        &'a self,
+        service: S,
+    ) -> Result<crate::stream::server::Acceptor, BindError>
+    where
+        S: Into<Cow<'a, str>>,
+    {
+        let name = service.into();
+        let span = tracing::Span::current();
+        span.record("service", name.as_ref());
+
         self.inner
-            .bind(&self.config, &service)
-            .map_err(|err| BindError::new(service.into_owned(), err))
+            .bind(&self.config, &name)
+            .map_err(|err| BindError::new(name.into_owned(), err))
     }
 
     /// Create a server which will bind to a service by name.
@@ -266,8 +273,15 @@ impl ServiceRegistry {
     /// Connect to a service by name.
     ///
     /// Prefer using `client` instead of this method.
-    #[tracing::instrument(skip_all, fields(service=%service))]
-    pub async fn connect(&self, service: Cow<'_, str>) -> Result<ClientStream, ConnectionError> {
+    #[tracing::instrument(skip_all, fields(service=tracing::field::Empty))]
+    pub async fn connect<'a, S: Into<Cow<'a, str>>>(
+        &'a self,
+        service: S,
+    ) -> Result<ClientStream, ConnectionError> {
+        let service = service.into();
+        let span = tracing::Span::current();
+        span.record("service", service.as_ref());
+
         self.inner.connect(&self.config, service).await
     }
 
