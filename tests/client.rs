@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use http::StatusCode;
+use hyperdriver::body::Response;
 use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::rt::TokioExecutor;
 use std::pin::pin;
@@ -23,7 +24,7 @@ async fn client() -> Result<(), BoxError> {
         PoolConfig::default(),
     );
 
-    let resp = client.get("http://test/".parse().unwrap()).await?;
+    let resp: Response = client.get("http://test/".parse().unwrap()).await?;
 
     assert_eq!(resp.status(), StatusCode::OK);
     server.abort();
@@ -50,7 +51,7 @@ async fn client_h2() -> Result<(), BoxError> {
     let request = http::Request::get("http://test/")
         .version(http::Version::HTTP_2)
         .body(hyperdriver::body::Body::empty())?;
-    let resp = client.request(request).await?;
+    let resp: Response = client.request(request).await?;
 
     assert_eq!(resp.status(), StatusCode::OK);
 

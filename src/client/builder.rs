@@ -63,6 +63,8 @@ impl Builder {
 
             protocol: HttpConnectionBuilder::default(),
             pool: self.pool.map(crate::client::pool::Pool::new),
+
+            _body: std::marker::PhantomData,
         }
     }
 }
