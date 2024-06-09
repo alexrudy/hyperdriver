@@ -21,7 +21,7 @@ machete:
 
 # Check compilation across all features
 check:
-    cargo +{{rust}} hack check --no-private --each-feature --no-dev-deps
+    cargo +{{rust}} hack check --no-private --feature-powerset --no-dev-deps --skip docs
     cargo +{{rust}} check --all-targets --all-features
 
 # Run clippy
