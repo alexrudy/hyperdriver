@@ -5,7 +5,7 @@ use hyperdriver::client::Client;
 use tokio::io::AsyncWriteExt as _;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     tracing_subscriber::fmt::init();
 
     let args = clap::Command::new("httpbin")

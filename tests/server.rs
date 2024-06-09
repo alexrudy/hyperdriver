@@ -4,7 +4,6 @@ use std::pin::pin;
 
 use futures_util::FutureExt as _;
 use http_body_util::BodyExt as _;
-use hyper::body::Incoming;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
@@ -15,10 +14,9 @@ use hyperdriver::stream::server::Accept;
 use tower::MakeService;
 
 use hyperdriver::server::{Protocol, Server};
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-async fn echo(
-    req: hyper::Request<Incoming>,
-) -> Result<hyper::Response<hyperdriver::body::Body>, hyper::Error> {
+async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Response, BoxError> {
     tracing::trace!("processing request");
     let body = req.into_body();
     let data = body.collect().await?;
@@ -49,21 +47,16 @@ fn hello_world() -> hyperdriver::body::Request {
         .unwrap()
 }
 
-type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
 fn serve<S, P, A>(server: Server<S, P, A>) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeService<
-            (),
-            hyper::Request<hyper::body::Incoming>,
-            Response = hyperdriver::body::Response,
-        > + Send
+    S: MakeService<(), hyperdriver::body::Request, Response = hyperdriver::body::Response>
+        + Send
         + 'static,
     S::Service: Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-    S::MakeError: std::error::Error + Send + Sync + 'static,
-    <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::MakeError: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <S::Service as tower::Service<hyperdriver::body::Request>>::Future: Send + 'static,
     P: Protocol<S::Service, A::Conn> + Send + 'static,
     A: Accept + Send + Unpin + 'static,
     A::Conn: HasConnectionInfo + Send + 'static,
@@ -94,17 +87,14 @@ where
 
 fn serve_gracefully<S, P, A>(server: Server<S, P, A>) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeService<
-            (),
-            hyper::Request<hyper::body::Incoming>,
-            Response = hyperdriver::body::Response,
-        > + Send
+    S: MakeService<(), hyperdriver::body::Request, Response = hyperdriver::body::Response>
+        + Send
         + 'static,
     S::Service: Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-    S::MakeError: std::error::Error + Send + Sync + 'static,
-    <S::Service as tower::Service<hyper::Request<hyper::body::Incoming>>>::Future: Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::MakeError: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <S::Service as tower::Service<hyperdriver::body::Request>>::Future: Send + 'static,
     P: Protocol<S::Service, A::Conn> + Send + 'static,
     A: Accept + Send + Unpin + 'static,
     A::Conn: HasConnectionInfo + Send + 'static,
@@ -135,7 +125,7 @@ async fn echo_h1() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        tower::service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),
+        tower::service_fn(|_| async { Ok::<_, BoxError>(tower::service_fn(echo)) }),
         hyperdriver::server::conn::http1::Builder::new(),
     );
 
@@ -194,7 +184,7 @@ async fn echo_h1_early_disconnect() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        tower::service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),
+        tower::service_fn(|_| async { Ok::<_, BoxError>(tower::service_fn(echo)) }),
         hyperdriver::server::conn::http1::Builder::new(),
     );
 

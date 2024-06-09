@@ -65,6 +65,12 @@ impl Protocol {
     }
 }
 
+impl From<http::Version> for Protocol {
+    fn from(version: http::Version) -> Self {
+        Self::Http(version)
+    }
+}
+
 /// Error returned when a protocol is invalid.
 #[derive(Debug, Error)]
 #[error("invalid protocol")]

@@ -8,6 +8,7 @@ use std::{
 use hyper::rt::Read;
 use hyper::rt::Write;
 
+/// Convert Tokio I/O Traits to their Hyper-1.x counterparts
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct TokioIo<T> {
@@ -16,6 +17,7 @@ pub struct TokioIo<T> {
 }
 
 impl<T> TokioIo<T> {
+    /// Create a new Tokio I/O wrapper around the given I/O object
     pub fn new(inner: T) -> Self {
         Self { inner }
     }

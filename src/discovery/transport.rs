@@ -99,7 +99,7 @@ impl tower::Service<Uri> for RegistryTransport {
                 let service = scheme.service(&req).map(|s| s.to_owned());
                 if let Some(service) = service {
                     (async move {
-                        let stream = registry.connect(service.into()).await?;
+                        let stream = registry.connect(service).await?;
                         Ok(TransportStream::new_stream(stream).await?)
                     })
                     .boxed()
@@ -123,12 +123,16 @@ mod builder {
     use super::SchemesDebug;
     use crate::discovery::ServiceRegistry;
 
+    /// A builder for creating a `RegistryTransport`, by adding custom schemes.
+    ///
+    /// Each scheme is a way to determine the service name from a request URI.
     pub struct TransportBuilder {
         pub(crate) registry: ServiceRegistry,
         pub(crate) schemes: BTreeMap<String, BoxScheme>,
     }
 
     impl TransportBuilder {
+        /// Add a custom scheme to the transport.
         pub fn add_scheme<S>(mut self, scheme: S) -> Self
         where
             S: Scheme + Send + Sync + 'static,
@@ -138,11 +142,13 @@ mod builder {
             self
         }
 
+        /// Add the default `svc` and `grpc` schemes to the transport.
         pub fn add_default_schemes(self) -> Self {
             self.add_scheme(super::SvcScheme::default())
                 .add_scheme(super::GrpcScheme::default())
         }
 
+        /// Build the `RegistryTransport` with the given service registry and schemes.
         pub fn build(self) -> RegistryTransport {
             RegistryTransport {
                 registry: self.registry,
@@ -225,7 +231,6 @@ impl Scheme for GrpcScheme {
 
 #[cfg(test)]
 mod tests {
-    use hyper::body::Incoming;
     use tower::{make::Shared, Service, ServiceExt};
 
     use crate::{body::Body, stream::info::BraidAddr};
@@ -251,7 +256,7 @@ mod tests {
     #[derive(Debug, Clone)]
     struct Svc;
 
-    impl Service<http::Request<Incoming>> for Svc {
+    impl Service<http::Request<Body>> for Svc {
         type Response = http::Response<Body>;
         type Error = BoxError;
         type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
@@ -263,7 +268,7 @@ mod tests {
             std::task::Poll::Ready(Ok(()))
         }
 
-        fn call(&mut self, _req: http::Request<Incoming>) -> Self::Future {
+        fn call(&mut self, _req: http::Request<Body>) -> Self::Future {
             let res = http::Response::new(Body::empty());
             std::future::ready(Ok(res))
         }

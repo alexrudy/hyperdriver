@@ -62,6 +62,7 @@ pub enum ValidateSNIError {
 ///
 /// This helps to prevent a client from connecting to the wrong host by
 /// validating a certificate against the SNI extension of a different host.
+#[derive(Debug, Clone, Default)]
 pub struct ValidateSNI;
 
 impl<S> Layer<S> for ValidateSNI {

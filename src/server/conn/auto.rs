@@ -6,7 +6,7 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, future::Future, io};
 
 use crate::bridge::rt::TokioExecutor;
-use hyper::body::Body;
+use http_body::Body;
 use hyper::rt::bounds::Http2ServerConnExec;
 use hyper::rt::{ReadBuf, Write};
 use hyper::{body, rt::Read};
@@ -17,11 +17,7 @@ use crate::rewind::Rewind;
 use crate::server::Protocol;
 
 use super::connecting::Connecting;
-use super::{http1, http2, Connection};
-
-type Error = Box<dyn std::error::Error + Send + Sync>;
-
-type Result<T, E = Error> = std::result::Result<T, E>;
+use super::{http1, http2, Connection, ConnectionError};
 
 const HTTP2_PREFIX: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -78,9 +74,9 @@ impl<E> Builder<E> {
     where
         S: hyper::service::HttpService<body::Incoming, ResBody = B> + Clone,
         S::Future: 'static,
-        S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+        S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         B: Body + 'static,
-        B::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         I: Read + Write + Unpin + Send + 'static,
     {
         UpgradableConnection {
@@ -101,16 +97,16 @@ impl<E> Builder<E> {
 
 impl<S, IO> Protocol<S, IO> for Builder<TokioExecutor>
 where
-    S: tower::Service<http::Request<hyper::body::Incoming>, Response = crate::body::Response>
+    S: tower::Service<crate::body::Request, Response = crate::body::Response>
         + Clone
         + Send
         + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Connection = Connecting<S, IO>;
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = ConnectionError;
 
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {
         Connecting::build(self.clone(), service, stream)
@@ -122,7 +118,7 @@ where
 #[derive(Debug)]
 pub struct UpgradableConnection<'b, I, S, E>
 where
-    S: hyper::service::HttpService<body::Incoming>,
+    S: hyper::service::HttpService<hyper::body::Incoming>,
 {
     #[pin]
     state: ConnectionState<'b, I, S, E>,
@@ -130,11 +126,11 @@ where
 
 impl<'b, I, S, Executor, B> Connection for UpgradableConnection<'b, I, S, Executor>
 where
-    S: hyper::service::HttpService<body::Incoming, ResBody = B> + Clone,
+    S: hyper::service::HttpService<hyper::body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     B: Body + 'static,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     I: Read + Write + Unpin + Send + 'static,
     Executor: Http2ServerConnExec<S::Future, B>,
 {
@@ -152,15 +148,15 @@ where
 
 impl<'b, I, S, E, B> Future for UpgradableConnection<'b, I, S, E>
 where
-    S: hyper::service::HttpService<body::Incoming, ResBody = B> + Clone,
+    S: hyper::service::HttpService<hyper::body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     B: Body + 'static,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     I: Read + Write + Unpin + Send + 'static,
     E: Http2ServerConnExec<S::Future, B>,
 {
-    type Output = Result<()>;
+    type Output = Result<(), ConnectionError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
@@ -172,7 +168,8 @@ where
                     builder,
                     service,
                 } => {
-                    let (version, rewind) = ready!(read_version.poll(cx))?;
+                    let (version, rewind) =
+                        ready!(read_version.poll(cx)).map_err(ConnectionError::Protocol)?;
                     let service = service.take().unwrap();
                     let conn = match version {
                         HttpProtocol::Http1 => ConnectionState::Http1(
@@ -201,7 +198,7 @@ where
 #[pin_project(project = ConnectionStateProject)]
 enum ConnectionState<'b, I, S, E>
 where
-    S: hyper::service::HttpService<body::Incoming>,
+    S: hyper::service::HttpService<hyper::body::Incoming>,
 {
     ReadVersion {
         #[pin]

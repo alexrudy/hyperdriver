@@ -16,7 +16,6 @@ use http::uri::Scheme;
 use http::HeaderValue;
 use http::Uri;
 use http::Version;
-use hyper::body::Incoming;
 use thiserror::Error;
 use tracing::warn;
 
@@ -267,7 +266,7 @@ where
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<Incoming>, Error> {
+    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<crate::body::Body>, Error> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();
@@ -286,7 +285,7 @@ where
     B: Into<crate::body::Body>,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
-    type Response = http::Response<Incoming>;
+    type Response = http::Response<crate::body::Body>;
     type Error = Error;
     type Future = ResponseFuture<P::Connection, TransportStream<T::IO>>;
 
@@ -331,7 +330,7 @@ where
     C: Connection + pool::PoolableConnection,
     T: pool::PoolableTransport,
 {
-    type Output = Result<http::Response<Incoming>, Error>;
+    type Output = Result<http::Response<crate::body::Body>, Error>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -356,9 +355,7 @@ where
                     }
                 },
                 ResponseFutureState::Request(mut fut) => match fut.poll_unpin(cx) {
-                    Poll::Ready(outcome) => {
-                        return Poll::Ready(outcome);
-                    }
+                    Poll::Ready(response) => return Poll::Ready(response),
                     Poll::Pending => {
                         self.inner = ResponseFutureState::Request(fut);
                         return Poll::Pending;
@@ -378,13 +375,13 @@ enum ResponseFutureState<C: pool::PoolableConnection, T: pool::PoolableTransport
         checkout: Checkout<C, T, ConnectionError>,
         request: crate::body::Request,
     },
-    Request(BoxFuture<'static, Result<http::Response<Incoming>, HyperdriverError>>),
+    Request(BoxFuture<'static, Result<http::Response<crate::body::Body>, HyperdriverError>>),
 }
 
 async fn execute_request<C: Connection + PoolableConnection>(
     mut request: crate::body::Request,
     mut conn: Pooled<C>,
-) -> Result<http::Response<Incoming>, Error> {
+) -> Result<http::Response<crate::body::Body>, Error> {
     request
         .headers_mut()
         .entry(http::header::USER_AGENT)
@@ -441,7 +438,7 @@ async fn execute_request<C: Connection + PoolableConnection>(
         });
     }
 
-    Ok(response)
+    Ok(response.map(|body| body.into()))
 }
 
 /// Convert the URI to authority-form, if it is not already.

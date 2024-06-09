@@ -19,6 +19,7 @@ use crate::stream::info::HasConnectionInfo;
 use super::acceptor::TlsStream;
 
 /// A middleware which adds TLS connection information to the request extensions.
+#[derive(Debug, Clone, Default)]
 pub struct TlsConnectLayer;
 
 impl<S> Layer<S> for TlsConnectLayer {
@@ -69,6 +70,7 @@ where
 }
 
 /// Tower middleware for collecting TLS connection information after a handshake has been completed.
+#[derive(Debug)]
 pub struct TlsConnection<S, A> {
     inner: S,
     rx: crate::stream::tls::info::TlsConnectionInfoReciever<A>,
