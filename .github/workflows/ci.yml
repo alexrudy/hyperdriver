@@ -1,121 +1,121 @@
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
 
 name: CI
 
 env:
-  RUSTDOCFLAGS: "-Dwarnings"
+    RUSTDOCFLAGS: "-Dwarnings"
 
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-        toolchain:
-          - stable
-          - nightly
-          - beta
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-      - name: Run cargo build
-        run: cargo build --release --target ${{ matrix.target }}
-
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
+    build:
+        name: Build
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                target:
+                    - x86_64-unknown-linux-gnu
+                toolchain:
+                    - stable
+                    - nightly
+                    - beta
         steps:
-          - name: cargo check
-            run: cargo check --all-targets --all-features
-          - name: cargo hack check
-            run: cargo hack check --no-private --each-feature --no-dev-deps
-            hack: true
-          - name: cargo doc
-            run: cargo doc --all-features --no-deps
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-      - uses: taiki-e/install-action@cargo-hack
-        if: matrix.steps.hack
-      - name: ${{ matrix.steps.name }}
-        run: ${{ matrix.steps.run }}
+            - name: Checkout sources
+              uses: actions/checkout@v2
+            - name: Install rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: ${{ matrix.toolchain }}
+            - name: Run cargo build
+              run: cargo build --release --target ${{ matrix.target }}
 
-  msrv:
-    name: MSRV 1.74
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.74.0
-      - name: Run cargo build
-        run: cargo check --all-targets --all-features
+    check:
+        name: Check
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                steps:
+                    - name: cargo check
+                      run: cargo check --all-targets --all-features
+                    - name: cargo hack check
+                      run: cargo hack check --no-private --feature-powerset --no-dev-deps --skip docs
+                      hack: true
+                    - name: cargo doc
+                      run: cargo doc --all-features --no-deps
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v2
+            - name: Install rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: stable
+            - uses: taiki-e/install-action@cargo-hack
+              if: matrix.steps.hack
+            - name: ${{ matrix.steps.name }}
+              run: ${{ matrix.steps.run }}
 
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        toolchain:
-          - stable
-          - beta
+    msrv:
+        name: MSRV 1.74
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v2
+            - name: Install rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: 1.74.0
+            - name: Run cargo build
+              run: cargo check --all-targets --all-features
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+    test:
+        name: Tests
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                toolchain:
+                    - stable
+                    - beta
 
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v2
 
-      - name: Build cargo tests
-        run: cargo test --all-features --no-run
+            - name: Install rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: ${{ matrix.toolchain }}
 
-      - name: Run cargo test
-        run: cargo test --all-features
+            - name: Build cargo tests
+              run: cargo test --all-features --no-run
 
-  lints:
-    name: Lints
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+            - name: Run cargo test
+              run: cargo test --all-features
 
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
+    lints:
+        name: Lints
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v2
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+            - name: Install rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: stable
+                  components: rustfmt, clippy
 
-      - name: Run cargo clippy
-        uses: actions-rs/clippy-check@v1
-        if: github.repository_owner == 'linode-sokka'
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features -- -D warnings
+            - name: Run cargo fmt
+              run: cargo fmt --all -- --check
 
-      - name: Run cargo clippy
-        if: github.repository_owner != 'linode-sokka'
-        run: cargo clippy --all-features -- -D warnings
+            - name: Run cargo clippy
+              uses: actions-rs/clippy-check@v1
+              if: github.repository_owner == 'linode-sokka'
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  args: --all-features -- -D warnings
+
+            - name: Run cargo clippy
+              if: github.repository_owner != 'linode-sokka'
+              run: cargo clippy --all-features -- -D warnings
