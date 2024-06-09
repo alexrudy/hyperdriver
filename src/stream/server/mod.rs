@@ -21,7 +21,7 @@ use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 use crate::stream::tls::info::TlsConnectionInfoReciever;
 
 #[cfg(feature = "tls")]
-use crate::stream::core::TlsBraid;
+use crate::stream::TlsBraid;
 
 #[cfg(feature = "tls")]
 use crate::stream::tls::server::TlsStream;
@@ -198,7 +198,7 @@ where
     fn from(stream: TlsStream<IO>) -> Self {
         Stream {
             info: ConnectionInfoState::Handshake(stream.rx.clone()),
-            inner: crate::stream::core::TlsBraid::Tls(stream),
+            inner: TlsBraid::Tls(stream),
         }
     }
 }

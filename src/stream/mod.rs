@@ -21,5 +21,5 @@ pub mod tls;
 #[cfg(feature = "stream")]
 pub use core::Braid;
 
-#[cfg(all(feature = "tls", feature = "stream"))]
-pub use core::TlsBraid;
+#[cfg(feature = "tls")]
+pub use tls::TlsBraid;

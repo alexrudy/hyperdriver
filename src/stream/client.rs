@@ -21,7 +21,7 @@ use tokio::net::{TcpStream, UnixStream};
 use crate::stream::core::Braid;
 
 #[cfg(feature = "tls")]
-use crate::stream::core::TlsBraid;
+use crate::stream::TlsBraid;
 
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::HasConnectionInfo;
@@ -94,12 +94,12 @@ where
     /// * `config` - The TLS client configuration to use.
     pub fn tls(self, domain: &str, config: Arc<rustls::ClientConfig>) -> Self {
         let core = match self.inner {
-            crate::stream::core::TlsBraid::NoTls(core) => core,
-            crate::stream::core::TlsBraid::Tls(_) => panic!("Stream::tls called twice"),
+            TlsBraid::NoTls(core) => core,
+            TlsBraid::Tls(_) => panic!("Stream::tls called twice"),
         };
 
         Stream {
-            inner: crate::stream::core::TlsBraid::Tls(ClientTlsStream::new(core, domain, config)),
+            inner: TlsBraid::Tls(ClientTlsStream::new(core, domain, config)),
         }
     }
 }
@@ -135,8 +135,8 @@ where
     fn info(&self) -> crate::stream::info::ConnectionInfo<IO::Addr> {
         #[cfg(feature = "tls")]
         match self.inner {
-            crate::stream::core::TlsBraid::Tls(ref stream) => stream.info(),
-            crate::stream::core::TlsBraid::NoTls(ref stream) => stream.info(),
+            TlsBraid::Tls(ref stream) => stream.info(),
+            TlsBraid::NoTls(ref stream) => stream.info(),
         }
 
         #[cfg(not(feature = "tls"))]
