@@ -33,7 +33,8 @@ pub use transport::TransportBuilder;
 
 /// Service Registry client which will connect to internal services.
 
-pub type Client = crate::client::Client<HttpConnectionBuilder, transport::RegistryTransport>;
+pub type Client<B = crate::body::Body> =
+    crate::client::Client<HttpConnectionBuilder, transport::RegistryTransport, B>;
 
 /// An error occured while connecting to a service.
 #[derive(Debug, thiserror::Error)]
@@ -299,7 +300,7 @@ impl ServiceRegistry {
     }
 
     /// Create a client which will connect to internal services.
-    pub fn client(&self) -> Client {
+    pub fn client<B>(&self) -> Client<B> {
         Client::new(
             Default::default(),
             self.default_transport(),
