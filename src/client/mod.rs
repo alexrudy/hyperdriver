@@ -29,6 +29,7 @@ use crate::client::pool::Connector;
 use crate::client::pool::{PoolableConnection, Pooled};
 use crate::client::Error as HyperdriverError;
 use crate::stream::info::HasConnectionInfo;
+use crate::DebugLiteral;
 
 #[cfg(feature = "stream")]
 mod builder;
@@ -114,7 +115,6 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
 pub struct Client<P = HttpConnectionBuilder, T = TcpConnector, B = crate::body::Body>
 where
     T: Transport,
@@ -124,12 +124,11 @@ where
     protocol: P,
     transport: T,
     pool: Option<pool::Pool<P::Connection>>,
-    _body: std::marker::PhantomData<B>,
+    _body: std::marker::PhantomData<fn() -> B>,
 }
 
 #[cfg(not(feature = "stream"))]
 /// An HTTP client
-#[derive(Debug)]
 pub struct Client<P, T, B = crate::body::Body>
 where
     T: Transport,
@@ -139,7 +138,22 @@ where
     protocol: P,
     transport: T,
     pool: Option<pool::Pool<P::Connection>>,
-    _body: std::marker::PhantomData<B>,
+    _body: std::marker::PhantomData<fn() -> B>,
+}
+
+impl<P, T, B> fmt::Debug for Client<P, T, B>
+where
+    T: Transport + fmt::Debug,
+    P: Protocol<T::IO> + fmt::Debug,
+    P::Connection: PoolableConnection,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Client")
+            .field("protocol", &self.protocol)
+            .field("transport", &self.transport)
+            .field("pool", &Some(DebugLiteral("Pool")))
+            .finish()
+    }
 }
 
 impl<P, T, B> Client<P, T, B>
