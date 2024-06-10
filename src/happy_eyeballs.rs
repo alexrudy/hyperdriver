@@ -83,7 +83,7 @@ pub struct EyeballSet<F, T, E> {
     timeout: Option<Duration>,
     initial_concurrency: Option<usize>,
     error: Option<HappyEyeballsError<E>>,
-    result: PhantomData<T>,
+    result: PhantomData<fn() -> T>,
 }
 
 impl<F, T, E> EyeballSet<F, T, E> {
@@ -102,11 +102,13 @@ impl<F, T, E> EyeballSet<F, T, E> {
     }
 
     /// Returns `true` if the set of tasks is empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.tasks.is_empty() && self.queue.is_empty()
     }
 
     /// Returns the number of tasks in the set.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.tasks.len() + self.queue.len()
     }

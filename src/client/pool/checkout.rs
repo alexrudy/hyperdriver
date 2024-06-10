@@ -147,7 +147,7 @@ pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E> {
     waiter: Waiting<C>,
     inner: InnerCheckoutConnecting<C, T, E>,
     connection: Option<C>,
-    connection_error: PhantomData<E>,
+    connection_error: PhantomData<fn() -> E>,
     #[cfg(debug_assertions)]
     id: CheckoutId,
 }

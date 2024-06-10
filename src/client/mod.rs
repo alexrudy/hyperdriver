@@ -336,7 +336,7 @@ where
     T: pool::PoolableTransport,
 {
     inner: ResponseFutureState<C, T>,
-    _body: std::marker::PhantomData<BOut>,
+    _body: std::marker::PhantomData<fn() -> BOut>,
 }
 
 impl<C: pool::PoolableConnection, T: pool::PoolableTransport, B> fmt::Debug
