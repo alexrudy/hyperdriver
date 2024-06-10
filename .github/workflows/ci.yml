@@ -40,7 +40,10 @@ jobs:
                     - name: cargo check
                       run: cargo check --all-targets --all-features
                     - name: cargo hack check
-                      run: cargo hack check --no-private --feature-powerset --no-dev-deps --skip docs
+                      run: cargo hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni
+                      hack: true
+                    - name: cargo hack check --each-feature
+                      run: cargo hack check --no-private --each-feature --no-dev-deps
                       hack: true
                     - name: cargo doc
                       run: cargo doc --all-features --no-deps

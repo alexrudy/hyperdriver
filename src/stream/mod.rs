@@ -5,7 +5,7 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
-#[cfg(all(feature = "client", feature = "stream"))]
+#[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "stream")]
 mod core;

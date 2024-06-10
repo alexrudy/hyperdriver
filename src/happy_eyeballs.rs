@@ -83,13 +83,14 @@ pub struct EyeballSet<F, T, E> {
     timeout: Option<Duration>,
     initial_concurrency: Option<usize>,
     error: Option<HappyEyeballsError<E>>,
-    result: PhantomData<T>,
+    result: PhantomData<fn() -> T>,
 }
 
 impl<F, T, E> EyeballSet<F, T, E> {
     /// Create a new `EyeballSet` with an optional timeout.
     ///
     /// The timeout is the amount of time between individual connection attempts.
+    #[allow(dead_code)]
     pub fn new(timeout: Option<Duration>) -> Self {
         Self {
             queue: VecDeque::new(),
@@ -102,16 +103,19 @@ impl<F, T, E> EyeballSet<F, T, E> {
     }
 
     /// Returns `true` if the set of tasks is empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.tasks.is_empty() && self.queue.is_empty()
     }
 
     /// Returns the number of tasks in the set.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.tasks.len() + self.queue.len()
     }
 
     /// Push a future into the set of tasks.
+    #[allow(dead_code)]
     pub fn push(&mut self, future: F)
     where
         F: Future<Output = std::result::Result<T, E>>,

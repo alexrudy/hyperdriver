@@ -20,8 +20,6 @@ use thiserror::Error;
 use tracing::warn;
 
 #[cfg(feature = "stream")]
-use crate::client::conn::tcp::TcpConnectionConfig;
-#[cfg(feature = "stream")]
 use crate::client::conn::tcp::TcpConnector;
 use crate::client::conn::Connection;
 use crate::client::pool::Checkout;
@@ -29,12 +27,14 @@ use crate::client::pool::Connector;
 use crate::client::pool::{PoolableConnection, Pooled};
 use crate::client::Error as HyperdriverError;
 use crate::stream::info::HasConnectionInfo;
+use crate::DebugLiteral;
 
-#[cfg(feature = "stream")]
 mod builder;
 
 pub mod conn;
 pub mod pool;
+
+pub use builder::Builder;
 
 pub use conn::http::HttpConnectionBuilder;
 pub use conn::ConnectionError;
@@ -114,8 +114,7 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
-pub struct Client<P = HttpConnectionBuilder, T = TcpConnector>
+pub struct Client<P = HttpConnectionBuilder, T = TcpConnector, B = crate::body::Body>
 where
     T: Transport,
     P: Protocol<T::IO>,
@@ -124,12 +123,12 @@ where
     protocol: P,
     transport: T,
     pool: Option<pool::Pool<P::Connection>>,
+    _body: std::marker::PhantomData<fn() -> B>,
 }
 
 #[cfg(not(feature = "stream"))]
 /// An HTTP client
-#[derive(Debug)]
-pub struct Client<P, T>
+pub struct Client<P, T, B = crate::body::Body>
 where
     T: Transport,
     P: Protocol<T::IO>,
@@ -138,9 +137,25 @@ where
     protocol: P,
     transport: T,
     pool: Option<pool::Pool<P::Connection>>,
+    _body: std::marker::PhantomData<fn() -> B>,
 }
 
-impl<P, T> Client<P, T>
+impl<P, T, B> fmt::Debug for Client<P, T, B>
+where
+    T: Transport + fmt::Debug,
+    P: Protocol<T::IO> + fmt::Debug,
+    P::Connection: PoolableConnection,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Client")
+            .field("protocol", &self.protocol)
+            .field("transport", &self.transport)
+            .field("pool", &Some(DebugLiteral("Pool")))
+            .finish()
+    }
+}
+
+impl<P, T, B> Client<P, T, B>
 where
     T: Transport,
     P: Protocol<T::IO>,
@@ -152,11 +167,12 @@ where
             protocol: connector,
             transport,
             pool: Some(pool::Pool::new(pool)),
+            _body: std::marker::PhantomData,
         }
     }
 }
 
-impl<P, T> Clone for Client<P, T>
+impl<P, T, B> Clone for Client<P, T, B>
 where
     P: Protocol<T::IO> + Clone,
     P::Connection: PoolableConnection,
@@ -167,6 +183,7 @@ where
             protocol: self.protocol.clone(),
             transport: self.transport.clone(),
             pool: self.pool.clone(),
+            _body: std::marker::PhantomData,
         }
     }
 }
@@ -187,12 +204,14 @@ impl Client<HttpConnectionBuilder, TcpConnector> {
             })),
 
             #[cfg(feature = "tls")]
-            transport: TcpConnector::new(TcpConnectionConfig::default(), default_tls_config()),
+            transport: TcpConnector::default(),
 
             #[cfg(not(feature = "tls"))]
-            transport: TcpConnector::new(TcpConnectionConfig::default()),
+            transport: TcpConnector::default(),
 
             protocol: HttpConnectionBuilder::default(),
+
+            _body: std::marker::PhantomData,
         }
     }
 }
@@ -204,7 +223,7 @@ impl Default for Client<HttpConnectionBuilder> {
     }
 }
 
-impl<P, C, T> Client<P, T>
+impl<P, C, T, B> Client<P, T, B>
 where
     C: Connection + PoolableConnection,
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
@@ -251,12 +270,22 @@ where
             Checkout::detached(key, connector)
         }
     }
+}
 
+impl<P, C, T, B> Client<P, T, B>
+where
+    C: Connection + PoolableConnection,
+    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    T: Transport + 'static,
+    T::IO: Unpin,
+    B: From<crate::body::Body> + Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
+{
     /// Send an http Request, and return a Future of the Response.
     pub fn request(
         &self,
         request: crate::body::Request,
-    ) -> ResponseFuture<P::Connection, TransportStream<T::IO>> {
+    ) -> ResponseFuture<P::Connection, TransportStream<T::IO>, B> {
         let uri = request.uri().clone();
 
         let protocol: HttpProtocol = request.version().into();
@@ -266,7 +295,7 @@ where
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<crate::body::Body>, Error> {
+    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<B>, Error> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();
@@ -276,44 +305,48 @@ where
     }
 }
 
-impl<P, C, T, B> tower::Service<http::Request<B>> for Client<P, T>
+impl<P, C, T, BIn, BOut> tower::Service<http::Request<BIn>> for Client<P, T, BOut>
 where
     C: Connection + PoolableConnection,
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
-    B: Into<crate::body::Body>,
+    BIn: Into<crate::body::Body>,
+    BOut: From<crate::body::Body> + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
-    type Response = http::Response<crate::body::Body>;
+    type Response = http::Response<BOut>;
     type Error = Error;
-    type Future = ResponseFuture<P::Connection, TransportStream<T::IO>>;
+    type Future = ResponseFuture<P::Connection, TransportStream<T::IO>, BOut>;
 
     fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: http::Request<B>) -> Self::Future {
+    fn call(&mut self, req: http::Request<BIn>) -> Self::Future {
         self.request(req.map(|b| b.into()))
     }
 }
 
 /// A future that resolves to an HTTP response.
-pub struct ResponseFuture<C, T>
+pub struct ResponseFuture<C, T, BOut>
 where
     C: pool::PoolableConnection,
     T: pool::PoolableTransport,
 {
     inner: ResponseFutureState<C, T>,
+    _body: std::marker::PhantomData<fn() -> BOut>,
 }
 
-impl<C: pool::PoolableConnection, T: pool::PoolableTransport> fmt::Debug for ResponseFuture<C, T> {
+impl<C: pool::PoolableConnection, T: pool::PoolableTransport, B> fmt::Debug
+    for ResponseFuture<C, T, B>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResponseFuture").finish()
     }
 }
 
-impl<C, T> ResponseFuture<C, T>
+impl<C, T, BOut> ResponseFuture<C, T, BOut>
 where
     C: pool::PoolableConnection,
     T: pool::PoolableTransport,
@@ -321,16 +354,18 @@ where
     fn new(checkout: Checkout<C, T, ConnectionError>, request: crate::body::Request) -> Self {
         Self {
             inner: ResponseFutureState::Checkout { checkout, request },
+            _body: std::marker::PhantomData,
         }
     }
 }
 
-impl<C, T> Future for ResponseFuture<C, T>
+impl<C, T, BOut> Future for ResponseFuture<C, T, BOut>
 where
     C: Connection + pool::PoolableConnection,
     T: pool::PoolableTransport,
+    BOut: From<crate::body::Body> + Unpin,
 {
-    type Output = Result<http::Response<crate::body::Body>, Error>;
+    type Output = Result<http::Response<BOut>, Error>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -355,7 +390,8 @@ where
                     }
                 },
                 ResponseFutureState::Request(mut fut) => match fut.poll_unpin(cx) {
-                    Poll::Ready(response) => return Poll::Ready(response),
+                    Poll::Ready(Ok(response)) => return Poll::Ready(Ok(response.map(Into::into))),
+                    Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                     Poll::Pending => {
                         self.inner = ResponseFutureState::Request(fut);
                         return Poll::Pending;
@@ -378,10 +414,11 @@ enum ResponseFutureState<C: pool::PoolableConnection, T: pool::PoolableTransport
     Request(BoxFuture<'static, Result<http::Response<crate::body::Body>, HyperdriverError>>),
 }
 
-async fn execute_request<C: Connection + PoolableConnection>(
-    mut request: crate::body::Request,
-    mut conn: Pooled<C>,
-) -> Result<http::Response<crate::body::Body>, Error> {
+/// Prepare a request for sending over the connection.
+fn prepare_request<C: Connection + PoolableConnection>(
+    request: &mut http::Request<crate::body::Body>,
+    conn: &Pooled<C>,
+) -> Result<(), Error> {
     request
         .headers_mut()
         .entry(http::header::USER_AGENT)
@@ -400,7 +437,7 @@ async fn execute_request<C: Connection + PoolableConnection>(
         }
 
         //TODO: Configure set host header?
-        set_host_header(&mut request);
+        set_host_header(request);
 
         if request.method() == http::Method::CONNECT {
             authority_form(request.uri_mut());
@@ -419,8 +456,16 @@ async fn execute_request<C: Connection + PoolableConnection>(
     } else if request.method() == http::Method::CONNECT {
         return Err(Error::InvalidMethod(http::Method::CONNECT));
     } else if conn.version() == Version::HTTP_2 {
-        set_host_header(&mut request);
+        set_host_header(request);
     }
+    Ok(())
+}
+
+async fn execute_request<C: Connection + PoolableConnection>(
+    mut request: crate::body::Request,
+    mut conn: Pooled<C>,
+) -> Result<http::Response<crate::body::Body>, Error> {
+    prepare_request(&mut request, &conn)?;
 
     tracing::trace!(request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
 
