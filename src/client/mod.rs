@@ -20,8 +20,6 @@ use thiserror::Error;
 use tracing::warn;
 
 #[cfg(feature = "stream")]
-use crate::client::conn::tcp::TcpConnectionConfig;
-#[cfg(feature = "stream")]
 use crate::client::conn::tcp::TcpConnector;
 use crate::client::conn::Connection;
 use crate::client::pool::Checkout;
@@ -31,11 +29,12 @@ use crate::client::Error as HyperdriverError;
 use crate::stream::info::HasConnectionInfo;
 use crate::DebugLiteral;
 
-#[cfg(feature = "stream")]
 mod builder;
 
 pub mod conn;
 pub mod pool;
+
+pub use builder::Builder;
 
 pub use conn::http::HttpConnectionBuilder;
 pub use conn::ConnectionError;
@@ -205,10 +204,10 @@ impl Client<HttpConnectionBuilder, TcpConnector> {
             })),
 
             #[cfg(feature = "tls")]
-            transport: TcpConnector::new(TcpConnectionConfig::default(), default_tls_config()),
+            transport: TcpConnector::default(),
 
             #[cfg(not(feature = "tls"))]
-            transport: TcpConnector::new(TcpConnectionConfig::default()),
+            transport: TcpConnector::default(),
 
             protocol: HttpConnectionBuilder::default(),
 

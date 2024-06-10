@@ -90,6 +90,7 @@ impl<F, T, E> EyeballSet<F, T, E> {
     /// Create a new `EyeballSet` with an optional timeout.
     ///
     /// The timeout is the amount of time between individual connection attempts.
+    #[allow(dead_code)]
     pub fn new(timeout: Option<Duration>) -> Self {
         Self {
             queue: VecDeque::new(),
@@ -114,6 +115,7 @@ impl<F, T, E> EyeballSet<F, T, E> {
     }
 
     /// Push a future into the set of tasks.
+    #[allow(dead_code)]
     pub fn push(&mut self, future: F)
     where
         F: Future<Output = std::result::Result<T, E>>,

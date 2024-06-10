@@ -9,6 +9,7 @@ use std::future::poll_fn;
 #[cfg(feature = "tls")]
 use std::io;
 
+#[cfg(feature = "stream")]
 use std::net::SocketAddr;
 
 #[cfg(feature = "tls")]
@@ -16,13 +17,16 @@ use std::sync::Arc;
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
+#[cfg(feature = "stream")]
 use tokio::net::{TcpStream, UnixStream};
 
+#[cfg(feature = "stream")]
 use crate::stream::core::Braid;
 
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
 
+#[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
 use crate::stream::info::HasConnectionInfo;
 
@@ -32,6 +36,7 @@ use crate::stream::tls::client::ClientTlsStream;
 #[cfg(feature = "tls")]
 use crate::stream::tls::TlsHandshakeStream as _;
 
+#[cfg(feature = "stream")]
 /// A stream which can handle multiple different underlying transports, and TLS
 /// through a unified type.
 ///
@@ -51,6 +56,27 @@ where
     inner: IO,
 }
 
+#[cfg(not(feature = "stream"))]
+/// A stream which can handle multiple different underlying transports, and TLS
+/// through a unified type.
+///
+/// This is the client side of the Braid stream.
+#[derive(Debug)]
+#[pin_project]
+pub struct Stream<IO>
+where
+    IO: HasConnectionInfo,
+{
+    #[cfg(feature = "tls")]
+    #[pin]
+    inner: TlsBraid<ClientTlsStream<IO>, IO>,
+
+    #[cfg(not(feature = "tls"))]
+    #[pin]
+    inner: IO,
+}
+
+#[cfg(feature = "stream")]
 impl Stream {
     /// Connect to a server via TCP at the given address.
     ///
@@ -73,6 +99,24 @@ where
 
             #[cfg(not(feature = "tls"))]
             inner,
+        }
+    }
+
+    /// Map the inner stream to a new type.
+    pub fn map<F, T>(self, f: F) -> Stream<T>
+    where
+        F: FnOnce(IO) -> T,
+        T: HasConnectionInfo,
+    {
+        Stream {
+            #[cfg(feature = "tls")]
+            inner: match self.inner {
+                TlsBraid::NoTls(inner) => TlsBraid::NoTls(f(inner)),
+                TlsBraid::Tls(_) => panic!("Stream::map called on a TLS stream"),
+            },
+
+            #[cfg(not(feature = "tls"))]
+            inner: f(self.inner),
         }
     }
 }
@@ -144,6 +188,7 @@ where
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
@@ -152,6 +197,7 @@ impl From<TcpStream> for Stream {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
@@ -160,6 +206,7 @@ impl From<DuplexStream> for Stream {
     }
 }
 
+#[cfg(feature = "stream")]
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {

@@ -12,6 +12,7 @@
 use std::fmt;
 use std::future::Future;
 use std::io;
+use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use http::Uri;
 #[cfg(feature = "tls")]
 use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::task::JoinError;
 use tower::ServiceExt as _;
@@ -32,8 +34,7 @@ use super::TransportStream;
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 use crate::stream::client::Stream as ClientStream;
 
-#[cfg(any(feature = "tls", feature = "stream"))]
-use crate::stream::info::HasConnectionInfo as _;
+use crate::stream::info::HasConnectionInfo;
 
 /// A TCP connector for client connections.
 ///
@@ -56,136 +57,155 @@ use crate::stream::info::HasConnectionInfo as _;
 /// ```no_run
 /// # use hyperdriver::client::conn::tcp::TcpConnector;
 /// # use hyperdriver::client::conn::TcpConnectionConfig;
+/// # use hyperdriver::client::conn::dns::GaiResolver;
+/// # use tokio::net::TcpStream;
 /// # use tower::ServiceExt as _;
 ///
 /// # async fn run() {
 /// let config = TcpConnectionConfig::default();
-/// let connector = TcpConnector::new_with_config(config);
+/// let connector: TcpConnector<GaiResolver, TcpStream> = TcpConnector::builder().with_config(config).build_with_gai();
 ///
 /// let uri = "http://example.com".parse().unwrap();
 /// let stream = connector.oneshot(uri).await.unwrap();
 /// # }
 /// ```
-#[derive(Debug, Clone)]
-pub struct TcpConnector<R = GaiResolver> {
+#[derive(Debug)]
+pub struct TcpConnector<R = GaiResolver, IO = TcpStream> {
     config: Arc<TcpConnectionConfig>,
     resolver: R,
+    stream: PhantomData<fn() -> IO>,
 
     #[cfg(feature = "tls")]
-    tls: Arc<TlsClientConfig>,
+    tls: Option<Arc<TlsClientConfig>>,
 }
 
-impl Default for TcpConnector {
-    #[cfg(feature = "tls")]
+impl<R, IO> Clone for TcpConnector<R, IO>
+where
+    R: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            resolver: self.resolver.clone(),
+            stream: PhantomData,
+            #[cfg(feature = "tls")]
+            tls: self.tls.clone(),
+        }
+    }
+}
+
+impl<IO> Default for TcpConnector<GaiResolver, IO> {
     fn default() -> Self {
-        Self::new(
-            TcpConnectionConfig::default(),
-            crate::client::default_tls_config(),
-        )
+        TcpConnector::builder().build_with_gai()
+    }
+}
+
+#[derive(Debug)]
+/// Builder for a TCP connector.
+pub struct TcpConnectorBuilder {
+    config: TcpConnectionConfig,
+
+    #[cfg(feature = "tls")]
+    tls: Option<TlsClientConfig>,
+}
+
+impl TcpConnectorBuilder {
+    /// Access the TCP connection configuration
+    pub fn config(&mut self) -> &mut TcpConnectionConfig {
+        &mut self.config
     }
 
-    #[cfg(not(feature = "tls"))]
-    fn default() -> Self {
-        Self::new(TcpConnectionConfig::default())
+    /// Set the TCP connection configuration
+    pub fn with_config(mut self, config: TcpConnectionConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Build a TCP connector with a resolver
+    pub fn build<R, IO>(self, resolver: R) -> TcpConnector<R, IO> {
+        TcpConnector {
+            config: Arc::new(self.config),
+            resolver,
+            stream: PhantomData,
+
+            #[cfg(feature = "tls")]
+            tls: self.tls.map(Arc::new),
+        }
+    }
+
+    /// Build a TCP connecter with GetAddrInfo resolution
+    pub fn build_with_gai<IO>(self) -> TcpConnector<GaiResolver, IO> {
+        TcpConnector {
+            config: Arc::new(self.config),
+            resolver: GaiResolver::new(),
+            stream: PhantomData,
+
+            #[cfg(feature = "tls")]
+            tls: self.tls.map(Arc::new),
+        }
+    }
+}
+
+#[cfg(feature = "tls")]
+impl TcpConnectorBuilder {
+    /// Access the TLS configuration
+    pub fn tls(&mut self) -> &mut Option<TlsClientConfig> {
+        &mut self.tls
+    }
+
+    /// Set the TLS configuration for the connector to the default configuration
+    pub fn with_default_tls(mut self) -> Self {
+        self.tls = Some(crate::client::default_tls_config());
+        self
+    }
+
+    /// Set the TLS configuration for the connector
+    pub fn with_tls(mut self, config: TlsClientConfig) -> Self {
+        self.tls = Some(config);
+        self
+    }
+
+    /// Disable TLS for the connector
+    pub fn without_tls(mut self) -> Self {
+        self.tls = None;
+        self
+    }
+
+    /// Set the TLS configuration for the connector, optionally
+    pub fn with_optional_tls(mut self, config: Option<TlsClientConfig>) -> Self {
+        self.tls = config;
+        self
     }
 }
 
 impl TcpConnector {
-    #[cfg(feature = "tls")]
-    /// Create a new `TcpConnector` with the given configuration.
-    pub fn new(config: TcpConnectionConfig, tls: TlsClientConfig) -> Self {
-        Self {
-            config: Arc::new(config),
-            resolver: GaiResolver::new(),
-            tls: Arc::new(tls),
-        }
-    }
+    /// Create a new TCP connector builder with the default configuration.
+    pub fn builder() -> TcpConnectorBuilder {
+        TcpConnectorBuilder {
+            config: Default::default(),
 
-    #[cfg(not(feature = "tls"))]
-    /// Create a new `TcpConnector` with the given configuration.
-    pub fn new(config: TcpConnectionConfig) -> Self {
-        Self {
-            config: Arc::new(config),
-            resolver: GaiResolver::new(),
-        }
-    }
-
-    /// Create a new `TcpConnector` with the given configuration, and a default resolver and
-    /// TLS configuration.
-    pub fn new_with_config(config: TcpConnectionConfig) -> Self {
-        Self {
-            config: Arc::new(config),
-            ..Self::default()
+            #[cfg(feature = "tls")]
+            tls: None,
         }
     }
 }
 
-impl<R> TcpConnector<R> {
-    #[cfg(feature = "tls")]
-    /// Create a new `TcpConnector` with the given configuration, resolver, and TLS configuration.
-    pub fn new_with_resolver(
-        config: TcpConnectionConfig,
-        resolver: R,
-        tls: TlsClientConfig,
-    ) -> Self {
-        Self {
-            config: Arc::new(config),
-            resolver,
-            tls: Arc::new(tls),
-        }
-    }
-
-    #[cfg(not(feature = "tls"))]
-    /// Create a new `TcpConnector` with the given configuration and resolver.
-    pub fn new_with_resolver(resolver: R) -> Self {
-        Self {
-            config: Arc::new(TcpConnectionConfig::default()),
-            resolver,
-        }
-    }
-
-    /// Set the resolver for the TCP connector.
-    pub fn with_resolver(self, resolver: R) -> Self {
-        Self { resolver, ..self }
-    }
-
-    /// Set the configuration for the TCP connector.
-    pub fn with_config(self, config: TcpConnectionConfig) -> Self {
-        Self {
-            config: Arc::new(config),
-            ..self
-        }
-    }
-
-    #[cfg(feature = "tls")]
-    /// Set the TLS configuration for the TCP connector.
-    pub fn with_tls(self, tls: TlsClientConfig) -> Self {
-        Self {
-            tls: Arc::new(tls),
-            ..self
-        }
-    }
-
+impl<R, IO> TcpConnector<R, IO> {
     /// Get the configuration for the TCP connector.
     pub fn config(&self) -> &TcpConnectionConfig {
         &self.config
     }
 
-    /// Get a mutable reference to the configuration for the TCP connector.
-    pub fn config_mut(&mut self) -> &mut TcpConnectionConfig {
-        Arc::make_mut(&mut self.config)
-    }
-
     #[cfg(feature = "tls")]
     /// Get the TLS configuration for the TCP connector.
-    pub fn tls(&self) -> &Arc<TlsClientConfig> {
-        &self.tls
+    pub fn tls(&self) -> Option<&Arc<TlsClientConfig>> {
+        self.tls.as_ref()
     }
 }
 
 type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
-impl<R> tower::Service<Uri> for TcpConnector<R>
+impl<R, IO> tower::Service<Uri> for TcpConnector<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error>
         + Clone
@@ -193,8 +213,11 @@ where
         + Sync
         + 'static,
     R::Future: Send,
+    TcpStream: Into<IO>,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO::Addr: Clone + Unpin + Send + 'static,
 {
-    type Response = TransportStream<ClientStream<TcpStream>>;
+    type Response = TransportStream<ClientStream<IO>>;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -232,14 +255,18 @@ where
 
                     #[cfg(feature = "tls")]
                     {
-                        let mut tls = connector.tls.clone();
+                        let Some(mut tls) = connector.tls.clone() else {
+                            return Err(TcpConnectionError::new(
+                                "TLS is not enabled, can't connect to https",
+                            ));
+                        };
                         {
                             let config = Arc::make_mut(&mut tls);
                             config.alpn_protocols.push(b"h2".to_vec());
                             config.alpn_protocols.push(b"http/1.1".to_vec());
                         }
 
-                        let mut stream = ClientStream::new(stream).tls(host.as_ref(), tls);
+                        let mut stream = ClientStream::new(stream.into()).tls(host.as_ref(), tls);
 
                         stream
                             .finish_handshake()
@@ -251,7 +278,7 @@ where
                         Ok(TransportStream { stream, info })
                     }
                 } else {
-                    let stream = ClientStream::new(stream);
+                    let stream = ClientStream::new(stream.into());
 
                     let info = stream.info();
 
@@ -263,7 +290,7 @@ where
     }
 }
 
-impl<R> TcpConnector<R>
+impl<R, IO> TcpConnector<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {

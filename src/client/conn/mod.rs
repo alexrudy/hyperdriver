@@ -44,14 +44,12 @@ use tokio::io::AsyncWrite;
 use hyper::body::Incoming;
 use tower::Service;
 
-#[cfg(feature = "stream")]
 pub mod dns;
 
 #[cfg(feature = "stream")]
 pub mod duplex;
 pub mod http;
 
-#[cfg(feature = "stream")]
 pub mod tcp;
 
 use crate::client::pool::PoolableTransport;
@@ -64,9 +62,7 @@ use crate::stream::info::HasConnectionInfo;
 
 pub use self::http::ConnectionError;
 
-#[cfg(feature = "stream")]
 pub use self::tcp::TcpConnectionConfig;
-#[cfg(feature = "stream")]
 pub use self::tcp::TcpConnector;
 
 /// A transport provides data transmission between two endpoints.
