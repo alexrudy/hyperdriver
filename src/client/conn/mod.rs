@@ -153,8 +153,22 @@ where
         self.info.authority.as_ref().map(|a| a.as_str())
     }
 
-    pub(crate) fn into_inner(self) -> IO {
+    /// Reduce the transport to its inner IO stream.
+    pub fn into_inner(self) -> IO {
         self.stream
+    }
+
+    /// Map the inner IO stream to a new IO stream.
+    pub fn map<F, U>(self, f: F) -> TransportStream<U>
+    where
+        F: FnOnce(IO) -> U,
+        U: HasConnectionInfo,
+        IO::Addr: Into<U::Addr>,
+    {
+        TransportStream {
+            stream: f(self.stream),
+            info: self.info.map(Into::into),
+        }
     }
 }
 
