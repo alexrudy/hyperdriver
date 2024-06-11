@@ -248,12 +248,12 @@ impl ServiceRegistry {
     }
 
     /// Create a server which will bind to a service by name.
-    pub async fn server<'a, M, S>(
+    pub async fn server<'a, M, S, B>(
         &'a self,
         make_service: M,
         name: S,
     ) -> Result<
-        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::stream::server::Acceptor>,
+        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::stream::server::Acceptor, B>,
         BindError,
     >
     where
@@ -264,10 +264,10 @@ impl ServiceRegistry {
     }
 
     /// Create a server which will use a registry transport to proxy requests to services.
-    pub fn router<A>(
+    pub fn router<A, B>(
         &self,
         acceptor: A,
-    ) -> crate::server::Server<Shared<Client>, AutoBuilder<TokioExecutor>, A> {
+    ) -> crate::server::Server<Shared<Client>, AutoBuilder<TokioExecutor>, A, B> {
         crate::server::Server::new(acceptor, Shared::new(self.client()))
     }
 

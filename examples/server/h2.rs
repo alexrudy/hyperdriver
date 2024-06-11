@@ -43,7 +43,7 @@ async fn main() {
 
     let server = hyperdriver::server::Server::new(
         acceptor,
-        tower::service_fn(|_| async {
+        hyperdriver::server::service::make_service_fn(|_| async {
             Ok::<_, Infallible>(tower::service_fn(|req: hyperdriver::body::Request| async {
                 let body = req.into_body();
                 let data = body.collect().await.unwrap();
