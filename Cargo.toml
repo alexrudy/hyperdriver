@@ -105,6 +105,11 @@ name = "client"
 path = "tests/client.rs"
 required-features = ["server", "client", "stream"]
 
+[[test]]
+name = "custom-body"
+path = "tests/server/custombody.rs"
+required-features = ["server"]
+
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]
 

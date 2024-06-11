@@ -10,10 +10,13 @@ use core::fmt;
 use tracing::dispatcher;
 
 pub mod body;
+pub use body::Body;
 pub mod bridge;
 
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "client")]
+pub use client::Client;
 
 #[cfg(feature = "discovery")]
 pub mod discovery;
@@ -32,6 +35,9 @@ mod rewind;
 
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "server")]
+pub use server::Server;
+
 pub mod stream;
 
 #[allow(unused)]
@@ -57,4 +63,16 @@ pub(crate) mod private {
 
     #[allow(unused)]
     pub trait Sealed {}
+}
+
+/// Service-related types and traits.
+pub mod service {
+
+    pub use crate::body::{AdaptCustomBodyExt, AdaptCustomBodyLayer, AdaptCustomBodyService};
+    pub use crate::body::{AdaptIncomingLayer, AdaptIncomingService};
+    pub use crate::body::{AdaptOuterBodyLayer, AdaptOuterBodyService};
+
+    #[cfg(feature = "server")]
+    pub use crate::server::service::{make_service_fn, HttpService, MakeServiceRef};
+    pub use tower::{service_fn, Service, ServiceBuilder, ServiceExt};
 }
