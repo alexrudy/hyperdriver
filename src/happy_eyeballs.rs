@@ -28,7 +28,7 @@ pub enum HappyEyeballsError<T> {
     /// No progress can be made.
     NoProgress,
     /// Timeout reached.
-    Timeout(Elapsed),
+    Timeout(Duration),
     /// An error occurred during the underlying future.
     Error(T),
 }
@@ -40,15 +40,9 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoProgress => write!(f, "no progress can be made"),
-            Self::Timeout(e) => write!(f, "timeout: {}", e),
+            Self::Timeout(e) => write!(f, "timeout: {}", e.as_secs_f32()),
             Self::Error(e) => write!(f, "error: {}", e),
         }
-    }
-}
-
-impl<T> From<Elapsed> for HappyEyeballsError<T> {
-    fn from(e: Elapsed) -> Self {
-        Self::Timeout(e)
     }
 }
 
@@ -58,7 +52,7 @@ where
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Timeout(e) => Some(e),
+            Self::Timeout(_) => None,
             Self::Error(e) => Some(e),
             _ => None,
         }
@@ -184,7 +178,9 @@ where
             match self.join_next_with_timeout().await {
                 Eyeball::Ok(outcome) => return Ok(outcome),
                 Eyeball::Error => continue,
-                Eyeball::Timeout(elapsed) => return Err(HappyEyeballsError::Timeout(elapsed)),
+                Eyeball::Timeout(_) => {
+                    return Err(HappyEyeballsError::Timeout(self.timeout.unwrap()))
+                }
                 Eyeball::Exhausted => {
                     return self
                         .error

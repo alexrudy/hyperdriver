@@ -94,6 +94,14 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
+impl<IO> Default for TcpConnector<GaiResolver, IO> {
+    fn default() -> Self {
+        TcpConnector::builder().with_default_tls().build_with_gai()
+    }
+}
+
+#[cfg(not(feature = "tls"))]
 impl<IO> Default for TcpConnector<GaiResolver, IO> {
     fn default() -> Self {
         TcpConnector::builder().build_with_gai()
@@ -334,10 +342,14 @@ impl<'c> TcpConnecting<'c> {
     }
 
     async fn connect(mut self) -> Result<TcpStream, TcpConnectionError> {
-        let delay = self
-            .config
-            .happy_eyeballs_timeout
-            .map(|duration| duration / (self.addresses.len() + 1) as u32);
+        let delay = if self.addresses.is_empty() {
+            self.config.happy_eyeballs_timeout
+        } else {
+            self.config
+                .happy_eyeballs_timeout
+                .map(|duration| duration / (self.addresses.len()) as u32)
+        };
+
         let mut attempts = EyeballSet::new(delay);
 
         while let Some(address) = self.addresses.pop() {
