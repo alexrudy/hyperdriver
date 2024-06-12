@@ -9,7 +9,7 @@ use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
 use hyperdriver::client::HttpProtocol;
-use hyperdriver::server::service::MakeServiceRef;
+use hyperdriver::service::MakeServiceRef;
 use hyperdriver::stream::client::Stream;
 use hyperdriver::stream::server::Accept;
 
@@ -113,7 +113,7 @@ async fn echo_h1() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        hyperdriver::server::service::make_service_fn(|_| async {
+        hyperdriver::service::make_service_fn(|_| async {
             Ok::<_, BoxError>(tower::service_fn(echo))
         }),
         hyperdriver::server::conn::http1::Builder::new(),
@@ -145,7 +145,7 @@ async fn echo_h2() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        hyperdriver::server::service::make_service_fn(|_| async {
+        hyperdriver::service::make_service_fn(|_| async {
             Ok::<_, hyper::Error>(tower::service_fn(echo))
         }),
         hyperdriver::server::conn::http2::Builder::new(TokioExecutor::new()),
@@ -176,7 +176,7 @@ async fn echo_h1_early_disconnect() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        hyperdriver::server::service::make_service_fn(|_| async {
+        hyperdriver::service::make_service_fn(|_| async {
             Ok::<_, BoxError>(tower::service_fn(echo))
         }),
         hyperdriver::server::conn::http1::Builder::new(),
@@ -208,7 +208,7 @@ async fn echo_auto_h1() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        hyperdriver::server::service::make_service_fn(|_| async {
+        hyperdriver::service::make_service_fn(|_| async {
             Ok::<_, hyper::Error>(tower::service_fn(echo))
         }),
         hyperdriver::server::conn::auto::Builder::new(TokioExecutor::new()),
@@ -240,7 +240,7 @@ async fn echo_auto_h2() {
     let acceptor = hyperdriver::stream::server::Acceptor::new(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
-        hyperdriver::server::service::make_service_fn(|_| async {
+        hyperdriver::service::make_service_fn(|_| async {
             Ok::<_, hyper::Error>(tower::service_fn(echo))
         }),
         hyperdriver::server::conn::auto::Builder::new(TokioExecutor::new()),

@@ -14,18 +14,17 @@ use std::{fmt, io};
 pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
+use crate::service::MakeServiceRef;
 use crate::stream::info::HasConnectionInfo;
 pub use crate::stream::server::Accept;
 use crate::stream::server::Acceptor;
 use futures_util::future::FutureExt as _;
 use http_body::Body;
-use service::MakeServiceRef;
 use tower::make::Shared;
 use tracing::instrument::Instrumented;
 use tracing::{debug, trace, Instrument};
 
 pub mod conn;
-pub mod service;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
