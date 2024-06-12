@@ -92,9 +92,13 @@ pub fn default_tls_config() -> rustls::ClientConfig {
         roots.add(cert).unwrap();
     }
 
-    rustls::ClientConfig::builder()
+    let mut cfg = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
-        .with_no_client_auth()
+        .with_no_client_auth();
+
+    cfg.alpn_protocols.push(b"h2".to_vec());
+    cfg.alpn_protocols.push(b"http/1.1".to_vec());
+    cfg
 }
 
 #[cfg(feature = "stream")]

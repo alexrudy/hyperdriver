@@ -137,7 +137,7 @@ mod tests {
         let client = builder.build();
         assert_eq!(
             client.transport.tls().unwrap().alpn_protocols,
-            vec![b"a1".to_vec()]
+            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"a1".to_vec()]
         );
     }
 }

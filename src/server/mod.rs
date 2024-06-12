@@ -5,6 +5,7 @@
 #![deny(unsafe_code)]
 
 use std::future::{Future, IntoFuture};
+use std::marker::PhantomData;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -12,12 +13,13 @@ use std::{fmt, io};
 
 pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
-use self::service::ServingMakeService;
 use crate::bridge::rt::TokioExecutor;
+use crate::service::MakeServiceRef;
 use crate::stream::info::HasConnectionInfo;
 pub use crate::stream::server::Accept;
 use crate::stream::server::Acceptor;
 use futures_util::future::FutureExt as _;
+use http_body::Body;
 use tower::make::Shared;
 use tracing::instrument::Instrumented;
 use tracing::{debug, trace, Instrument};
@@ -26,64 +28,6 @@ pub mod conn;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
-mod service {
-    use crate::private::Sealed;
-    use std::future::Future;
-    use tower::make::MakeService;
-    use tower::Service;
-
-    type Request = http::Request<crate::body::Body>;
-
-    /// A trait alias to provide common bounds for the MakeService and Service types
-    /// which can be used with the server.
-    pub trait ServingMakeService: Sealed {
-        type Service: Service<Request, Error = Self::Error, Future = Self::ServiceFuture>
-            + Clone
-            + Send
-            + 'static;
-        type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
-        type MakeError: Into<Box<dyn std::error::Error + Send + Sync>>;
-        type Future: Future<Output = Result<Self::Service, Self::MakeError>> + 'static;
-        type ServiceFuture: Send + 'static;
-
-        fn poll_ready(
-            &mut self,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), Self::MakeError>>;
-
-        fn make_service(&mut self, _: ()) -> Self::Future;
-    }
-
-    impl<T> Sealed for T where T: MakeService<(), Request> {}
-
-    impl<T> ServingMakeService for T
-    where
-        T: MakeService<(), Request>,
-        T::Service: Service<Request> + Clone + Send + 'static,
-        T::Future: 'static,
-        <T as MakeService<(), Request>>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-        T::MakeError: Into<Box<dyn std::error::Error + Send + Sync>>,
-        <T::Service as Service<Request>>::Future: Send + 'static,
-    {
-        type MakeError = T::MakeError;
-        type Service = T::Service;
-        type Future = T::Future;
-        type Error = T::Error;
-        type ServiceFuture = <T::Service as Service<Request>>::Future;
-
-        fn make_service(&mut self, _: ()) -> Self::Future {
-            MakeService::make_service(self, ())
-        }
-
-        fn poll_ready(
-            &mut self,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), Self::MakeError>> {
-            MakeService::poll_ready(self, cx)
-        }
-    }
-}
 
 /// A transport protocol for serving connections.
 ///
@@ -105,24 +49,26 @@ pub trait Protocol<S, IO> {
 
 /// A server that can accept connections, and run each connection
 /// using a [tower::Service].
-pub struct Server<S, P, A> {
+pub struct Server<S, P, A, B> {
     incoming: A,
     make_service: S,
     protocol: P,
+    body: PhantomData<fn(B) -> ()>,
 }
 
-impl<S, P, A> fmt::Debug for Server<S, P, A> {
+impl<S, P, A, B> fmt::Debug for Server<S, P, A, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Server").finish()
     }
 }
-impl<S, P, A> Server<S, P, A> {
+impl<S, P, A, B> Server<S, P, A, B> {
     /// Set the protocol to use for serving connections.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2, A> {
+    pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2, A, B> {
         Server {
             incoming: self.incoming,
             make_service: self.make_service,
             protocol,
+            body: PhantomData,
         }
     }
 
@@ -135,33 +81,36 @@ impl<S, P, A> Server<S, P, A> {
             incoming,
             make_service,
             protocol,
+            body: PhantomData,
         }
     }
 
     /// Shutdown the server gracefully when the given future resolves.
-    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<S, P, A, F>
+    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<S, P, A, B, F>
     where
-        S: ServingMakeService,
+        S: MakeServiceRef<A::Conn, B>,
         P: Protocol<S::Service, A::Conn>,
         A: Accept + Unpin,
+        B: Body,
         F: Future<Output = ()> + Send + 'static,
     {
         GracefulShutdown::new(self, signal)
     }
 }
 
-impl<S, A> Server<S, AutoBuilder<TokioExecutor>, A> {
+impl<S, A, B> Server<S, AutoBuilder<TokioExecutor>, A, B> {
     /// Create a new server with the given `MakeService` and `Acceptor`.
     pub fn new(incoming: A, make_service: S) -> Self {
         Self {
             incoming,
             make_service,
             protocol: AutoBuilder::new(TokioExecutor::new()),
+            body: PhantomData,
         }
     }
 }
 
-impl<S> Server<S, AutoBuilder<TokioExecutor>, Acceptor<tokio::net::TcpListener>> {
+impl<S, B> Server<S, AutoBuilder<TokioExecutor>, Acceptor<tokio::net::TcpListener>, B> {
     /// Bind a new server to the given address.
     pub async fn bind(addr: std::net::SocketAddr, make_service: S) -> io::Result<Self> {
         let incoming = tokio::net::TcpListener::bind(addr).await?;
@@ -170,24 +119,26 @@ impl<S> Server<S, AutoBuilder<TokioExecutor>, Acceptor<tokio::net::TcpListener>>
     }
 }
 
-impl<S, A> Server<Shared<S>, AutoBuilder<TokioExecutor>, A> {
+impl<S, A, B> Server<Shared<S>, AutoBuilder<TokioExecutor>, A, B> {
     /// Create a new server with the given `Service` and `Acceptor`. The service will be cloned for each connection.
     pub fn new_shared(incoming: A, service: S) -> Self {
         Self {
             incoming,
             make_service: Shared::new(service),
             protocol: AutoBuilder::new(TokioExecutor::new()),
+            body: PhantomData,
         }
     }
 }
 
-impl<S, P, A> IntoFuture for Server<S, P, A>
+impl<S, P, A, B> IntoFuture for Server<S, P, A, B>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
+    B: Body,
 {
-    type IntoFuture = Serving<S, P, A>;
+    type IntoFuture = Serving<S, P, A, B>;
     type Output = Result<(), ServerError>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -202,32 +153,32 @@ where
 #[derive(Debug)]
 #[pin_project::pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Serving<S, P, A>
+pub struct Serving<S, P, A, B>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
+    A: Accept,
 {
-    server: Server<S, P, A>,
+    server: Server<S, P, A, B>,
 
     #[pin]
-    state: State<S::Service, S::Future>,
+    state: State<A::Conn, S::Future>,
 }
 
 #[derive(Debug)]
 #[pin_project::pin_project(project = StateProj, project_replace = StateProjOwn)]
 enum State<S, F> {
     Preparing,
-    Accepting {
-        service: S,
-    },
+    Accepting,
     Making {
         #[pin]
         future: F,
+        stream: S,
     },
 }
 
-impl<S, P, A> Serving<S, P, A>
+impl<S, P, A, B> Serving<S, P, A, B>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
 {
@@ -243,38 +194,35 @@ where
 
         match me.state.as_mut().project() {
             StateProj::Preparing => {
-                ready!(me.server.make_service.poll_ready(cx)).map_err(ServerError::ready)?;
-                let future = me.server.make_service.make_service(());
-                me.state.set(State::Making { future });
+                ready!(me.server.make_service.poll_ready_ref(cx)).map_err(ServerError::ready)?;
+                me.state.set(State::Accepting);
             }
+            StateProj::Accepting => match ready!(Pin::new(&mut me.server.incoming).poll_accept(cx))
+            {
+                Ok(stream) => {
+                    trace!("accepted connection from {}", stream.info().remote_addr());
+                    let future = me.server.make_service.make_service_ref(&stream);
+                    me.state.set(State::Making { future, stream });
+                }
+                Err(e) => {
+                    return Poll::Ready(Err(ServerError::accept(e)));
+                }
+            },
             StateProj::Making { future, .. } => {
                 let service = ready!(future.poll(cx)).map_err(ServerError::make)?;
-                trace!("Server is ready to accept");
-                me.state.set(State::Accepting { service });
-            }
-            StateProj::Accepting { .. } => {
-                match ready!(Pin::new(&mut me.server.incoming).poll_accept(cx)) {
-                    Ok(stream) => {
-                        trace!("accepted connection from {}", stream.info().remote_addr());
+                if let StateProjOwn::Making { stream, .. } =
+                    me.state.project_replace(State::Preparing)
+                {
+                    let span = tracing::span!(tracing::Level::TRACE, "connection", remote = %stream.info().remote_addr());
+                    let conn = me
+                        .server
+                        .protocol
+                        .serve_connection_with_upgrades(stream, service)
+                        .instrument(span);
 
-                        if let StateProjOwn::Accepting { service } =
-                            me.state.project_replace(State::Preparing)
-                        {
-                            let span = tracing::span!(tracing::Level::TRACE, "connection", remote = %stream.info().remote_addr());
-                            let conn = me
-                                .server
-                                .protocol
-                                .serve_connection_with_upgrades(stream, service)
-                                .instrument(span);
-
-                            return Poll::Ready(Ok(Some(conn)));
-                        } else {
-                            unreachable!("state must still be accepting");
-                        }
-                    }
-                    Err(e) => {
-                        return Poll::Ready(Err(ServerError::accept(e)));
-                    }
+                    return Poll::Ready(Ok(Some(conn)));
+                } else {
+                    unreachable!("state must still be accepting");
                 }
             }
         };
@@ -282,11 +230,12 @@ where
     }
 }
 
-impl<S, P, A> Future for Serving<S, P, A>
+impl<S, P, A, B> Future for Serving<S, P, A, B>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
+    B: Body,
 {
     type Output = Result<(), ServerError>;
 
@@ -350,12 +299,13 @@ fn close() -> (CloseSender, CloseReciever) {
 
 /// A server that can accept connections, and run each connection, and can also process graceful shutdown signals.
 #[pin_project::pin_project]
-pub struct GracefulShutdown<S, P, A, F>
+pub struct GracefulShutdown<S, P, A, B, F>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
+    A: Accept,
 {
     #[pin]
-    server: Serving<S, P, A>,
+    server: Serving<S, P, A, B>,
 
     #[pin]
     signal: F,
@@ -368,14 +318,15 @@ where
     connection: CloseSender,
 }
 
-impl<S, P, A, F> GracefulShutdown<S, P, A, F>
+impl<S, P, A, B, F> GracefulShutdown<S, P, A, B, F>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
+    B: Body,
     F: Future<Output = ()>,
 {
-    fn new(server: Server<S, P, A>, signal: F) -> Self {
+    fn new(server: Server<S, P, A, B>, signal: F) -> Self {
         let (tx, rx) = close();
         let (tx2, rx2) = close();
         Self {
@@ -389,18 +340,19 @@ where
     }
 }
 
-impl<S, P, A, F> fmt::Debug for GracefulShutdown<S, P, A, F>
+impl<S, P, A, B, F> fmt::Debug for GracefulShutdown<S, P, A, B, F>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, B>,
+    A: Accept,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GracefulShutdown").finish()
     }
 }
 
-impl<S, P, A, F> Future for GracefulShutdown<S, P, A, F>
+impl<S, P, A, Body, F> Future for GracefulShutdown<S, P, A, Body, F>
 where
-    S: ServingMakeService,
+    S: MakeServiceRef<A::Conn, Body>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
     F: Future<Output = ()>,

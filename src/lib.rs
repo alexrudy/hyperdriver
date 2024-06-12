@@ -10,10 +10,13 @@ use core::fmt;
 use tracing::dispatcher;
 
 pub mod body;
+pub use body::Body;
 pub mod bridge;
 
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "client")]
+pub use client::Client;
 
 #[cfg(feature = "discovery")]
 pub mod discovery;
@@ -32,6 +35,9 @@ mod rewind;
 
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "server")]
+pub use server::Server;
+
 pub mod stream;
 
 #[allow(unused)]
@@ -58,3 +64,5 @@ pub(crate) mod private {
     #[allow(unused)]
     pub trait Sealed {}
 }
+
+pub mod service;

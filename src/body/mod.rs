@@ -19,10 +19,10 @@ use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
 
+pub use crate::service::{AdaptCustomBodyExt, AdaptCustomBodyLayer, AdaptCustomBodyService};
 #[cfg(feature = "incoming")]
-pub use self::adapt::AdaptIncomingLayer;
-#[cfg(feature = "incoming")]
-pub use self::adapt::AdaptIncomingService;
+pub use crate::service::{AdaptIncomingLayer, AdaptIncomingService};
+pub use crate::service::{AdaptOuterBodyLayer, AdaptOuterBodyService};
 
 type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
 
@@ -61,6 +61,25 @@ impl Body {
     pub fn empty() -> Self {
         Self {
             inner: InnerBody::Empty,
+        }
+    }
+
+    /// Convert this body into a boxed body.
+    pub fn as_boxed(self) -> UnsyncBoxBody<Bytes, BoxError> {
+        match self.inner {
+            InnerBody::Boxed(body) => UnsyncBoxBody::new(body),
+            InnerBody::Full(body) => UnsyncBoxBody::new(body.map_err(|_| unreachable!())),
+            InnerBody::Empty => {
+                UnsyncBoxBody::new(http_body_util::Empty::new().map_err(|_| unreachable!()))
+            }
+            InnerBody::Http(body) => body,
+            InnerBody::HttpSync(body) => UnsyncBoxBody::new(body),
+
+            #[cfg(feature = "incoming")]
+            InnerBody::Incoming(incoming) => UnsyncBoxBody::new(incoming.map_err(Into::into)),
+
+            #[cfg(feature = "axum")]
+            InnerBody::AxumBody(body) => UnsyncBoxBody::new(body.map_err(Into::into)),
         }
     }
 }
@@ -278,72 +297,6 @@ impl fmt::Debug for InnerBody {
             InnerBody::Incoming(_) => f.debug_struct("Incoming").finish(),
             #[cfg(feature = "axum")]
             InnerBody::AxumBody(_) => f.debug_struct("AxumBody").finish(),
-        }
-    }
-}
-
-#[cfg(feature = "incoming")]
-mod adapt {
-
-    use tower::Layer;
-    use tower::Service;
-
-    use super::Body;
-    use super::{Request, Response};
-
-    /// Layer to convert a body to use `Body` as the request body from `hyper::body::Incoming`.
-    #[derive(Debug, Clone, Default)]
-    pub struct AdaptIncomingLayer;
-
-    impl AdaptIncomingLayer {
-        /// Create a new `AdaptBodyLayer`.
-        pub fn new() -> Self {
-            Self
-        }
-    }
-
-    impl<S> Layer<S> for AdaptIncomingLayer {
-        type Service = AdaptIncomingService<S>;
-
-        fn layer(&self, inner: S) -> Self::Service {
-            AdaptIncomingService { inner }
-        }
-    }
-
-    /// Adapt a service to use `Body` as the request body.
-    ///
-    /// This is useful when you want to use `Body` as the request body type for a
-    /// service, and the outer functions require a service that provides a body
-    /// type of `http::Request<hyper::body::Incoming>`.
-    #[derive(Debug, Clone, Default)]
-    pub struct AdaptIncomingService<S> {
-        inner: S,
-    }
-
-    impl<S> AdaptIncomingService<S> {
-        /// Create a new `AdaptBody` to wrap a service.
-        pub fn new(inner: S) -> Self {
-            Self { inner }
-        }
-    }
-
-    impl<T> Service<http::Request<hyper::body::Incoming>> for AdaptIncomingService<T>
-    where
-        T: Service<Request, Response = Response>,
-    {
-        type Response = Response;
-        type Error = T::Error;
-        type Future = T::Future;
-
-        fn poll_ready(
-            &mut self,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), Self::Error>> {
-            self.inner.poll_ready(cx)
-        }
-
-        fn call(&mut self, req: http::Request<hyper::body::Incoming>) -> Self::Future {
-            self.inner.call(req.map(Body::from))
         }
     }
 }
