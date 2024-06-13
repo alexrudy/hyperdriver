@@ -3,12 +3,12 @@
 use std::io;
 use std::task::{Context, Poll};
 
-use crate::stream::client::Stream;
-use crate::stream::info::Protocol;
 use futures_util::future::BoxFuture;
 use http::Uri;
 
 use super::TransportStream;
+use crate::stream::client::Stream;
+use crate::stream::info::Protocol;
 
 /// Transport via duplex stream
 #[derive(Debug, Clone)]

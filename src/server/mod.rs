@@ -15,14 +15,13 @@ pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
 use crate::service::MakeServiceRef;
-use crate::stream::info::HasConnectionInfo;
 pub use crate::stream::server::Accept;
 use crate::stream::server::Acceptor;
 use futures_util::future::FutureExt as _;
 use http_body::Body;
 use tower::make::Shared;
 use tracing::instrument::Instrumented;
-use tracing::{debug, trace, Instrument};
+use tracing::{debug, Instrument};
 
 pub mod conn;
 
@@ -200,7 +199,6 @@ where
             StateProj::Accepting => match ready!(Pin::new(&mut me.server.incoming).poll_accept(cx))
             {
                 Ok(stream) => {
-                    trace!("accepted connection from {}", stream.info().remote_addr());
                     let future = me.server.make_service.make_service_ref(&stream);
                     me.state.set(State::Making { future, stream });
                 }
@@ -213,7 +211,7 @@ where
                 if let StateProjOwn::Making { stream, .. } =
                     me.state.project_replace(State::Preparing)
                 {
-                    let span = tracing::span!(tracing::Level::TRACE, "connection", remote = %stream.info().remote_addr());
+                    let span = tracing::span!(tracing::Level::TRACE, "connection");
                     let conn = me
                         .server
                         .protocol

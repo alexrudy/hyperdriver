@@ -3,9 +3,10 @@ use std::{net::Ipv4Addr, sync::Arc};
 use rustls::ServerConfig;
 
 fn tls_config() -> rustls::ServerConfig {
-    let (_, cert) = pem_rfc7468::decode_vec(include_bytes!("minica/example.com/cert.pem")).unwrap();
+    let (_, cert) =
+        pem_rfc7468::decode_vec(include_bytes!("../minica/example.com/cert.pem")).unwrap();
     let (label, key) =
-        pem_rfc7468::decode_vec(include_bytes!("minica/example.com/key.pem")).unwrap();
+        pem_rfc7468::decode_vec(include_bytes!("../minica/example.com/key.pem")).unwrap();
 
     let cert = rustls::pki_types::CertificateDer::from(cert);
     let key = match label {
@@ -23,7 +24,7 @@ fn tls_config() -> rustls::ServerConfig {
 
 fn tls_root_store() -> rustls::RootCertStore {
     let mut root_store = rustls::RootCertStore::empty();
-    let (_, cert) = pem_rfc7468::decode_vec(include_bytes!("minica/minica.pem")).unwrap();
+    let (_, cert) = pem_rfc7468::decode_vec(include_bytes!("../minica/minica.pem")).unwrap();
     root_store
         .add(rustls::pki_types::CertificateDer::from(cert))
         .unwrap();

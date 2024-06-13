@@ -1,14 +1,21 @@
+#[cfg(feature = "tls")]
+use std::sync::Arc;
+
 use tokio::net::TcpStream;
 
 #[cfg(feature = "tls")]
 use rustls::ClientConfig;
 
-use crate::client::{conn::http::HttpConnectionBuilder, Client};
+use crate::client::{conn::HttpConnectionBuilder, Client};
 
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 
-use super::conn::{dns::GaiResolver, TcpConnector};
+use super::conn::{
+    dns::GaiResolver,
+    transport::{TlsTransport, TransportTlsExt as _},
+    TcpConnector,
+};
 
 /// A builder for a client.
 #[derive(Debug)]
@@ -17,7 +24,7 @@ pub struct Builder {
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
-    conn: crate::client::conn::http::HttpConnectionBuilder,
+    conn: crate::client::conn::HttpConnectionBuilder,
 }
 
 impl Default for Builder {
@@ -79,25 +86,28 @@ impl Builder {
     }
 
     /// HTTP connection configuration.
-    pub fn conn(&mut self) -> &mut crate::client::conn::http::HttpConnectionBuilder {
+    pub fn conn(&mut self) -> &mut crate::client::conn::HttpConnectionBuilder {
         &mut self.conn
     }
 }
 
 impl Builder {
     /// Build the client.
-    pub fn build(self) -> Client<HttpConnectionBuilder, TcpConnector<GaiResolver, TcpStream>> {
+    pub fn build(
+        self,
+    ) -> Client<HttpConnectionBuilder, TlsTransport<TcpConnector<GaiResolver, TcpStream>>> {
         Client {
             #[cfg(feature = "tls")]
             transport: crate::client::conn::TcpConnector::builder()
                 .with_config(self.tcp)
-                .with_optional_tls(self.tls)
-                .build_with_gai(),
+                .build_with_gai()
+                .with_optional_tls(self.tls.map(Arc::new)),
 
             #[cfg(not(feature = "tls"))]
             transport: crate::client::conn::TcpConnector::builder()
                 .with_config(self.tcp)
-                .build_with_gai(),
+                .build_with_gai()
+                .without_tls(),
 
             protocol: HttpConnectionBuilder::default(),
             pool: self.pool.map(crate::client::pool::Pool::new),
@@ -123,7 +133,7 @@ mod tests {
         builder.tcp().nodelay = true;
 
         let client = builder.build();
-        assert!(client.transport.config().nodelay)
+        assert!(client.transport.inner().config().nodelay)
     }
 
     #[cfg(feature = "tls")]
@@ -136,7 +146,7 @@ mod tests {
 
         let client = builder.build();
         assert_eq!(
-            client.transport.tls().unwrap().alpn_protocols,
+            client.transport.tls_config().unwrap().alpn_protocols,
             vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"a1".to_vec()]
         );
     }
