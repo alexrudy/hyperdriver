@@ -4,7 +4,6 @@ use std::fmt;
 use std::io;
 use std::str::FromStr;
 
-#[cfg(feature = "stream")]
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use http::uri::Authority;
@@ -109,6 +108,73 @@ fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
     }
 }
 
+/// Connection address for a unix domain socket.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct UnixAddr {
+    path: Option<Utf8PathBuf>,
+}
+
+impl UnixAddr {
+    /// Does this socket have a name
+    pub fn is_named(&self) -> bool {
+        self.path.is_some()
+    }
+
+    /// Get the path of this socket.
+    pub fn path(&self) -> Option<&Utf8Path> {
+        self.path.as_deref()
+    }
+
+    /// Create a new address from a path.
+    pub fn from_pathbuf(path: Utf8PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+}
+
+impl fmt::Display for UnixAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(path) = self.path() {
+            write!(f, "unix://{}", path)
+        } else {
+            write!(f, "unix://")
+        }
+    }
+}
+
+impl TryFrom<std::os::unix::net::SocketAddr> for UnixAddr {
+    type Error = io::Error;
+    fn try_from(addr: std::os::unix::net::SocketAddr) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: addr
+                .as_pathname()
+                .map(|p| {
+                    Utf8Path::from_path(p).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "not a utf-8 path")
+                    })
+                })
+                .transpose()?
+                .map(|path| path.to_owned()),
+        })
+    }
+}
+
+impl TryFrom<tokio::net::unix::SocketAddr> for UnixAddr {
+    type Error = io::Error;
+    fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: addr
+                .as_pathname()
+                .map(|p| {
+                    Utf8Path::from_path(p).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "not a utf-8 path")
+                    })
+                })
+                .transpose()?
+                .map(|path| path.to_owned()),
+        })
+    }
+}
+
 /// A socket address for a Braid stream.
 ///
 /// Supports more than just network socket addresses, also support Unix socket addresses (paths)
@@ -123,10 +189,7 @@ pub enum BraidAddr {
     Duplex,
 
     /// A Unix socket address.
-    Unix(Utf8PathBuf),
-
-    /// Represents a Unix socket connection which has no address.
-    UnixUnnamed,
+    Unix(UnixAddr),
 }
 
 #[cfg(feature = "stream")]
@@ -136,7 +199,6 @@ impl std::fmt::Display for BraidAddr {
             Self::Tcp(addr) => write!(f, "{}", addr),
             Self::Duplex => write!(f, "<duplex>"),
             Self::Unix(path) => write!(f, "{}", path),
-            Self::UnixUnnamed => write!(f, "<unnamed>"),
         }
     }
 }
@@ -154,7 +216,7 @@ impl BraidAddr {
     /// Returns the Unix socket address, if this is a Unix socket address.
     pub fn path(&self) -> Option<&Utf8Path> {
         match self {
-            Self::Unix(path) => Some(path.as_path()),
+            Self::Unix(addr) => addr.path(),
             _ => None,
         }
     }
@@ -179,21 +241,7 @@ impl From<std::net::SocketAddr> for BraidAddr {
 impl TryFrom<tokio::net::unix::SocketAddr> for BraidAddr {
     type Error = io::Error;
     fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
-        let path = match addr.as_pathname() {
-            Some(path) => path.to_path_buf(),
-            None => {
-                return Ok(Self::UnixUnnamed);
-            }
-        };
-
-        let path = Utf8PathBuf::from_path_buf(path).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid (non-utf8) unix socket address",
-            )
-        })?;
-
-        Ok(Self::Unix(path))
+        Ok(Self::Unix(addr.try_into()?))
     }
 }
 
@@ -227,6 +275,13 @@ impl From<(std::net::Ipv6Addr, u16)> for BraidAddr {
 #[cfg(feature = "stream")]
 impl From<Utf8PathBuf> for BraidAddr {
     fn from(addr: Utf8PathBuf) -> Self {
+        Self::Unix(UnixAddr::from_pathbuf(addr))
+    }
+}
+
+#[cfg(feature = "stream")]
+impl From<UnixAddr> for BraidAddr {
+    fn from(addr: UnixAddr) -> Self {
         Self::Unix(addr)
     }
 }
@@ -433,18 +488,20 @@ impl HasConnectionInfo for TcpStream {
 }
 
 impl HasConnectionInfo for UnixStream {
-    type Addr = Utf8PathBuf;
+    type Addr = UnixAddr;
 
     fn info(&self) -> ConnectionInfo<Self::Addr> {
         ConnectionInfo {
-            local_addr: Utf8PathBuf::from_path_buf(
-                self.local_addr().unwrap().as_pathname().unwrap().to_owned(),
-            )
-            .expect("unix socket address"),
-            remote_addr: Utf8PathBuf::from_path_buf(
-                self.peer_addr().unwrap().as_pathname().unwrap().to_owned(),
-            )
-            .expect("unix socket address"),
+            local_addr: self
+                .local_addr()
+                .expect("unable to get local address")
+                .try_into()
+                .expect("utf-8 unix socket address"),
+            remote_addr: self
+                .peer_addr()
+                .expect("unable to get peer address")
+                .try_into()
+                .expect("utf-8 unix socket address"),
             ..Default::default()
         }
     }
