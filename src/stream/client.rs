@@ -14,6 +14,7 @@ use std::net::SocketAddr;
 
 #[cfg(feature = "tls")]
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -161,7 +162,15 @@ where
     /// handshake to complete. If this method is not called, the TLS handshake
     /// will be completed the first time the connection is used.
     pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        poll_fn(|cx| self.inner.poll_handshake(cx)).await
+        poll_fn(|cx| self.poll_handshake(cx)).await
+    }
+
+    #[inline]
+    pub(crate) fn poll_handshake(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        self.inner.poll_handshake(cx)
     }
 }
 
@@ -222,9 +231,9 @@ where
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
+    ) -> Poll<std::io::Result<()>> {
         self.project().inner.poll_read(cx, buf)
     }
 }
@@ -236,23 +245,23 @@ where
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+    ) -> Poll<Result<usize, std::io::Error>> {
         self.project().inner.poll_write(cx, buf)
     }
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         self.project().inner.poll_flush(cx)
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         self.project().inner.poll_shutdown(cx)
     }
 }
