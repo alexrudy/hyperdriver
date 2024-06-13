@@ -11,6 +11,9 @@ use std::sync::Arc;
 
 use crate::bridge::rt::TokioExecutor;
 #[cfg(feature = "client")]
+use crate::client::conn::TlsTransport;
+use crate::client::conn::TransportTlsExt;
+#[cfg(feature = "client")]
 use crate::client::HttpConnectionBuilder;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
@@ -34,7 +37,7 @@ pub use transport::TransportBuilder;
 /// Service Registry client which will connect to internal services.
 
 pub type Client<B = crate::body::Body> =
-    crate::client::Client<HttpConnectionBuilder, transport::RegistryTransport, B>;
+    crate::client::Client<HttpConnectionBuilder, TlsTransport<transport::RegistryTransport>, B>;
 
 /// An error occured while connecting to a service.
 #[derive(Debug, thiserror::Error)]
@@ -301,11 +304,13 @@ impl ServiceRegistry {
 
     /// Create a client which will connect to internal services.
     pub fn client<B>(&self) -> Client<B> {
-        Client::new(
-            Default::default(),
-            self.default_transport(),
-            Default::default(),
-        )
+        #[cfg(feature = "tls")]
+        let transport = self.default_transport().with_default_tls();
+
+        #[cfg(not(feature = "tls"))]
+        let transport = self.default_transport().without_tls();
+
+        Client::new(Default::default(), transport, Default::default())
     }
 }
 

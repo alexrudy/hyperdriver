@@ -66,3 +66,8 @@ pub(crate) mod private {
 }
 
 pub mod service;
+
+/// Conenction Information
+pub mod info {
+    pub use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
+}

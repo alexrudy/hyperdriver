@@ -20,8 +20,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use http::Uri;
-#[cfg(feature = "tls")]
-use rustls::ClientConfig as TlsClientConfig;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpSocket, TcpStream};
@@ -29,10 +27,9 @@ use tokio::task::JoinError;
 use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
-use super::dns::{GaiResolver, IpVersion, SocketAddrs};
 use super::TransportStream;
+use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
-use crate::stream::client::Stream as ClientStream;
 
 use crate::stream::info::HasConnectionInfo;
 
@@ -47,7 +44,7 @@ use crate::stream::info::HasConnectionInfo;
 /// local addresses to bind to.
 ///
 /// If the `tls` feature is enabled, the connector can also be configured with
-/// a [`TlsClientConfig`] to enable TLS support.
+/// a [`rustls::ClientConfig`] to enable TLS support.
 ///
 /// This connector implements the happy-eyeballs algorithm for connecting to
 /// remote addresses, which allows for faster connection times by trying
@@ -55,7 +52,7 @@ use crate::stream::info::HasConnectionInfo;
 ///
 /// # Example
 /// ```no_run
-/// # use hyperdriver::client::conn::tcp::TcpConnector;
+/// # use hyperdriver::client::conn::TcpConnector;
 /// # use hyperdriver::client::conn::TcpConnectionConfig;
 /// # use hyperdriver::client::conn::dns::GaiResolver;
 /// # use tokio::net::TcpStream;
@@ -74,9 +71,6 @@ pub struct TcpConnector<R = GaiResolver, IO = TcpStream> {
     config: Arc<TcpConnectionConfig>,
     resolver: R,
     stream: PhantomData<fn() -> IO>,
-
-    #[cfg(feature = "tls")]
-    tls: Option<Arc<TlsClientConfig>>,
 }
 
 impl<R, IO> Clone for TcpConnector<R, IO>
@@ -88,20 +82,10 @@ where
             config: self.config.clone(),
             resolver: self.resolver.clone(),
             stream: PhantomData,
-            #[cfg(feature = "tls")]
-            tls: self.tls.clone(),
         }
     }
 }
 
-#[cfg(feature = "tls")]
-impl<IO> Default for TcpConnector<GaiResolver, IO> {
-    fn default() -> Self {
-        TcpConnector::builder().with_default_tls().build_with_gai()
-    }
-}
-
-#[cfg(not(feature = "tls"))]
 impl<IO> Default for TcpConnector<GaiResolver, IO> {
     fn default() -> Self {
         TcpConnector::builder().build_with_gai()
@@ -112,9 +96,6 @@ impl<IO> Default for TcpConnector<GaiResolver, IO> {
 /// Builder for a TCP connector.
 pub struct TcpConnectorBuilder {
     config: TcpConnectionConfig,
-
-    #[cfg(feature = "tls")]
-    tls: Option<TlsClientConfig>,
 }
 
 impl TcpConnectorBuilder {
@@ -135,9 +116,6 @@ impl TcpConnectorBuilder {
             config: Arc::new(self.config),
             resolver,
             stream: PhantomData,
-
-            #[cfg(feature = "tls")]
-            tls: self.tls.map(Arc::new),
         }
     }
 
@@ -147,42 +125,7 @@ impl TcpConnectorBuilder {
             config: Arc::new(self.config),
             resolver: GaiResolver::new(),
             stream: PhantomData,
-
-            #[cfg(feature = "tls")]
-            tls: self.tls.map(Arc::new),
         }
-    }
-}
-
-#[cfg(feature = "tls")]
-impl TcpConnectorBuilder {
-    /// Access the TLS configuration
-    pub fn tls(&mut self) -> &mut Option<TlsClientConfig> {
-        &mut self.tls
-    }
-
-    /// Set the TLS configuration for the connector to the default configuration
-    pub fn with_default_tls(mut self) -> Self {
-        self.tls = Some(crate::client::default_tls_config());
-        self
-    }
-
-    /// Set the TLS configuration for the connector
-    pub fn with_tls(mut self, config: TlsClientConfig) -> Self {
-        self.tls = Some(config);
-        self
-    }
-
-    /// Disable TLS for the connector
-    pub fn without_tls(mut self) -> Self {
-        self.tls = None;
-        self
-    }
-
-    /// Set the TLS configuration for the connector, optionally
-    pub fn with_optional_tls(mut self, config: Option<TlsClientConfig>) -> Self {
-        self.tls = config;
-        self
     }
 }
 
@@ -191,9 +134,6 @@ impl TcpConnector {
     pub fn builder() -> TcpConnectorBuilder {
         TcpConnectorBuilder {
             config: Default::default(),
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
@@ -202,12 +142,6 @@ impl<R, IO> TcpConnector<R, IO> {
     /// Get the configuration for the TCP connector.
     pub fn config(&self) -> &TcpConnectionConfig {
         &self.config
-    }
-
-    #[cfg(feature = "tls")]
-    /// Get the TLS configuration for the TCP connector.
-    pub fn tls(&self) -> Option<&Arc<TlsClientConfig>> {
-        self.tls.as_ref()
     }
 }
 
@@ -225,7 +159,7 @@ where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Unpin + Send + 'static,
 {
-    type Response = TransportStream<ClientStream<IO>>;
+    type Response = TransportStream<IO>;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -255,43 +189,10 @@ where
                     trace!("tcp connected");
                 }
 
-                if req.scheme_str() == Some("https") {
-                    #[cfg(not(feature = "tls"))]
-                    {
-                        panic!("TLS support is disabled");
-                    }
+                let stream = stream.into();
+                let info = stream.info();
 
-                    #[cfg(feature = "tls")]
-                    {
-                        let Some(mut tls) = connector.tls.clone() else {
-                            return Err(TcpConnectionError::new(
-                                "TLS is not enabled, can't connect to https",
-                            ));
-                        };
-                        {
-                            let config = Arc::make_mut(&mut tls);
-                            config.alpn_protocols.push(b"h2".to_vec());
-                            config.alpn_protocols.push(b"http/1.1".to_vec());
-                        }
-
-                        let mut stream = ClientStream::new(stream.into()).tls(host.as_ref(), tls);
-
-                        stream
-                            .finish_handshake()
-                            .await
-                            .map_err(TcpConnectionError::msg("TLS handshake"))?;
-
-                        let info = stream.info();
-
-                        Ok(TransportStream { stream, info })
-                    }
-                } else {
-                    let stream = ClientStream::new(stream.into());
-
-                    let info = stream.info();
-
-                    Ok(TransportStream { stream, info })
-                }
+                Ok(TransportStream { stream, info })
             }
             .instrument(span),
         )

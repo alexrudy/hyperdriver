@@ -10,11 +10,12 @@ use tracing::trace;
 
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
+use crate::client::conn::Connection;
 use crate::client::conn::TransportStream;
-use crate::client::conn::{Connection, HttpProtocol};
 use crate::client::pool::PoolableConnection;
-use crate::stream::info::HasConnectionInfo;
+use crate::info::HasConnectionInfo;
 
+use super::HttpProtocol;
 use super::ProtocolRequest;
 
 /// A builder for configuring and starting HTTP connections.

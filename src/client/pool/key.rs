@@ -19,7 +19,10 @@ impl From<http::Uri> for Key {
     fn from(value: http::Uri) -> Self {
         let parts = value.into_parts();
 
-        Self(parts.scheme.unwrap(), parts.authority.unwrap())
+        Self(
+            parts.scheme.expect("uri has a scheme"),
+            parts.authority.expect("uri has an authority"),
+        )
     }
 }
 

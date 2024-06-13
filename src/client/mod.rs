@@ -19,15 +19,14 @@ use http::Version;
 use thiserror::Error;
 use tracing::warn;
 
-#[cfg(feature = "stream")]
-use crate::client::conn::tcp::TcpConnector;
 use crate::client::conn::Connection;
+use crate::client::conn::TcpConnector;
+use crate::client::conn::TlsTransport;
 use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
 use crate::client::pool::{PoolableConnection, Pooled};
 use crate::client::Error as HyperdriverError;
 use crate::stream::info::HasConnectionInfo;
-use crate::DebugLiteral;
 
 mod builder;
 
@@ -36,9 +35,9 @@ pub mod pool;
 
 pub use builder::Builder;
 
-pub use conn::http::HttpConnectionBuilder;
+pub use conn::protocol::HttpProtocol;
 pub use conn::ConnectionError;
-pub use conn::HttpProtocol;
+pub use conn::HttpConnectionBuilder;
 pub use conn::Protocol;
 pub use conn::Transport;
 pub use conn::TransportStream;
@@ -101,7 +100,6 @@ pub fn default_tls_config() -> rustls::ClientConfig {
     cfg
 }
 
-#[cfg(feature = "stream")]
 /// A simple async HTTP client.
 ///
 /// This client is built on top of the `tokio` runtime and the `hyper` HTTP library.
@@ -118,21 +116,7 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 /// # Ok(())
 /// # }
 /// ```
-pub struct Client<P = HttpConnectionBuilder, T = TcpConnector, B = crate::body::Body>
-where
-    T: Transport,
-    P: Protocol<T::IO>,
-    P::Connection: PoolableConnection,
-{
-    protocol: P,
-    transport: T,
-    pool: Option<pool::Pool<P::Connection>>,
-    _body: std::marker::PhantomData<fn() -> B>,
-}
-
-#[cfg(not(feature = "stream"))]
-/// An HTTP client
-pub struct Client<P, T, B = crate::body::Body>
+pub struct Client<P = HttpConnectionBuilder, T = TlsTransport<TcpConnector>, B = crate::body::Body>
 where
     T: Transport,
     P: Protocol<T::IO>,
@@ -146,16 +130,12 @@ where
 
 impl<P, T, B> fmt::Debug for Client<P, T, B>
 where
-    T: Transport + fmt::Debug,
-    P: Protocol<T::IO> + fmt::Debug,
+    T: Transport,
+    P: Protocol<T::IO>,
     P::Connection: PoolableConnection,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client")
-            .field("protocol", &self.protocol)
-            .field("transport", &self.transport)
-            .field("pool", &Some(DebugLiteral("Pool")))
-            .finish()
+        f.debug_struct("Client").finish()
     }
 }
 
@@ -192,8 +172,7 @@ where
     }
 }
 
-#[cfg(feature = "stream")]
-impl Client<HttpConnectionBuilder, TcpConnector> {
+impl Client<HttpConnectionBuilder, TlsTransport<TcpConnector>> {
     /// A client builder for configuring the client.
     pub fn builder() -> builder::Builder {
         builder::Builder::default()
@@ -207,11 +186,7 @@ impl Client<HttpConnectionBuilder, TcpConnector> {
                 max_idle_per_host: 32,
             })),
 
-            #[cfg(feature = "tls")]
-            transport: TcpConnector::default(),
-
-            #[cfg(not(feature = "tls"))]
-            transport: TcpConnector::default(),
+            transport: Default::default(),
 
             protocol: HttpConnectionBuilder::default(),
 
@@ -333,7 +308,7 @@ where
 }
 
 /// A future that resolves to an HTTP response.
-pub struct ResponseFuture<C, T, BOut>
+pub struct ResponseFuture<C, T, BOut = crate::Body>
 where
     C: pool::PoolableConnection,
     T: pool::PoolableTransport,

@@ -96,6 +96,26 @@ path = "examples/server/h2.rs"
 required-features = ["server", "tls"]
 
 [[test]]
+name = "stream-duplex"
+path = "tests/stream/duplex.rs"
+required-features = ["stream"]
+
+[[test]]
+name = "stream-tcp"
+path = "tests/stream/tcp.rs"
+required-features = ["stream"]
+
+[[test]]
+name = "stream-tls"
+path = "tests/stream/tls.rs"
+required-features = ["stream", "tls"]
+
+[[test]]
+name = "stream-unix"
+path = "tests/stream/unix.rs"
+required-features = ["stream"]
+
+[[test]]
 name = "server"
 path = "tests/server.rs"
 required-features = ["server", "client", "stream"]
@@ -109,6 +129,11 @@ required-features = ["server", "client", "stream"]
 name = "custom-body"
 path = "tests/server/custombody.rs"
 required-features = ["server"]
+
+[[test]]
+name = "tls"
+path = "tests/tls.rs"
+required-features = ["server", "tls", "client"]
 
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]
