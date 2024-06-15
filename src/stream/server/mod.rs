@@ -6,6 +6,7 @@
 #[cfg(feature = "tls")]
 use std::io;
 use std::task::{Context, Poll};
+use std::{future::Future, pin::Pin};
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -51,6 +52,46 @@ pub trait Accept {
         self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Self::Conn, Self::Error>>;
+}
+
+/// Extension trait for Accept
+pub trait AcceptExt: Accept {
+    /// Wrap the acceptor in a future that resolves to a single connection
+    fn accept(self) -> AcceptOne<Self>
+    where
+        Self: Sized,
+    {
+        AcceptOne::new(self)
+    }
+}
+
+impl<A> AcceptExt for A where A: Accept {}
+
+/// A future that resolves to a single connection
+#[derive(Debug)]
+#[pin_project]
+pub struct AcceptOne<A> {
+    #[pin]
+    inner: A,
+}
+
+impl<A> AcceptOne<A> {
+    fn new(inner: A) -> Self {
+        AcceptOne { inner }
+    }
+}
+
+impl<A> Future for AcceptOne<A>
+where
+    A: Accept,
+    A::Conn: HasConnectionInfo,
+    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
+{
+    type Output = Result<A::Conn, A::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        self.project().inner.poll_accept(cx)
+    }
 }
 
 /// Dispatching wrapper for potential stream connection types for servers

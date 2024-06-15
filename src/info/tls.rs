@@ -183,3 +183,52 @@ mod channel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    #[test]
+    fn tls_server_info() {
+        #[derive(Debug, Clone)]
+        struct NoCertResolver;
+
+        impl rustls::server::ResolvesServerCert for NoCertResolver {
+            fn resolve(
+                &self,
+                _client_hello: rustls::server::ClientHello,
+            ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+                None
+            }
+        }
+
+        let cfg = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(NoCertResolver));
+
+        let server_info = rustls::ServerConnection::new(Arc::new(cfg)).unwrap();
+        let info = super::TlsConnectionInfo::server(&server_info);
+        assert_eq!(info.server_name, None);
+        assert!(!info.validated_server_name);
+        assert_eq!(info.alpn, None);
+    }
+
+    #[test]
+    fn tls_client_info() {
+        let root_store = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.into(),
+        };
+
+        let cfg = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        let client_info =
+            rustls::ClientConnection::new(Arc::new(cfg), "example.com".try_into().unwrap())
+                .unwrap();
+        let info = super::TlsConnectionInfo::client(&client_info);
+        assert_eq!(info.server_name, None);
+        assert!(!info.validated_server_name);
+        assert_eq!(info.alpn, None);
+    }
+}

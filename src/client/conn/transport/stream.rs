@@ -108,3 +108,34 @@ mod fut {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::client::conn::DuplexTransport;
+    use crate::stream::server::AcceptExt as _;
+    use tower::ServiceExt as _;
+
+    #[tokio::test]
+    async fn transport_into_stream() {
+        let (client, srv) = crate::stream::duplex::pair("example.com".parse().unwrap());
+
+        let transport = DuplexTransport::new(1024, None, client).into_stream();
+
+        let (io, _) = tokio::join!(
+            async {
+                transport
+                    .oneshot("https://example.com".parse().unwrap())
+                    .await
+                    .unwrap()
+            },
+            async { srv.accept().await.unwrap() }
+        );
+        let info = io.info();
+
+        assert_eq!(info.protocol, None);
+        assert_eq!(info.local_addr, BraidAddr::Duplex);
+        assert_eq!(info.remote_addr, BraidAddr::Duplex);
+    }
+}

@@ -172,7 +172,7 @@ where
     fn call(&mut self, req: Uri) -> Self::Future {
         let (host, port) = match get_host_and_port(&req) {
             Ok((host, port)) => (host, port),
-            Err(e) => panic!("uri error: {e}"),
+            Err(e) => return Box::pin(std::future::ready(Err(e))),
         };
 
         let connector = std::mem::replace(self, self.clone());
@@ -290,6 +290,12 @@ impl<'c> TcpConnectionAttempt<'c> {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("invalid URI")]
+pub struct InvalidUri {
+    _priv: (),
+}
+
 /// Error type for TCP connections.
 #[derive(Debug, Error)]
 pub struct TcpConnectionError {
@@ -299,6 +305,7 @@ pub struct TcpConnectionError {
 }
 
 impl TcpConnectionError {
+    #[allow(dead_code)]
     pub(super) fn new<S>(message: S) -> Self
     where
         S: Into<String>,
@@ -306,6 +313,16 @@ impl TcpConnectionError {
         Self {
             message: message.into(),
             source: None,
+        }
+    }
+
+    fn uri<S>(message: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            message: message.into(),
+            source: Some(InvalidUri { _priv: () }.into()),
         }
     }
 
@@ -396,14 +413,14 @@ impl Default for TcpConnectionConfig {
 }
 
 fn get_host_and_port(uri: &Uri) -> Result<(Box<str>, u16), TcpConnectionError> {
-    let host = uri.host().ok_or(TcpConnectionError::new("missing host"))?;
+    let host = uri.host().ok_or(TcpConnectionError::uri("missing host"))?;
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let port = match uri.port_u16() {
         Some(port) => port,
         None => match uri.scheme_str() {
             Some("http") => 80,
             Some("https") => 443,
-            _ => return Err(TcpConnectionError::new("missing port")),
+            _ => return Err(TcpConnectionError::uri("missing port")),
         },
     };
 
@@ -440,6 +457,9 @@ fn connect(
     let domain = Domain::for_address(*addr);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))
         .map_err(TcpConnectionError::msg("tcp open error"))?;
+    tracing::trace!("tcp socket opened");
+
+    let guard = tracing::trace_span!("socket_options").entered();
 
     // When constructing a Tokio `TcpSocket` from a raw fd/socket, the user is
     // responsible for ensuring O_NONBLOCK is set.
@@ -489,13 +509,20 @@ fn connect(
             warn!("tcp set_recv_buffer_size error: {}", e);
         }
     }
-    let connect = socket.connect(*addr);
+
+    drop(guard);
+
+    let span = tracing::trace_span!("tcp", remote.addr = %addr);
+    let connect = socket.connect(*addr).instrument(span);
     Ok(async move {
         match connect_timeout {
             Some(dur) => match tokio::time::timeout(dur, connect).await {
                 Ok(Ok(s)) => Ok(s),
                 Ok(Err(e)) => Err(e),
-                Err(e) => Err(io::Error::new(io::ErrorKind::TimedOut, e)),
+                Err(e) => {
+                    tracing::trace!(timeout=?dur, "connection timed out");
+                    Err(io::Error::new(io::ErrorKind::TimedOut, e))
+                }
             },
             None => connect.await,
         }
@@ -505,6 +532,13 @@ fn connect(
 
 #[cfg(test)]
 mod test {
+
+    use std::future::Ready;
+
+    use tokio::net::TcpListener;
+    use tower::Service;
+
+    use crate::client::Transport;
 
     use super::*;
 
@@ -536,5 +570,79 @@ mod test {
 
         let uri: Uri = "grpc://[::1]".parse().unwrap();
         assert!(get_host_and_port(&uri).is_err());
+    }
+
+    #[derive(Debug, Clone)]
+    struct Resolver(u16);
+
+    impl Service<Box<str>> for Resolver {
+        type Response = SocketAddrs;
+        type Error = io::Error;
+        type Future = Ready<Result<SocketAddrs, io::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Box<str>) -> Self::Future {
+            std::future::ready(Ok(SocketAddrs::from_iter(vec![SocketAddr::new(
+                Ipv4Addr::LOCALHOST.into(),
+                self.0,
+            )])))
+        }
+    }
+
+    async fn connect_transport<T>(
+        uri: Uri,
+        transport: T,
+        listener: TcpListener,
+    ) -> (TransportStream<T::IO>, TcpStream)
+    where
+        T: Transport + Service<Uri, Response = TransportStream<T::IO>>,
+        <T as Service<Uri>>::Error: std::fmt::Debug,
+    {
+        tokio::join!(async { transport.oneshot(uri).await.unwrap() }, async {
+            listener.accept().await.unwrap().0
+        })
+    }
+
+    #[tokio::test]
+    async fn test_tcp_invalid_uri() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let uri: Uri = "/path/".parse().unwrap();
+
+        let config = TcpConnectionConfig::default();
+
+        let transport = TcpConnector::builder()
+            .with_config(config)
+            .build::<_, TcpStream>(Resolver(0));
+
+        let result = transport.oneshot(uri).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tcp_transport() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let bind = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = bind.local_addr().unwrap().port();
+
+        let uri: Uri = format!("http://example.com:{port}").parse().unwrap();
+
+        let config = TcpConnectionConfig::default();
+
+        let transport = TcpConnector::builder()
+            .with_config(config)
+            .build::<_, TcpStream>(Resolver(port));
+
+        let (stream, _) = connect_transport(uri, transport, bind).await;
+
+        let info = stream.info();
+        assert_eq!(
+            *info.remote_addr(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+        );
     }
 }

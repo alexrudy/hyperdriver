@@ -59,3 +59,24 @@ where
         self.inner.call(req.map(Body::from))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "incoming")]
+mod tests {
+    use std::convert::Infallible;
+
+    use super::*;
+    use crate::body::Body;
+    use http::Request;
+    use http_body::Body as HttpBody;
+
+    #[allow(dead_code, clippy::async_yields_async)]
+    fn compile_adapt_incoming() {
+        let _ = tower::ServiceBuilder::new()
+            .layer(AdaptIncomingLayer::new())
+            .service(tower::service_fn(|req: Request<Body>| async move {
+                assert_eq!(req.body().size_hint().exact(), Some(0));
+                async { Ok::<_, Infallible>(Response::new(Body::empty())) }
+            }));
+    }
+}

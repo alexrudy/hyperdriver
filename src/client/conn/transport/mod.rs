@@ -142,6 +142,16 @@ where
         self.stream
     }
 
+    /// Get a reference to the inner IO stream.
+    pub fn get_io_ref(&self) -> &IO {
+        &self.stream
+    }
+
+    /// Get a mutable reference to the inner IO stream.
+    pub fn get_io_mut(&mut self) -> &mut IO {
+        &mut self.stream
+    }
+
     /// Return the parts of the stream.
     pub fn into_parts(self) -> (IO, ConnectionInfo<IO::Addr>) {
         (self.stream, self.info)

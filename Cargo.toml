@@ -29,7 +29,7 @@ pin-project = { version = "1" }
 rustls-native-certs = { version = "0.7.0", optional = true }
 serde = { version = "1", optional = true }
 socket2 = { version = "0.5", optional = true }
-thiserror = { version = "1" }
+thiserror = { version = "1", optional = true }
 tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
 
@@ -56,14 +56,15 @@ tracing-subscriber = "0.3"
 tempfile = "3"
 clap = { version = "4.5.7" }
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+webpki-roots.version = "0.26"
 
 [features]
 axum = ["dep:axum"]
 default = ["client", "server", "discovery", "stream"]
 docs = []
 incoming = []
-client = ["incoming", "dep:socket2"]
-server = ["incoming", "dep:ouroboros"]
+client = ["incoming", "dep:socket2", "dep:thiserror"]
+server = ["incoming", "dep:ouroboros", "dep:thiserror"]
 discovery = [
     "server",
     "client",
@@ -133,6 +134,11 @@ required-features = ["server", "client", "stream"]
 name = "custom-body"
 path = "tests/server/custombody.rs"
 required-features = ["server"]
+
+[[test]]
+name = "httpbin"
+path = "tests/httpbin.rs"
+required-features = ["client", "tls"]
 
 [[test]]
 name = "tls"

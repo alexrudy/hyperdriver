@@ -60,3 +60,35 @@ impl tower::Service<Uri> for DuplexTransport {
         Box::pin(fut)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::info::DuplexAddr;
+    use crate::info::HasConnectionInfo as _;
+    use crate::stream::server::AcceptExt as _;
+
+    #[tokio::test]
+    async fn test_duplex_transport() {
+        let (client, srv) = crate::stream::duplex::pair("example.com".parse().unwrap());
+
+        let transport = DuplexTransport::new(1024, None, client);
+
+        let (io, _) = tokio::join!(
+            async {
+                transport
+                    .oneshot("https://example.com".parse().unwrap())
+                    .await
+                    .unwrap()
+            },
+            async { srv.accept().await.unwrap() }
+        );
+        let info = io.info();
+
+        assert_eq!(info.protocol, None);
+        assert_eq!(info.local_addr, DuplexAddr);
+        assert_eq!(info.remote_addr, DuplexAddr);
+    }
+}

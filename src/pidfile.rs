@@ -70,7 +70,7 @@ impl PidFile {
                     ));
                 }
                 Ok(false) => {
-                    tracing::warn!("Removing stale PID file at {path}");
+                    tracing::debug!("Removing stale PID file at {path}");
                     let _ = std::fs::remove_file(&path);
                 }
                 Err(error) if error.kind() == io::ErrorKind::InvalidData => {
@@ -145,16 +145,21 @@ mod test {
     fn test_invalid_file() {
         let path = Utf8Path::new("/tmp/pidfile-test.pid");
         std::fs::write(path, "not a pid").unwrap();
-        assert!(
-            !PidFile::is_locked(path).unwrap(),
-            "Invalid file should not be locked."
-        );
+        tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::new(), || {
+            assert!(
+                !PidFile::is_locked(path).unwrap(),
+                "Invalid file should not be locked."
+            )
+        });
         assert!(
             path.exists(),
             "Invalid file should exist after checking for locks."
         );
 
-        let pid_file = PidFile::new(path.into()).unwrap();
+        let pid_file =
+            tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::new(), || {
+                PidFile::new(path.into()).unwrap()
+            });
         assert!(
             PidFile::is_locked(path).unwrap(),
             "PID file should be locked after creation."

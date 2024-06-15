@@ -306,7 +306,66 @@ mod tests {
 
     use super::*;
 
+    use http_body::Body as HttpBody;
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(Body: Send);
+    assert_impl_all!(Body: HttpBody, Send);
+
+    #[test]
+    fn check_try_downcast() {
+        let original = try_downcast::<BoxBody<Box<[u8]>, ()>, _>(Box::new(1))
+            .expect_err("Box<1> downcast succeeded");
+        assert_eq!(*original, 1);
+
+        //TODO: fix downcasting
+        // let unwrapped = try_downcast::<Body, _>(Box::new(Body::empty())
+        //     as Box<dyn HttpBody<Data = Bytes, Error = BoxError> + Send + 'static>)
+        // .map_err(|_| ())
+        // .expect("Box<Body> downcast failed");
+        // assert!(unwrapped.is_end_stream());
+
+        let original = try_downcast::<Body, _>(Body::empty().as_boxed())
+            .expect_err("Body::as_boxed() downcast succeeded");
+        assert!(original.is_end_stream());
+    }
+
+    #[test]
+    fn check_body_from_string() {
+        let body = Body::from("Hello, World!".to_string());
+        assert_eq!(body.size_hint().lower(), 13);
+        assert_eq!(body.size_hint().upper(), Some(13));
+        assert!(!body.is_end_stream());
+    }
+
+    #[test]
+    fn check_body_from_empty_string() {
+        let body = Body::from("".to_string());
+        assert_eq!(body.size_hint().lower(), 0);
+        assert_eq!(body.size_hint().upper(), Some(0));
+        assert!(body.is_end_stream());
+    }
+
+    #[test]
+    fn check_body_empty() {
+        let body = Body::empty();
+        assert_eq!(body.size_hint().lower(), 0);
+        assert_eq!(body.size_hint().upper(), Some(0));
+        assert!(body.is_end_stream());
+    }
+
+    #[test]
+    fn check_body_from_bytes() {
+        let body = Body::from(Bytes::from("Hello, World!"));
+        assert_eq!(body.size_hint().lower(), 13);
+        assert_eq!(body.size_hint().upper(), Some(13));
+        assert!(!body.is_end_stream());
+    }
+
+    #[test]
+    fn check_body_from_empty_bytes() {
+        let body = Body::from(Bytes::new());
+        assert_eq!(body.size_hint().lower(), 0);
+        assert_eq!(body.size_hint().upper(), Some(0));
+        assert!(body.is_end_stream());
+    }
 }

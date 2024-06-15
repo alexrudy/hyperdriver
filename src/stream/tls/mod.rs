@@ -12,6 +12,7 @@ use std::{
 };
 
 pub use crate::info::TlsConnectionInfo;
+use futures_core::Future;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -103,5 +104,42 @@ where
 impl<Tls, NoTls> From<NoTls> for TlsBraid<Tls, NoTls> {
     fn from(stream: NoTls) -> Self {
         Self::NoTls(stream)
+    }
+}
+
+/// Extension trait for `TlsHandshakeStream`.
+pub trait TlsHandshakeExt: TlsHandshakeStream {
+    /// Perform a TLS handshake.
+    fn handshake(&mut self) -> TlsHandshakeFuture<'_, Self>
+    where
+        Self: Sized,
+    {
+        TlsHandshakeFuture::new(self)
+    }
+}
+
+impl<T> TlsHandshakeExt for T where T: TlsHandshakeStream {}
+
+/// A future that resolves once the TLS handshake is complete.
+#[derive(Debug)]
+#[pin_project]
+pub struct TlsHandshakeFuture<'s, S> {
+    stream: &'s mut S,
+}
+
+impl<'s, S> TlsHandshakeFuture<'s, S> {
+    fn new(stream: &'s mut S) -> Self {
+        Self { stream }
+    }
+}
+
+impl<'s, S> Future for TlsHandshakeFuture<'s, S>
+where
+    S: TlsHandshakeStream,
+{
+    type Output = Result<(), io::Error>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().stream.poll_handshake(cx)
     }
 }
