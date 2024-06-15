@@ -11,10 +11,11 @@ use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 
-use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
+use crate::info::tls::HasTlsConnectionInfo;
+use crate::info::{ConnectionInfo, HasConnectionInfo};
 
-use super::info::TlsConnectionInfo;
 use super::TlsHandshakeStream;
+use crate::info::TlsConnectionInfo;
 
 #[cfg(feature = "connector")]
 mod connector;
@@ -48,6 +49,7 @@ where
 {
     state: State<IO>,
     info: ConnectionInfo<IO::Addr>,
+    tls: Option<TlsConnectionInfo>,
 }
 
 impl<IO> HasConnectionInfo for ClientTlsStream<IO>
@@ -59,6 +61,16 @@ where
 
     fn info(&self) -> ConnectionInfo<Self::Addr> {
         self.info.clone()
+    }
+}
+
+impl<IO> HasTlsConnectionInfo for ClientTlsStream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Clone,
+{
+    fn tls_info(&self) -> Option<&TlsConnectionInfo> {
+        self.tls.as_ref()
     }
 }
 
@@ -124,7 +136,7 @@ where
                     // Take some action here when the handshake happens
                     let (_, client_info) = stream.get_ref();
                     let info = TlsConnectionInfo::client(client_info);
-                    self.info.tls = Some(info);
+                    self.tls = Some(info);
 
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
@@ -151,6 +163,7 @@ where
         Self {
             state: State::Handshake(accept),
             info,
+            tls: None,
         }
     }
 }

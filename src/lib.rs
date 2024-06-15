@@ -12,32 +12,26 @@ use tracing::dispatcher;
 pub mod body;
 pub use body::Body;
 pub mod bridge;
-
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "client")]
 pub use client::Client;
-
 #[cfg(feature = "discovery")]
 pub mod discovery;
-
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
-
 #[cfg(feature = "client")]
 mod lazy;
-
 #[cfg(feature = "pidfile")]
 pub mod pidfile;
-
 #[cfg(feature = "server")]
 mod rewind;
-
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "server")]
 pub use server::Server;
-
+pub mod info;
+pub mod service;
 pub mod stream;
 
 #[allow(unused)]
@@ -63,11 +57,4 @@ pub(crate) mod private {
 
     #[allow(unused)]
     pub trait Sealed {}
-}
-
-pub mod service;
-
-/// Conenction Information
-pub mod info {
-    pub use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 }

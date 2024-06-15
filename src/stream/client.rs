@@ -21,15 +21,17 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "stream")]
 use tokio::net::{TcpStream, UnixStream};
 
+#[cfg(feature = "tls")]
+use crate::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
 use crate::stream::core::Braid;
 
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
 
+use crate::info::HasConnectionInfo;
 #[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::HasConnectionInfo;
 
 #[cfg(feature = "tls")]
 use crate::stream::tls::client::ClientTlsStream;
@@ -185,7 +187,7 @@ where
     ///
     /// This method is async because TLS information isn't available until the handshake
     /// is complete. This method will not return until the handshake is complete.
-    fn info(&self) -> crate::stream::info::ConnectionInfo<IO::Addr> {
+    fn info(&self) -> crate::info::ConnectionInfo<IO::Addr> {
         #[cfg(feature = "tls")]
         match self.inner {
             TlsBraid::Tls(ref stream) => stream.info(),
@@ -194,6 +196,20 @@ where
 
         #[cfg(not(feature = "tls"))]
         self.inner.info()
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<IO> HasTlsConnectionInfo for Stream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Unpin + Clone,
+{
+    fn tls_info(&self) -> Option<&crate::info::TlsConnectionInfo> {
+        match self.inner {
+            TlsBraid::Tls(ref stream) => stream.tls_info(),
+            TlsBraid::NoTls(_) => None,
+        }
     }
 }
 

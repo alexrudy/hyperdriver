@@ -6,8 +6,8 @@ use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
 
 use super::{TlsConnectionError, Transport, TransportStream};
+use crate::info::HasConnectionInfo;
 use crate::stream::client::Stream as ClientStream;
-use crate::stream::info::HasConnectionInfo;
 
 /// Transport via TLS
 #[derive(Debug, Clone)]
@@ -78,6 +78,8 @@ pub(in crate::client::conn::transport) mod future {
     use std::task::{Context, Poll};
 
     use pin_project::pin_project;
+
+    use crate::info::tls::HasTlsConnectionInfo;
 
     use super::super::Transport;
     use super::*;
@@ -177,7 +179,9 @@ pub(in crate::client::conn::transport) mod future {
                             };
 
                             let info = stream.info();
-                            return Poll::Ready(Ok(TransportStream { stream, info }));
+                            let tls = stream.tls_info().cloned();
+
+                            return Poll::Ready(Ok(TransportStream { stream, info, tls }));
                         }
                         Poll::Ready(Err(e)) => {
                             return Poll::Ready(Err(TlsConnectionError::Handshake(e)))
@@ -199,3 +203,6 @@ pub(in crate::client::conn::transport) mod future {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {}

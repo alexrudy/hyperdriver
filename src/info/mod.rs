@@ -1,4 +1,4 @@
-//! Connection info for braid streams.
+//! Connection Information
 
 use std::fmt;
 use std::io;
@@ -10,10 +10,13 @@ use http::uri::Authority;
 use thiserror::Error;
 use tokio::net::{TcpStream, UnixStream};
 
-#[cfg(not(feature = "stream"))]
-use crate::stream::duplex::DuplexAddr;
 #[cfg(feature = "tls")]
-use crate::stream::tls::info::TlsConnectionInfo;
+pub mod tls;
+#[cfg(feature = "tls")]
+pub use self::tls::HasTlsConnectionInfo;
+#[cfg(feature = "tls")]
+pub use self::tls::TlsConnectionInfo;
+pub use crate::stream::duplex::DuplexAddr;
 
 /// The transport protocol used for a connection.
 ///
@@ -286,6 +289,13 @@ impl From<UnixAddr> for BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
+impl From<DuplexAddr> for BraidAddr {
+    fn from(_: DuplexAddr) -> Self {
+        Self::Duplex
+    }
+}
+
 /// Information about a connection to a stream.
 #[cfg(feature = "stream")]
 #[derive(Debug, Clone)]
@@ -304,10 +314,6 @@ pub struct ConnectionInfo<Addr = BraidAddr> {
 
     /// Buffer size
     pub buffer_size: Option<usize>,
-
-    #[cfg(feature = "tls")]
-    /// Transport Layer Security information for this connection.
-    pub tls: Option<TlsConnectionInfo>,
 }
 
 /// Information about a connection to a stream.
@@ -328,10 +334,6 @@ pub struct ConnectionInfo<Addr> {
 
     /// Buffer size
     pub buffer_size: Option<usize>,
-
-    #[cfg(feature = "tls")]
-    /// Transport Layer Security information for this connection.
-    pub tls: Option<TlsConnectionInfo>,
 }
 
 impl<Addr> Default for ConnectionInfo<Addr>
@@ -345,9 +347,6 @@ where
             local_addr: Addr::default(),
             remote_addr: Addr::default(),
             buffer_size: None,
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
@@ -361,9 +360,6 @@ impl ConnectionInfo<BraidAddr> {
             local_addr: BraidAddr::Duplex,
             remote_addr: BraidAddr::Duplex,
             buffer_size: Some(buffer_size),
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
@@ -377,23 +373,11 @@ impl ConnectionInfo<DuplexAddr> {
             local_addr: DuplexAddr,
             remote_addr: DuplexAddr,
             buffer_size: Some(buffer_size),
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
 
 impl<Addr> ConnectionInfo<Addr> {
-    #[cfg(feature = "tls")]
-    /// Add tls info to the connection info
-    pub(crate) fn tls(self, tls: TlsConnectionInfo) -> Self {
-        ConnectionInfo {
-            tls: Some(tls),
-            ..self
-        }
-    }
-
     /// The local address for this connection
     pub fn local_addr(&self) -> &Addr {
         &self.local_addr
@@ -415,9 +399,6 @@ impl<Addr> ConnectionInfo<Addr> {
             local_addr: f(self.local_addr),
             remote_addr: f(self.remote_addr),
             buffer_size: self.buffer_size,
-
-            #[cfg(feature = "tls")]
-            tls: self.tls,
         }
     }
 }
@@ -438,9 +419,6 @@ where
             local_addr: local_addr.into(),
             remote_addr: remote_addr.into(),
             buffer_size: None,
-
-            #[cfg(feature = "tls")]
-            tls: None,
         })
     }
 }
@@ -462,9 +440,6 @@ where
             local_addr: local_addr.try_into().expect("unix socket address"),
             remote_addr: remote_addr.try_into().expect("unix socket address"),
             buffer_size: None,
-
-            #[cfg(feature = "tls")]
-            tls: None,
         })
     }
 }

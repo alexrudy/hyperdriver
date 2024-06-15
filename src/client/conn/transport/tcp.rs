@@ -31,7 +31,7 @@ use super::TransportStream;
 use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 
-use crate::stream::info::HasConnectionInfo;
+use crate::info::HasConnectionInfo;
 
 /// A TCP connector for client connections.
 ///
@@ -192,7 +192,12 @@ where
                 let stream = stream.into();
                 let info = stream.info();
 
-                Ok(TransportStream { stream, info })
+                Ok(TransportStream {
+                    stream,
+                    info,
+                    #[cfg(feature = "tls")]
+                    tls: None,
+                })
             }
             .instrument(span),
         )

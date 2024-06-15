@@ -7,8 +7,8 @@ use futures_util::future::BoxFuture;
 use http::Uri;
 
 use super::TransportStream;
-use crate::stream::client::Stream;
-use crate::stream::info::Protocol;
+use crate::info::Protocol;
+use crate::stream::duplex::DuplexStream as Stream;
 
 /// Transport via duplex stream
 #[derive(Debug, Clone)]
@@ -50,7 +50,11 @@ impl tower::Service<Uri> for DuplexTransport {
         let protocol = self.protocol.clone();
         let fut = async move {
             let stream = client.connect(max_buf_size, protocol).await?;
-            TransportStream::new_stream(stream.into()).await
+            Ok(TransportStream::new(
+                stream,
+                #[cfg(feature = "tls")]
+                None,
+            ))
         };
 
         Box::pin(fut)

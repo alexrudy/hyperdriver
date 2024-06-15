@@ -92,24 +92,24 @@ impl HttpConnectionBuilder {
     ) -> Result<HttpConnection, ConnectionError>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        <IO as HasConnectionInfo>::Addr: Clone,
     {
         match protocol {
             HttpProtocol::Http2 => self.handshake_h2(transport.into_inner()).await,
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
                 if transport
-                    .info()
-                    .tls
+                    .tls_info()
                     .as_ref()
                     .and_then(|tls| tls.alpn.as_ref())
-                    == Some(&crate::stream::info::Protocol::Http(http::Version::HTTP_2))
+                    == Some(&crate::info::Protocol::Http(http::Version::HTTP_2))
                 {
                     trace!("alpn h2 switching");
                     return self.handshake_h2(transport.into_inner()).await;
                 }
 
                 #[cfg(feature = "tls")]
-                trace!(tls=?transport.info().tls, "no alpn h2 switching");
+                trace!(tls=?transport.tls_info(), "no alpn h2 switching");
 
                 self.handshake_h1(transport.into_inner()).await
             }
@@ -129,7 +129,7 @@ impl Default for HttpConnectionBuilder {
 impl<IO> tower::Service<ProtocolRequest<IO>> for HttpConnectionBuilder
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    IO::Addr: Send + Sync,
+    IO::Addr: Clone + Send + Sync,
 {
     type Response = HttpConnection;
 
@@ -250,7 +250,7 @@ mod future {
 
     use crate::client::conn::TransportStream;
     use crate::client::HttpProtocol;
-    use crate::stream::info::HasConnectionInfo;
+    use crate::info::HasConnectionInfo;
     use crate::DebugLiteral;
 
     use super::ConnectionError;
@@ -275,7 +275,7 @@ mod future {
     impl<IO> HttpConnectFuture<IO>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
-        IO::Addr: Send + Sync,
+        IO::Addr: Clone + Send + Sync,
     {
         pub(super) fn new(
             builder: HttpConnectionBuilder,
@@ -404,6 +404,7 @@ pub enum ConnectionError {
 mod tests {
     use std::fmt::Debug;
     use std::future::Future;
+    use std::io;
 
     use super::*;
 
@@ -423,6 +424,8 @@ mod tests {
     async fn transport() -> Result<(TransportStream<Stream>, Stream), BoxError> {
         let (client, mut incoming) = crate::stream::duplex::pair("test".parse()?);
 
+        // Connect to the server. This is a helper function that creates a client and server
+        // pair, and returns the client's transport stream and the server's stream.
         let (tx, rx) = tokio::try_join!(
             async {
                 let stream = client.connect(1024, None).await?;
@@ -523,5 +526,44 @@ mod tests {
         let (_rtx, rrx) = tokio::join!(request_future, server_future);
 
         assert!(rrx.is_ok());
+    }
+
+    #[tokio::test]
+    async fn http_connector_alpn_h2() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let (stream, client) = transport().await.unwrap();
+
+        async fn serve(stream: Stream) -> Result<HttpConnection, ConnectionError> {
+            let mut builder = HttpConnectionBuilder::default();
+
+            let tls = crate::info::TlsConnectionInfo::new_client(Some(
+                crate::info::Protocol::http(http::Version::HTTP_2),
+            ));
+
+            let stream = TransportStream::new(stream, Some(tls));
+            builder.connect(stream, HttpProtocol::Http1).await
+        }
+
+        async fn handshake(mut stream: Stream) -> Result<(), io::Error> {
+            stream.finish_handshake().await?;
+            tracing::info!("Client finished handshake");
+            Ok(())
+        }
+
+        let inner = stream.into_inner();
+
+        let (conn, client) = tokio::join!(serve(inner), handshake(client));
+        client.unwrap();
+
+        let mut conn = conn.unwrap();
+        assert!(conn.is_open());
+        assert!(conn.can_share());
+        assert_eq!(conn.version(), Version::HTTP_2);
+        assert!(conn.reuse().is_some());
+        assert_eq!(
+            format!("{:?}", conn),
+            "HttpConnection { version: HTTP/2.0 }"
+        );
     }
 }

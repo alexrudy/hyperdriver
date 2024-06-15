@@ -20,7 +20,7 @@ use tokio::net::{TcpListener, UnixListener};
 
 use super::Accept;
 use super::Stream;
-use crate::stream::info::HasConnectionInfo;
+use crate::info::HasConnectionInfo;
 
 #[cfg(feature = "stream")]
 use crate::stream::{core::Braid, duplex::DuplexIncoming};

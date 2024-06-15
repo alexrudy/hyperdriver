@@ -16,8 +16,12 @@ use tower::Service;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 use crate::client::pool::PoolableTransport;
+#[cfg(feature = "tls")]
+use crate::info::tls::HasTlsConnectionInfo;
 use crate::info::ConnectionInfo;
 use crate::info::HasConnectionInfo;
+#[cfg(feature = "tls")]
+use crate::info::TlsConnectionInfo;
 use crate::stream::client::Stream;
 
 #[cfg(feature = "tls")]
@@ -98,6 +102,8 @@ where
     #[pin]
     stream: IO,
     info: ConnectionInfo<IO::Addr>,
+    #[cfg(feature = "tls")]
+    tls: Option<TlsConnectionInfo>,
 }
 
 impl<IO> TransportStream<IO>
@@ -105,14 +111,26 @@ where
     IO: HasConnectionInfo,
 {
     /// Create a new transport from an IO stream.
-    pub fn new(stream: IO) -> Self {
+    pub fn new(stream: IO, #[cfg(feature = "tls")] tls: Option<TlsConnectionInfo>) -> Self {
         let info = stream.info();
+
+        #[cfg(feature = "tls")]
+        return Self { stream, info, tls };
+
+        #[cfg(not(feature = "tls"))]
         Self { stream, info }
     }
+}
 
-    #[cfg_attr(not(feature = "tls"), allow(dead_code))]
-    pub(crate) fn info(&self) -> &ConnectionInfo<IO::Addr> {
-        &self.info
+impl<IO> TransportStream<IO>
+where
+    IO: HasConnectionInfo,
+{
+    #[cfg(feature = "tls")]
+    /// Get the connection information for the transport.
+    pub fn tls_info(&self) -> Option<&TlsConnectionInfo> {
+        #[cfg(feature = "tls")]
+        return self.tls.as_ref();
     }
 
     pub(crate) fn host(&self) -> Option<&str> {
@@ -139,6 +157,8 @@ where
         TransportStream {
             stream: f(self.stream),
             info: self.info.map(Into::into),
+            #[cfg(feature = "tls")]
+            tls: self.tls,
         }
     }
 }
@@ -153,7 +173,15 @@ impl TransportStream<Stream> {
 
         let info = stream.info();
 
-        Ok(Self { stream, info })
+        #[cfg(feature = "tls")]
+        let tls = stream.tls_info().cloned();
+
+        Ok(Self {
+            stream,
+            info,
+            #[cfg(feature = "tls")]
+            tls,
+        })
     }
 }
 
@@ -164,15 +192,36 @@ where
 {
     #[cfg(feature = "tls")]
     fn can_share(&self) -> bool {
-        self.info.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
-            == Some(&crate::stream::info::Protocol::Http(
-                ::http::Version::HTTP_2,
-            ))
+        self.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
+            == Some(&crate::info::Protocol::Http(::http::Version::HTTP_2))
     }
 
     #[cfg(not(feature = "tls"))]
     fn can_share(&self) -> bool {
         false
+    }
+}
+
+impl<IO> HasConnectionInfo for TransportStream<IO>
+where
+    IO: HasConnectionInfo,
+    <IO as HasConnectionInfo>::Addr: Clone,
+{
+    type Addr = IO::Addr;
+
+    fn info(&self) -> ConnectionInfo<Self::Addr> {
+        self.info.clone()
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<IO> HasTlsConnectionInfo for TransportStream<IO>
+where
+    IO: HasTlsConnectionInfo,
+    <IO as HasConnectionInfo>::Addr: Clone,
+{
+    fn tls_info(&self) -> Option<&TlsConnectionInfo> {
+        self.tls.as_ref()
     }
 }
 
@@ -543,3 +592,16 @@ pub trait TransportTlsExt: Transport {
 }
 
 impl<T> TransportTlsExt for T where T: Transport {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use static_assertions::assert_impl_all;
+    use tokio::net::TcpStream;
+
+    assert_impl_all!(TransportStream<Stream>: HasTlsConnectionInfo, HasConnectionInfo);
+    assert_impl_all!(TransportStream<Stream>: Send, Sync, Unpin);
+
+    assert_impl_all!(TransportStream<TcpStream>: HasConnectionInfo);
+}

@@ -10,7 +10,6 @@ pub mod client;
 #[cfg(feature = "stream")]
 mod core;
 pub mod duplex;
-pub mod info;
 
 #[cfg(feature = "server")]
 pub mod server;

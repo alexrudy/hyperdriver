@@ -10,22 +10,17 @@ use futures_core::ready;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
-use super::info::{TlsConnectionInfo, TlsConnectionInfoReciever, TlsConnectionInfoSender};
 use super::TlsHandshakeStream;
-use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
+use crate::info::tls::{channel, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use crate::info::{ConnectionInfo, HasConnectionInfo, TlsConnectionInfo};
 
-#[cfg(feature = "server")]
 pub mod acceptor;
 
-#[cfg(feature = "server")]
 pub mod connector;
 #[cfg(feature = "sni")]
 pub mod sni;
 
-#[cfg(feature = "server")]
 pub use self::acceptor::TlsAcceptor;
-
-#[cfg(feature = "server")]
 pub use self::connector::TlsConnectLayer;
 
 /// State tracks the process of accepting a connection and turning it into a stream.
@@ -50,8 +45,8 @@ where
     IO: HasConnectionInfo,
 {
     state: TlsState<IO>,
-    tx: TlsConnectionInfoSender<IO::Addr>,
-    pub(crate) rx: TlsConnectionInfoReciever<IO::Addr>,
+    tx: TlsConnectionInfoSender,
+    pub(crate) rx: TlsConnectionInfoReciever,
 }
 
 impl<IO> TlsHandshakeStream for TlsStream<IO>
@@ -77,12 +72,12 @@ where
                 Ok(mut stream) => {
                     // Take some action here when the handshake happens
 
-                    let (_, server_info) = stream.get_ref();
+                    let (io, server_info) = stream.get_ref();
                     let info = TlsConnectionInfo::server(server_info);
                     self.tx.send(info.clone());
 
                     let host = info.server_name.as_deref().unwrap_or("-");
-                    tracing::trace!(local=%self.rx.local_addr(), remote=%self.rx.remote_addr(), %host,  "TLS Handshake complete");
+                    tracing::trace!(local=%io.info().local_addr(), remote=%io.info().remote_addr(), %host,  "TLS Handshake complete");
 
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
@@ -105,28 +100,13 @@ where
     ///
     /// This adapts the underlying `rustls` stream to provide connection information.
     pub fn new(accept: Accept<IO>) -> Self {
-        // We don't expect these to panic because we assume that the handshake has not finished when
-        // this implementation is called. As long as no-one manually polls the future and then
-        // does this after the future has returned ready, we should be okay.
-        let info: ConnectionInfo<IO::Addr> = accept
-            .get_ref()
-            .map(|stream| stream.info())
-            .expect("TLS handshake should have access to underlying IO");
-
-        let (tx, rx) = TlsConnectionInfo::channel(info);
+        let (tx, rx) = channel();
 
         Self {
             state: TlsState::Handshake(accept),
             tx,
             rx,
         }
-    }
-
-    /// Receive the TLS connection info, which will become available when the handshake completes.
-    ///
-    /// If you are not actively polling the stream, this will block.
-    pub async fn recv_info(&self) -> io::Result<ConnectionInfo<IO::Addr>> {
-        self.rx.recv().await
     }
 }
 
@@ -138,7 +118,13 @@ where
     type Addr = IO::Addr;
 
     fn info(&self) -> ConnectionInfo<Self::Addr> {
-        self.rx.info()
+        match &self.state {
+            TlsState::Handshake(a) => a
+                .get_ref()
+                .map(|io| io.info())
+                .expect("handshake is complete"),
+            TlsState::Streaming(s) => s.get_ref().0.info(),
+        }
     }
 }
 

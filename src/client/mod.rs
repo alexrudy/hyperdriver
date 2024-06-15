@@ -26,7 +26,7 @@ use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
 use crate::client::pool::{PoolableConnection, Pooled};
 use crate::client::Error as HyperdriverError;
-use crate::stream::info::HasConnectionInfo;
+use crate::info::HasConnectionInfo;
 
 mod builder;
 

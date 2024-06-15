@@ -1,8 +1,9 @@
 //! Support for braided streams which include Transport Layer security
 //! and so involve a negotiation component.
 
+#[cfg(feature = "client")]
 pub mod client;
-pub(crate) mod info;
+#[cfg(feature = "server")]
 pub mod server;
 
 use std::{
@@ -10,7 +11,7 @@ use std::{
     task::{Context, Poll},
 };
 
-pub use info::TlsConnectionInfo;
+pub use crate::info::TlsConnectionInfo;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 

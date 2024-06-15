@@ -3,6 +3,7 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+#[cfg(feature = "tls")]
 use std::io;
 use std::task::{Context, Poll};
 
@@ -11,14 +12,14 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "stream")]
 use tokio::net::{TcpStream, UnixStream};
 
+use crate::info::{ConnectionInfo, HasConnectionInfo};
 #[cfg(feature = "stream")]
 use crate::stream::core::Braid;
 #[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
 #[cfg(feature = "tls")]
-use crate::stream::tls::info::TlsConnectionInfoReciever;
+use crate::info::tls::TlsConnectionInfoReciever;
 
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
@@ -27,36 +28,15 @@ use crate::stream::TlsBraid;
 use crate::stream::tls::server::TlsStream;
 
 mod acceptor;
+#[cfg(feature = "tls")]
 mod connector;
 
 pub use acceptor::Acceptor;
+#[cfg(feature = "tls")]
 pub use connector::{Connection, StartConnectionInfoLayer, StartConnectionInfoService};
-
-#[cfg(feature = "stream")]
-use super::info::BraidAddr;
 
 #[cfg(feature = "tls")]
 use super::tls::TlsHandshakeStream;
-
-#[derive(Debug, Clone)]
-enum ConnectionInfoState<Addr> {
-    #[cfg(feature = "tls")]
-    Handshake(TlsConnectionInfoReciever<Addr>),
-    Connected(ConnectionInfo<Addr>),
-}
-
-impl<Addr> ConnectionInfoState<Addr>
-where
-    Addr: Clone,
-{
-    async fn recv(&self) -> io::Result<ConnectionInfo<Addr>> {
-        match self {
-            #[cfg(feature = "tls")]
-            ConnectionInfoState::Handshake(rx) => rx.recv().await,
-            ConnectionInfoState::Connected(info) => Ok(info.clone()),
-        }
-    }
-}
 
 /// An async generator of new connections
 pub trait Accept {
@@ -81,7 +61,10 @@ pub struct Stream<IO = Braid>
 where
     IO: HasConnectionInfo,
 {
-    info: ConnectionInfoState<IO::Addr>,
+    info: ConnectionInfo<IO::Addr>,
+
+    #[cfg(feature = "tls")]
+    tls: TlsConnectionInfoReciever,
 
     #[cfg(feature = "tls")]
     #[pin]
@@ -100,7 +83,10 @@ pub struct Stream<IO>
 where
     IO: HasConnectionInfo,
 {
-    info: ConnectionInfoState<IO::Addr>,
+    info: ConnectionInfo<IO::Addr>,
+
+    #[cfg(feature = "tls")]
+    tls: TlsConnectionInfoReciever,
 
     #[cfg(feature = "tls")]
     #[pin]
@@ -118,7 +104,10 @@ where
     /// Create a new stream from an inner stream, without TLS
     pub fn new(inner: IO) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(inner.info()),
+            info: inner.info(),
+
+            #[cfg(feature = "tls")]
+            tls: TlsConnectionInfoReciever::empty(),
 
             #[cfg(feature = "tls")]
             inner: TlsBraid::NoTls(inner),
@@ -129,32 +118,13 @@ where
     }
 }
 
+#[cfg(feature = "tls")]
 impl<IO> Stream<IO>
 where
     IO: HasConnectionInfo,
-    IO::Addr: Clone,
 {
-    /// Get the connection info for this stream
-    ///
-    /// This will block until the handshake completes for
-    /// TLS connections.
-    pub async fn info(&self) -> io::Result<ConnectionInfo<IO::Addr>> {
-        match &self.info {
-            #[cfg(feature = "tls")]
-            ConnectionInfoState::Handshake(rx) => rx.recv().await,
-            ConnectionInfoState::Connected(info) => Ok(info.clone()),
-        }
-    }
-
-    /// Get the remote address for this stream.
-    ///
-    /// This can be done before the TLS handshake completes.
-    pub fn remote_addr(&self) -> &IO::Addr {
-        match &self.info {
-            #[cfg(feature = "tls")]
-            ConnectionInfoState::Handshake(rx) => rx.remote_addr(),
-            ConnectionInfoState::Connected(info) => info.remote_addr(),
-        }
+    pub(crate) fn rx(&self) -> &TlsConnectionInfoReciever {
+        &self.tls
     }
 }
 
@@ -179,13 +149,7 @@ where
 {
     type Addr = IO::Addr;
     fn info(&self) -> ConnectionInfo<IO::Addr> {
-        match &self.info {
-            #[cfg(feature = "tls")]
-            ConnectionInfoState::Handshake(_) => {
-                panic!("connection info is not avaialble before the handshake completes")
-            }
-            ConnectionInfoState::Connected(info) => info.clone(),
-        }
+        self.info.clone()
     }
 }
 
@@ -197,7 +161,8 @@ where
 {
     fn from(stream: TlsStream<IO>) -> Self {
         Stream {
-            info: ConnectionInfoState::Handshake(stream.rx.clone()),
+            info: stream.info(),
+            tls: stream.rx.clone(),
             inner: TlsBraid::Tls(stream),
         }
     }
@@ -207,9 +172,9 @@ where
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(
-                <TcpStream as HasConnectionInfo>::info(&stream).map(Into::into),
-            ),
+            info: stream.info().map(Into::into),
+            #[cfg(feature = "tls")]
+            tls: TlsConnectionInfoReciever::empty(),
             inner: Braid::from(stream).into(),
         }
     }
@@ -219,9 +184,9 @@ impl From<TcpStream> for Stream {
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(
-                <DuplexStream as HasConnectionInfo>::info(&stream).map(|_| BraidAddr::Duplex),
-            ),
+            info: stream.info().map(Into::into),
+            #[cfg(feature = "tls")]
+            tls: TlsConnectionInfoReciever::empty(),
             inner: Braid::from(stream).into(),
         }
     }
@@ -231,7 +196,9 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(stream.info().map(Into::into)),
+            info: stream.info().map(Into::into),
+            #[cfg(feature = "tls")]
+            tls: TlsConnectionInfoReciever::empty(),
             inner: Braid::from(stream).into(),
         }
     }
@@ -241,7 +208,9 @@ impl From<UnixStream> for Stream {
 impl From<Braid> for Stream {
     fn from(stream: Braid) -> Self {
         Stream {
-            info: ConnectionInfoState::Connected(stream.info()),
+            info: stream.info(),
+            #[cfg(feature = "tls")]
+            tls: TlsConnectionInfoReciever::empty(),
             inner: stream.into(),
         }
     }

@@ -11,7 +11,7 @@ use hyper::{header, Request, Response};
 use thiserror::Error;
 use tower::{Layer, Service};
 
-use crate::stream::info::ConnectionInfo;
+use crate::info::TlsConnectionInfo;
 
 /// Error returned by the SNI Middleware.
 #[derive(Debug, Error)]
@@ -139,12 +139,11 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
 
     // Grab the TLS connection info
     //TODO: Fix the type of the connection info address
-    let info = req
+    let tls = req
         .extensions_mut()
-        .get_mut::<ConnectionInfo<()>>()
+        .get_mut::<TlsConnectionInfo>()
         .expect("Missing connection info extension - misconfiguration?");
 
-    let tls = info.tls.as_mut()?;
     if let Some(sni) = tls
         .server_name
         .as_ref()

@@ -8,7 +8,8 @@ use futures_core::ready;
 use pin_project::pin_project;
 use rustls::ServerConfig;
 
-use crate::stream::info::HasConnectionInfo;
+use crate::info::HasConnectionInfo;
+
 use crate::stream::server::Accept;
 /// TLS Acceptor which uses a [rustls::ServerConfig] to accept connections
 /// and start a TLS handshake.
