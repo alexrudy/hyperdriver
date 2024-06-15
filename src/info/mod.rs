@@ -1,5 +1,6 @@
-//! Connection info for braid streams.
+//! Connection Information
 
+use std::convert::Infallible;
 use std::fmt;
 use std::io;
 use std::str::FromStr;
@@ -7,13 +8,15 @@ use std::str::FromStr;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use http::uri::Authority;
-use thiserror::Error;
 use tokio::net::{TcpStream, UnixStream};
 
-#[cfg(not(feature = "stream"))]
-use crate::stream::duplex::DuplexAddr;
 #[cfg(feature = "tls")]
-use crate::stream::tls::info::TlsConnectionInfo;
+pub mod tls;
+#[cfg(feature = "tls")]
+pub use self::tls::HasTlsConnectionInfo;
+#[cfg(feature = "tls")]
+pub use self::tls::TlsConnectionInfo;
+pub use crate::stream::duplex::DuplexAddr;
 
 /// The transport protocol used for a connection.
 ///
@@ -70,13 +73,8 @@ impl From<http::Version> for Protocol {
     }
 }
 
-/// Error returned when a protocol is invalid.
-#[derive(Debug, Error)]
-#[error("invalid protocol")]
-pub struct InvalidProtocol;
-
 impl FromStr for Protocol {
-    type Err = InvalidProtocol;
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -128,6 +126,11 @@ impl UnixAddr {
     /// Create a new address from a path.
     pub fn from_pathbuf(path: Utf8PathBuf) -> Self {
         Self { path: Some(path) }
+    }
+
+    /// Create a new address without a path.
+    pub fn unnamed() -> Self {
+        Self { path: None }
     }
 }
 
@@ -286,6 +289,13 @@ impl From<UnixAddr> for BraidAddr {
     }
 }
 
+#[cfg(feature = "stream")]
+impl From<DuplexAddr> for BraidAddr {
+    fn from(_: DuplexAddr) -> Self {
+        Self::Duplex
+    }
+}
+
 /// Information about a connection to a stream.
 #[cfg(feature = "stream")]
 #[derive(Debug, Clone)]
@@ -304,10 +314,6 @@ pub struct ConnectionInfo<Addr = BraidAddr> {
 
     /// Buffer size
     pub buffer_size: Option<usize>,
-
-    #[cfg(feature = "tls")]
-    /// Transport Layer Security information for this connection.
-    pub tls: Option<TlsConnectionInfo>,
 }
 
 /// Information about a connection to a stream.
@@ -328,10 +334,6 @@ pub struct ConnectionInfo<Addr> {
 
     /// Buffer size
     pub buffer_size: Option<usize>,
-
-    #[cfg(feature = "tls")]
-    /// Transport Layer Security information for this connection.
-    pub tls: Option<TlsConnectionInfo>,
 }
 
 impl<Addr> Default for ConnectionInfo<Addr>
@@ -345,9 +347,6 @@ where
             local_addr: Addr::default(),
             remote_addr: Addr::default(),
             buffer_size: None,
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
@@ -361,9 +360,6 @@ impl ConnectionInfo<BraidAddr> {
             local_addr: BraidAddr::Duplex,
             remote_addr: BraidAddr::Duplex,
             buffer_size: Some(buffer_size),
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
@@ -377,23 +373,11 @@ impl ConnectionInfo<DuplexAddr> {
             local_addr: DuplexAddr,
             remote_addr: DuplexAddr,
             buffer_size: Some(buffer_size),
-
-            #[cfg(feature = "tls")]
-            tls: None,
         }
     }
 }
 
 impl<Addr> ConnectionInfo<Addr> {
-    #[cfg(feature = "tls")]
-    /// Add tls info to the connection info
-    pub(crate) fn tls(self, tls: TlsConnectionInfo) -> Self {
-        ConnectionInfo {
-            tls: Some(tls),
-            ..self
-        }
-    }
-
     /// The local address for this connection
     pub fn local_addr(&self) -> &Addr {
         &self.local_addr
@@ -415,9 +399,6 @@ impl<Addr> ConnectionInfo<Addr> {
             local_addr: f(self.local_addr),
             remote_addr: f(self.remote_addr),
             buffer_size: self.buffer_size,
-
-            #[cfg(feature = "tls")]
-            tls: self.tls,
         }
     }
 }
@@ -438,33 +419,35 @@ where
             local_addr: local_addr.into(),
             remote_addr: remote_addr.into(),
             buffer_size: None,
-
-            #[cfg(feature = "tls")]
-            tls: None,
         })
     }
 }
 
 impl<Addr> TryFrom<&UnixStream> for ConnectionInfo<Addr>
 where
-    Addr: TryFrom<tokio::net::unix::SocketAddr>,
-    Addr::Error: std::error::Error,
+    Addr: From<UnixAddr>,
 {
     type Error = io::Error;
 
     fn try_from(stream: &UnixStream) -> Result<Self, Self::Error> {
-        let local_addr = stream.local_addr()?;
-        let remote_addr = stream.peer_addr()?;
+        let local_addr = match stream.local_addr() {
+            Ok(addr) => addr.try_into().expect("unix socket address"),
+            Err(e) if matches!(e.kind(), io::ErrorKind::InvalidInput) => UnixAddr::unnamed(),
+            Err(e) => return Err(e),
+        };
+
+        let remote_addr = match stream.peer_addr() {
+            Ok(addr) => addr.try_into().expect("unix socket address"),
+            Err(e) if matches!(e.kind(), io::ErrorKind::InvalidInput) => UnixAddr::unnamed(),
+            Err(e) => return Err(e),
+        };
 
         Ok(Self {
             protocol: None,
             authority: None,
-            local_addr: local_addr.try_into().expect("unix socket address"),
-            remote_addr: remote_addr.try_into().expect("unix socket address"),
+            local_addr: local_addr.into(),
+            remote_addr: remote_addr.into(),
             buffer_size: None,
-
-            #[cfg(feature = "tls")]
-            tls: None,
         })
     }
 }
@@ -504,5 +487,143 @@ impl HasConnectionInfo for UnixStream {
                 .expect("utf-8 unix socket address"),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use http::Version;
+    use tokio::net::{TcpListener, UnixListener};
+
+    use super::*;
+
+    #[test]
+    fn protocol_display() {
+        assert_eq!(Protocol::http(Version::HTTP_11).to_string(), "HTTP/1.1");
+        assert_eq!(Protocol::http(Version::HTTP_2).to_string(), "HTTP/2.0");
+        assert_eq!(Protocol::http(Version::HTTP_3).to_string(), "HTTP/3.0");
+        assert_eq!(Protocol::http(Version::HTTP_10).to_string(), "HTTP/1.0");
+        assert_eq!(Protocol::grpc().to_string(), "gRPC");
+        assert_eq!(Protocol::web_socket().to_string(), "WebSocket");
+    }
+
+    #[test]
+    fn parse_protocol() {
+        assert_eq!(
+            Protocol::from_str("http/1.1").unwrap(),
+            Protocol::http(Version::HTTP_11)
+        );
+        assert_eq!(
+            Protocol::from_str("h2").unwrap(),
+            Protocol::http(Version::HTTP_2)
+        );
+        assert_eq!(
+            Protocol::from_str("h3").unwrap(),
+            Protocol::http(Version::HTTP_3)
+        );
+        assert_eq!(
+            Protocol::from_str("http/1.0").unwrap(),
+            Protocol::http(Version::HTTP_10)
+        );
+        assert_eq!(Protocol::from_str("gRPC").unwrap(), Protocol::grpc());
+        assert_eq!(
+            Protocol::from_str("WebSocket").unwrap(),
+            Protocol::web_socket()
+        );
+        assert_eq!(
+            Protocol::from_str("foo").unwrap(),
+            Protocol::Other("foo".into())
+        )
+    }
+
+    #[test]
+    fn test_make_canonical() {
+        assert_eq!(
+            make_canonical("[::1]:8080".parse().unwrap()),
+            "[::1]:8080".parse().unwrap()
+        );
+        assert_eq!(
+            make_canonical("[::ffff:192.0.2.128]:8080".parse().unwrap()),
+            "192.0.2.128:8080".parse().unwrap()
+        )
+    }
+
+    #[test]
+    fn connection_info_default() {
+        let info = ConnectionInfo::<DuplexAddr>::default();
+        assert_eq!(info.protocol, None);
+        assert_eq!(info.authority, None);
+        assert_eq!(info.local_addr, DuplexAddr);
+        assert_eq!(info.remote_addr, DuplexAddr);
+        assert_eq!(info.buffer_size, None);
+    }
+
+    #[test]
+    fn unix_addr() {
+        let addr = UnixAddr::from_pathbuf("/tmp/foo.sock".into());
+        assert_eq!(addr.path(), Some("/tmp/foo.sock".into()));
+
+        let addr = UnixAddr::unnamed();
+        assert_eq!(addr.path(), None);
+    }
+
+    #[test]
+    fn connection_info_map() {
+        let info = ConnectionInfo {
+            protocol: Some(Protocol::http(Version::HTTP_11)),
+            authority: Some("example.com".parse().unwrap()),
+            local_addr: "local",
+            remote_addr: "remote",
+            buffer_size: Some(1024),
+        };
+
+        let mapped = info.map(|addr| addr.to_string());
+        assert_eq!(mapped.protocol, Some(Protocol::http(Version::HTTP_11)));
+        assert_eq!(mapped.authority, Some("example.com".parse().unwrap()));
+        assert_eq!(mapped.local_addr, "local".to_string());
+    }
+
+    #[tokio::test]
+    async fn unix_connection_info_unnamed() {
+        let (a, _) = UnixStream::pair().expect("pair");
+
+        let info: ConnectionInfo<UnixAddr> = ConnectionInfo::try_from(&a).unwrap();
+        assert_eq!(info.local_addr(), &UnixAddr::unnamed());
+    }
+
+    #[tokio::test]
+    async fn unix_connection_info_named() {
+        let tmp = tempfile::TempDir::with_prefix("unix-connection-info").unwrap();
+        tokio::fs::create_dir_all(&tmp).await.unwrap();
+        let path = tmp.path().join("socket.sock");
+
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let conn = UnixStream::connect(&path).await.unwrap();
+
+        let info: ConnectionInfo<UnixAddr> = ConnectionInfo::try_from(&conn).unwrap();
+
+        assert_eq!(
+            info.remote_addr(),
+            &UnixAddr::from_pathbuf(path.try_into().unwrap())
+        );
+
+        drop(listener);
+    }
+
+    #[tokio::test]
+    async fn tcp_connection_info() {
+        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let conn = TcpStream::connect(addr).await.unwrap();
+
+        let info: ConnectionInfo<std::net::SocketAddr> = ConnectionInfo::try_from(&conn).unwrap();
+        assert_eq!(info.remote_addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(info.remote_addr().port(), addr.port());
     }
 }

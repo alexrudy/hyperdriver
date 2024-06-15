@@ -12,32 +12,26 @@ use tracing::dispatcher;
 pub mod body;
 pub use body::Body;
 pub mod bridge;
-
 #[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "client")]
 pub use client::Client;
-
 #[cfg(feature = "discovery")]
 pub mod discovery;
-
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
-
 #[cfg(feature = "client")]
 mod lazy;
-
 #[cfg(feature = "pidfile")]
 pub mod pidfile;
-
 #[cfg(feature = "server")]
 mod rewind;
-
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "server")]
 pub use server::Server;
-
+pub mod info;
+pub mod service;
 pub mod stream;
 
 #[allow(unused)]
@@ -65,9 +59,53 @@ pub(crate) mod private {
     pub trait Sealed {}
 }
 
-pub mod service;
+#[cfg(test)]
+#[cfg(feature = "tls")]
+pub(crate) mod fixtures {
 
-/// Conenction Information
-pub mod info {
-    pub use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
+    use rustls::ServerConfig;
+
+    pub(crate) fn tls_server_config() -> rustls::ServerConfig {
+        let (_, cert) = pem_rfc7468::decode_vec(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/minica/example.com/cert.pem"
+        )))
+        .unwrap();
+        let (label, key) = pem_rfc7468::decode_vec(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/minica/example.com/key.pem"
+        )))
+        .unwrap();
+
+        let cert = rustls::pki_types::CertificateDer::from(cert);
+        let key = match label {
+            "PRIVATE KEY" => rustls::pki_types::PrivateKeyDer::Pkcs8(key.into()),
+            "RSA PRIVATE KEY" => rustls::pki_types::PrivateKeyDer::Pkcs1(key.into()),
+            "EC PRIVATE KEY" => rustls::pki_types::PrivateKeyDer::Sec1(key.into()),
+            _ => panic!("unknown key type"),
+        };
+
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert], key)
+            .unwrap()
+    }
+
+    fn tls_root_store() -> rustls::RootCertStore {
+        let mut root_store = rustls::RootCertStore::empty();
+        let (_, cert) = pem_rfc7468::decode_vec(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/minica/minica.pem"
+        )))
+        .unwrap();
+        root_store
+            .add(rustls::pki_types::CertificateDer::from(cert))
+            .unwrap();
+        root_store
+    }
+
+    pub(crate) fn tls_client_config() -> rustls::ClientConfig {
+        let config = rustls::ClientConfig::builder().with_root_certificates(tls_root_store());
+        config.with_no_client_auth()
+    }
 }

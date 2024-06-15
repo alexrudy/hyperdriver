@@ -81,13 +81,7 @@ impl<E> Builder<E> {
     {
         UpgradableConnection {
             state: ConnectionState::ReadVersion {
-                read_version: ReadVersion {
-                    io: Some(io),
-                    buf: [MaybeUninit::uninit(); 24],
-                    filled: 0,
-                    version: HttpProtocol::Http2,
-                    cancelled: false,
-                },
+                read_version: ReadVersion::new(io),
                 builder: self,
                 service: Some(service),
             },
@@ -245,6 +239,16 @@ impl<I> ReadVersion<I> {
     fn cancel(self: Pin<&mut Self>) {
         *self.project().cancelled = true;
     }
+
+    fn new(io: I) -> Self {
+        ReadVersion {
+            io: Some(io),
+            buf: [MaybeUninit::uninit(); 24],
+            filled: 0,
+            version: HttpProtocol::Http2,
+            cancelled: false,
+        }
+    }
 }
 
 impl<I> Future for ReadVersion<I>
@@ -280,5 +284,76 @@ where
         let io = this.io.take().unwrap();
         let rewind = Rewind::new(io, buf.filled().to_vec());
         Poll::Ready(Ok((*this.version, rewind)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt as _};
+
+    use crate::bridge::io::TokioIo;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_read_version_h2() {
+        let (io, mut srv) = tokio::io::duplex(1024);
+
+        srv.write_all(HTTP2_PREFIX).await.unwrap();
+        srv.flush().await.unwrap();
+
+        let read_version = ReadVersion::new(TokioIo::new(io));
+
+        let (version, rewind) = read_version.await.unwrap();
+        assert_eq!(version, HttpProtocol::Http2);
+
+        let (mut io, prefix) = rewind.into_parts();
+        assert_eq!(prefix.as_deref(), Some(HTTP2_PREFIX));
+
+        let mut buf = Vec::new();
+        tokio::try_join!(srv.shutdown(), io.read_to_end(&mut buf)).unwrap();
+        assert!(buf.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_version_h1() {
+        let (io, mut srv) = tokio::io::duplex(1024);
+
+        srv.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+        srv.flush().await.unwrap();
+
+        let read_version = ReadVersion::new(TokioIo::new(io));
+
+        let (version, rewind) = read_version.await.unwrap();
+        assert_eq!(version, HttpProtocol::Http1);
+
+        let (mut io, prefix) = rewind.into_parts();
+        assert_eq!(
+            prefix.as_deref(),
+            Some(b"GET / HTTP/1.1\r\n\r\n".as_slice()),
+            "prefix"
+        );
+
+        let mut buf = Vec::new();
+        tokio::try_join!(srv.shutdown(), io.read_to_end(&mut buf)).unwrap();
+        assert!(buf.is_empty(), "buffer");
+    }
+
+    #[tokio::test]
+    async fn test_rewind_returns_full_data() {
+        let (io, mut srv) = tokio::io::duplex(1024);
+        srv.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+        srv.flush().await.unwrap();
+
+        let read_version = ReadVersion::new(TokioIo::new(io));
+
+        let (version, rewind) = read_version.await.unwrap();
+        assert_eq!(version, HttpProtocol::Http1);
+
+        let mut buf = Vec::new();
+        let mut io = TokioIo::new(rewind);
+        tokio::try_join!(srv.shutdown(), io.read_to_end(&mut buf)).unwrap();
+        assert_eq!(b"GET / HTTP/1.1\r\n\r\n", buf.as_slice());
     }
 }

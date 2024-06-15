@@ -6,8 +6,8 @@ use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
 
 use super::{TlsConnectionError, Transport, TransportStream};
+use crate::info::HasConnectionInfo;
 use crate::stream::client::Stream as ClientStream;
-use crate::stream::info::HasConnectionInfo;
 
 /// Transport via TLS
 #[derive(Debug, Clone)]
@@ -78,6 +78,8 @@ pub(in crate::client::conn::transport) mod future {
     use std::task::{Context, Poll};
 
     use pin_project::pin_project;
+
+    use crate::info::tls::HasTlsConnectionInfo;
 
     use super::super::Transport;
     use super::*;
@@ -177,7 +179,9 @@ pub(in crate::client::conn::transport) mod future {
                             };
 
                             let info = stream.info();
-                            return Poll::Ready(Ok(TransportStream { stream, info }));
+                            let tls = stream.tls_info().cloned();
+
+                            return Poll::Ready(Ok(TransportStream { stream, info, tls }));
                         }
                         Poll::Ready(Err(e)) => {
                             return Poll::Ready(Err(TlsConnectionError::Handshake(e)))
@@ -197,5 +201,52 @@ pub(in crate::client::conn::transport) mod future {
                 };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use tower::ServiceExt;
+
+    use crate::{
+        fixtures,
+        stream::{server::AcceptExt, tls::TlsHandshakeExt},
+    };
+
+    #[tokio::test]
+    async fn test_tls_transport_wrapper() {
+        let (client, server) = crate::stream::duplex::pair("example.com".parse().unwrap());
+
+        let mut config = fixtures::tls_client_config();
+        config.alpn_protocols.push(b"h2".to_vec());
+        let transport = crate::client::conn::transport::TlsTransportWrapper::new(
+            crate::client::conn::transport::duplex::DuplexTransport::new(1024, None, client),
+            config.into(),
+        );
+
+        let mut config = fixtures::tls_server_config();
+        config.alpn_protocols.push(b"h2".to_vec());
+        let accept = crate::stream::server::Acceptor::new(server).tls(config.into());
+
+        let uri = "https://example.com/".parse().unwrap();
+
+        let (stream, _) = tokio::join!(
+            async {
+                let mut stream = transport.oneshot(uri).await.unwrap();
+                stream.get_io_mut().finish_handshake().await.unwrap();
+                stream
+            },
+            async move {
+                let mut conn = accept.accept().await.unwrap();
+                conn.handshake().await.unwrap();
+                conn
+            }
+        );
+
+        assert_eq!(
+            stream.tls_info().unwrap().alpn,
+            Some(crate::info::Protocol::http(http::Version::HTTP_2))
+        );
     }
 }

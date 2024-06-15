@@ -26,7 +26,7 @@ use tracing::{debug, Instrument};
 pub mod conn;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// A transport protocol for serving connections.
 ///
@@ -466,4 +466,34 @@ impl ServerError {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+
+    use std::{
+        convert::Infallible,
+        future::{ready, IntoFuture},
+    };
+
+    use super::*;
+
+    use crate::{stream::duplex, Body};
+
+    use crate::service::make_service_fn;
+    use tower::service_fn;
+
+    #[allow(dead_code, unused_must_use)]
+    fn compile() {
+        let svc = make_service_fn(|_| {
+            ready(Ok::<_, Infallible>(service_fn(|_: http::Request<Body>| {
+                ready(Ok::<_, Infallible>(http::Response::new(crate::Body::from(
+                    "hello",
+                ))))
+            })))
+        });
+
+        let (_, incoming) = duplex::pair("server.test".parse().unwrap());
+
+        let server = Server::new(incoming, svc);
+
+        server.into_future();
+    }
+}

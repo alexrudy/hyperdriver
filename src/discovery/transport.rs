@@ -233,7 +233,8 @@ impl Scheme for GrpcScheme {
 mod tests {
     use tower::{make::Shared, Service, ServiceExt};
 
-    use crate::{body::Body, stream::info::BraidAddr};
+    use crate::info::HasConnectionInfo;
+    use crate::{body::Body, info::BraidAddr};
 
     use super::*;
 

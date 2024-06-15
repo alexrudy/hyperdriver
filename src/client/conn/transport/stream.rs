@@ -4,9 +4,9 @@ use tokio::io::AsyncWrite;
 
 use tower::Service;
 
+use crate::info::BraidAddr;
 use crate::info::HasConnectionInfo;
 use crate::stream::client::Stream;
-use crate::stream::info::BraidAddr;
 
 use super::Transport;
 use super::TransportStream;
@@ -66,10 +66,8 @@ mod fut {
     use pin_project::pin_project;
 
     use crate::client::conn::{Transport, TransportStream};
-    use crate::stream::{
-        client::Stream,
-        info::{BraidAddr, HasConnectionInfo},
-    };
+    use crate::info::{BraidAddr, HasConnectionInfo};
+    use crate::stream::client::Stream;
 
     /// Future returned by `IntoStream` transports.
     #[pin_project]
@@ -108,5 +106,36 @@ mod fut {
                 .poll(cx)
                 .map_ok(|io| io.map(Into::into))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::client::conn::DuplexTransport;
+    use crate::stream::server::AcceptExt as _;
+    use tower::ServiceExt as _;
+
+    #[tokio::test]
+    async fn transport_into_stream() {
+        let (client, srv) = crate::stream::duplex::pair("example.com".parse().unwrap());
+
+        let transport = DuplexTransport::new(1024, None, client).into_stream();
+
+        let (io, _) = tokio::join!(
+            async {
+                transport
+                    .oneshot("https://example.com".parse().unwrap())
+                    .await
+                    .unwrap()
+            },
+            async { srv.accept().await.unwrap() }
+        );
+        let info = io.info();
+
+        assert_eq!(info.protocol, None);
+        assert_eq!(info.local_addr, BraidAddr::Duplex);
+        assert_eq!(info.remote_addr, BraidAddr::Duplex);
     }
 }

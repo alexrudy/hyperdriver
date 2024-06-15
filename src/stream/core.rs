@@ -6,10 +6,10 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
+use crate::info::{ConnectionInfo, HasConnectionInfo};
 use crate::stream::duplex::DuplexStream;
-use crate::stream::info::{ConnectionInfo, HasConnectionInfo};
 
-use super::info::BraidAddr;
+use crate::info::BraidAddr;
 
 /// Dispatching wrapper for potential stream connection types
 ///

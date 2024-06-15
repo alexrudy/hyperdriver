@@ -21,6 +21,8 @@ type Connection<'a, S, IO> = UpgradableConnection<
     TokioExecutor,
 >;
 
+/// Connection that handles the self-referential relationship between
+/// the protocol and the connection.
 #[self_referencing]
 pub struct Connecting<S, IO>
 where

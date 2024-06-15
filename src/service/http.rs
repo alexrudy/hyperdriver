@@ -46,3 +46,50 @@ where
         tower::Service::call(self, req)
     }
 }
+
+#[cfg(test)]
+#[allow(dead_code)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use http_body_util::Empty;
+    use std::{convert::Infallible, future::Ready};
+
+    struct Svc;
+
+    impl tower::Service<http::Request<Empty<Bytes>>> for Svc {
+        type Response = http::Response<Empty<Bytes>>;
+        type Error = Infallible;
+        type Future = Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<Empty<Bytes>>) -> Self::Future {
+            assert_eq!(req.version(), http::Version::HTTP_11);
+            std::future::ready(Ok(http::Response::new(Empty::new())))
+        }
+    }
+
+    static_assertions::assert_impl_all!(Svc: HttpService<Empty<Bytes>, ResBody=Empty<Bytes>, Error=Infallible>);
+
+    struct NotASvc;
+
+    impl tower::Service<http::Request<()>> for Svc {
+        type Response = http::Response<()>;
+        type Error = Infallible;
+        type Future = Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: http::Request<()>) -> Self::Future {
+            assert_eq!(req.version(), http::Version::HTTP_11);
+            std::future::ready(Ok(http::Response::new(())))
+        }
+    }
+
+    static_assertions::assert_not_impl_all!(NotASvc: HttpService<(), ResBody=(), Error=Infallible>);
+}

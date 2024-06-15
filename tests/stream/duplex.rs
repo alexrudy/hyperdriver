@@ -19,9 +19,7 @@ async fn braided_duplex() {
         client
             .connect(
                 1024,
-                Some(hyperdriver::stream::info::Protocol::Http(
-                    http::Version::HTTP_11,
-                )),
+                Some(hyperdriver::info::Protocol::Http(http::Version::HTTP_11)),
             )
             .await
             .unwrap(),

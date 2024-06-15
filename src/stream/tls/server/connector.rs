@@ -12,9 +12,9 @@ use std::{
 use futures_core::future::BoxFuture;
 use hyper::{Request, Response};
 use tower::{Layer, Service};
-use tracing::{dispatcher, Instrument};
+use tracing::Instrument;
 
-use crate::stream::info::HasConnectionInfo;
+use crate::info::HasConnectionInfo;
 
 use super::acceptor::TlsStream;
 
@@ -47,9 +47,8 @@ impl<S, IO> Service<&TlsStream<IO>> for TlsConnectionInfoService<S>
 where
     S: Clone + Send + 'static,
     IO: HasConnectionInfo,
-    IO::Addr: Clone,
 {
-    type Response = TlsConnection<S, IO::Addr>;
+    type Response = TlsConnection<S>;
 
     type Error = Infallible;
 
@@ -71,18 +70,17 @@ where
 
 /// Tower middleware for collecting TLS connection information after a handshake has been completed.
 #[derive(Debug)]
-pub struct TlsConnection<S, A> {
+pub struct TlsConnection<S> {
     inner: S,
-    rx: crate::stream::tls::info::TlsConnectionInfoReciever<A>,
+    rx: crate::info::tls::TlsConnectionInfoReciever,
 }
 
-impl<S, A, BIn, BOut> Service<Request<BIn>> for TlsConnection<S, A>
+impl<S, BIn, BOut> Service<Request<BIn>> for TlsConnection<S>
 where
     S: Service<Request<BIn>, Response = Response<BOut>> + Clone + Send + 'static,
     S::Future: Send,
     S::Error: fmt::Display,
     BIn: Send + 'static,
-    A: Clone + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -97,18 +95,13 @@ where
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
-        let span = tracing::info_span!("TLS Connection");
-        dispatcher::get_default(|dispatch| {
-            let id = span.id().expect("Missing ID; this is a bug");
-            if let Some(current) = dispatch.current_span().id() {
-                dispatch.record_follows_from(&id, current)
-            }
-        });
+        let span = tracing::info_span!("TLS");
+        crate::polled_span(&span);
 
         let fut = async move {
             async {
                 tracing::trace!("getting TLS Connection information (sent from the acceptor)");
-                if let Ok(info) = rx.recv().await {
+                if let Some(info) = rx.recv().await {
                     req.extensions_mut().insert(info);
                 }
             }

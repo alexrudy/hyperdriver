@@ -14,9 +14,10 @@ use hyper::{Request, Response};
 use tower::{Layer, Service};
 use tracing::Instrument;
 
-use super::ConnectionInfoState;
 use super::Stream;
-use crate::{polled_span, stream::info::HasConnectionInfo};
+
+use crate::info::tls::TlsConnectionInfoReciever;
+use crate::{info::HasConnectionInfo, polled_span};
 
 /// A middleware which adds connection information to the request extensions.
 #[derive(Debug, Clone)]
@@ -50,7 +51,7 @@ where
     IO: HasConnectionInfo + Send + 'static,
     IO::Addr: Clone,
 {
-    type Response = Connection<C, IO::Addr>;
+    type Response = Connection<C>;
 
     type Error = Infallible;
 
@@ -65,8 +66,8 @@ where
 
     fn call(&mut self, stream: &Stream<IO>) -> Self::Future {
         let inner = self.inner.clone();
-        let info = stream.info.clone();
-        ready(Ok(Connection { inner, info }))
+        let rx = stream.rx().clone();
+        ready(Ok(Connection { inner, rx }))
     }
 }
 
@@ -74,18 +75,17 @@ where
 ///
 /// This service wraps the request/response service, not the connector service.
 #[derive(Debug, Clone)]
-pub struct Connection<S, A> {
+pub struct Connection<S> {
     inner: S,
-    info: ConnectionInfoState<A>,
+    rx: TlsConnectionInfoReciever,
 }
 
-impl<S, A, BIn, BOut> Service<Request<BIn>> for Connection<S, A>
+impl<S, BIn, BOut> Service<Request<BIn>> for Connection<S>
 where
     S: Service<Request<BIn>, Response = Response<BOut>> + Clone + Send + 'static,
     S::Future: Send,
     S::Error: fmt::Display,
     BIn: Send + 'static,
-    A: Clone + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -96,17 +96,18 @@ where
     }
 
     fn call(&mut self, mut req: Request<BIn>) -> Self::Future {
-        let rx = self.info.clone();
-        let inner = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, inner);
+        let rx = self.rx.clone();
+
+        let next = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, next);
 
         let span = tracing::info_span!("Connection");
         polled_span(&span);
 
         let fut = async move {
             async {
-                tracing::trace!("getting Connection information (sent from the acceptor)");
-                if let Ok(info) = rx.recv().await {
+                tracing::trace!("getting TLS connection information (sent from the acceptor)");
+                if let Some(info) = rx.recv().await {
                     req.extensions_mut().insert(info);
                 }
             }

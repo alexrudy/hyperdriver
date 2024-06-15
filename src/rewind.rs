@@ -23,6 +23,11 @@ impl<R> Rewind<R> {
             prefix: Some(prefix.into()),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn into_parts(self) -> (R, Option<Bytes>) {
+        (self.inner, self.prefix)
+    }
 }
 
 impl<T> Read for Rewind<T>
