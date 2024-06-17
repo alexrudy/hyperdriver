@@ -304,12 +304,7 @@ impl ServiceRegistry {
 
     /// Create a client which will connect to internal services.
     pub fn client<B>(&self) -> Client<B> {
-        #[cfg(feature = "tls")]
-        let transport = self.default_transport().with_default_tls();
-
-        #[cfg(not(feature = "tls"))]
         let transport = self.default_transport().without_tls();
-
         Client::new(Default::default(), transport, Default::default())
     }
 }
@@ -421,8 +416,8 @@ impl ServiceHandle {
     }
 
     fn unix(path: &Utf8Path, service: &str) -> Self {
-        let svcpath = path.join(service).with_extension("svc");
-        let pidfile = path.join(service).with_extension("pid");
+        let svcpath = path.join(format!("{service}.svc"));
+        let pidfile = path.join(format!("{service}.pid"));
 
         Self::Unix {
             path: svcpath,
@@ -553,4 +548,28 @@ async fn connect_to_handle(
     })?;
 
     Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_service_handle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let name = "service.with.dots";
+        let handle = ServiceHandle::unix(tmp.path().try_into().unwrap(), name);
+
+        assert!(!handle.is_available());
+
+        let ServiceHandle::Unix { path, pidfile } = handle else {
+            panic!("expected unix handle")
+        };
+
+        let expected =
+            Utf8PathBuf::from_path_buf(tmp.path().join(format!("{}.svc", name))).unwrap();
+
+        assert_eq!(path, expected);
+        assert!(matches!(pidfile, PidLock::Path(_)));
+    }
 }
