@@ -1,11 +1,19 @@
 use http_body_util::BodyExt as _;
-use hyperdriver::client::Client;
+use hyperdriver::client::{conn::TcpConnectionConfig, Client};
 
 /// Make a request to httpbin.org
 async fn httpbin_request(
     mut req: http::Request<hyperdriver::Body>,
 ) -> Result<bytes::Bytes, Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let client = Client::new_tcp_http();
+    let config = TcpConnectionConfig {
+        happy_eyeballs_timeout: Some(std::time::Duration::from_secs(1)),
+        ..Default::default()
+    };
+
+    let client = Client::builder()
+        .with_tcp(config)
+        .with_default_tls()
+        .build();
 
     let hdrs = req.headers_mut();
     hdrs.append(

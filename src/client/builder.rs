@@ -55,15 +55,20 @@ impl Builder {
 #[cfg(feature = "tls")]
 impl Builder {
     /// Use the provided TLS configuration.
-    pub fn with_tls(&mut self, config: ClientConfig) -> &mut Self {
+    pub fn with_tls(mut self, config: ClientConfig) -> Self {
         self.tls = Some(config);
         self
     }
 
     /// Use the default TLS configuration with native root certificates.
-    pub fn with_default_tls(&mut self) -> &mut Self {
+    pub fn with_default_tls(mut self) -> Self {
         self.tls = Some(default_tls_config());
         self
+    }
+
+    /// TLS configuration.
+    pub fn tls(&mut self) -> &mut Option<ClientConfig> {
+        &mut self.tls
     }
 }
 
@@ -142,7 +147,7 @@ mod tests {
         let mut builder = Builder::default();
         let mut tls = super::default_tls_config();
         tls.alpn_protocols.push(b"a1".to_vec());
-        builder.with_tls(tls);
+        builder = builder.with_tls(tls);
 
         let client = builder.build();
         assert_eq!(
