@@ -53,14 +53,12 @@ use crate::info::HasConnectionInfo;
 /// # Example
 /// ```no_run
 /// # use hyperdriver::client::conn::TcpConnector;
-/// # use hyperdriver::client::conn::TcpConnectionConfig;
 /// # use hyperdriver::client::conn::dns::GaiResolver;
 /// # use tokio::net::TcpStream;
 /// # use tower::ServiceExt as _;
 ///
 /// # async fn run() {
-/// let config = TcpConnectionConfig::default();
-/// let connector: TcpConnector<GaiResolver, TcpStream> = TcpConnector::builder().with_config(config).build_with_gai();
+/// let connector: TcpConnector<GaiResolver, TcpStream> = TcpConnector::default();
 ///
 /// let uri = "http://example.com".parse().unwrap();
 /// let stream = connector.oneshot(uri).await.unwrap();
@@ -88,17 +86,18 @@ where
 
 impl<IO> Default for TcpConnector<GaiResolver, IO> {
     fn default() -> Self {
-        TcpConnector::builder().build_with_gai()
+        TcpConnector::builder().with_gai_resolver().build()
     }
 }
 
 #[derive(Debug)]
 /// Builder for a TCP connector.
-pub struct TcpConnectorBuilder {
+pub struct TcpConnectorBuilder<R> {
     config: TcpConnectionConfig,
+    resolver: R,
 }
 
-impl TcpConnectorBuilder {
+impl<R> TcpConnectorBuilder<R> {
     /// Access the TCP connection configuration
     pub fn config(&mut self) -> &mut TcpConnectionConfig {
         &mut self.config
@@ -109,21 +108,40 @@ impl TcpConnectorBuilder {
         self.config = config;
         self
     }
+}
 
-    /// Build a TCP connector with a resolver
-    pub fn build<R, IO>(self, resolver: R) -> TcpConnector<R, IO> {
-        TcpConnector {
-            config: Arc::new(self.config),
+impl<R> TcpConnectorBuilder<R> {
+    /// Set the resolver for the TCP connector
+    pub fn with_resolver<R2>(self, resolver: R2) -> TcpConnectorBuilder<R2> {
+        TcpConnectorBuilder {
+            config: self.config,
             resolver,
-            stream: PhantomData,
         }
     }
 
-    /// Build a TCP connecter with GetAddrInfo resolution
-    pub fn build_with_gai<IO>(self) -> TcpConnector<GaiResolver, IO> {
+    /// Use the default GAI resolver for the TCP connector
+    pub fn with_gai_resolver(self) -> TcpConnectorBuilder<GaiResolver> {
+        TcpConnectorBuilder {
+            config: self.config,
+            resolver: GaiResolver::new(),
+        }
+    }
+
+    /// Access the resolver for the TCP connector
+    pub fn resolver(&mut self) -> &R {
+        &mut self.resolver
+    }
+}
+
+impl<R> TcpConnectorBuilder<R>
+where
+    R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
+{
+    /// Build a TCP connector with a resolver
+    pub fn build<IO>(self) -> TcpConnector<R, IO> {
         TcpConnector {
             config: Arc::new(self.config),
-            resolver: GaiResolver::new(),
+            resolver: self.resolver,
             stream: PhantomData,
         }
     }
@@ -131,9 +149,10 @@ impl TcpConnectorBuilder {
 
 impl TcpConnector {
     /// Create a new TCP connector builder with the default configuration.
-    pub fn builder() -> TcpConnectorBuilder {
+    pub fn builder() -> TcpConnectorBuilder<()> {
         TcpConnectorBuilder {
             config: Default::default(),
+            resolver: (),
         }
     }
 }
@@ -208,6 +227,7 @@ impl<R, IO> TcpConnector<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {
+    /// Connect to a host and port.
     async fn connect(&self, host: Box<str>, port: u16) -> Result<TcpStream, TcpConnectionError> {
         let mut addrs = self
             .resolver
@@ -220,6 +240,7 @@ where
         connecting.connect().await
     }
 
+    /// Create a new `TcpConnecting` future.
     fn connecting(&self, mut addrs: SocketAddrs) -> TcpConnecting<'_> {
         if self.config.happy_eyeballs_timeout.is_some() {
             addrs.sort_preferred(IpVersion::from_binding(
@@ -243,10 +264,12 @@ pub(crate) struct TcpConnecting<'c> {
 }
 
 impl<'c> TcpConnecting<'c> {
+    /// Create a new `TcpConnecting` future.
     pub(crate) fn new(addresses: SocketAddrs, config: &'c TcpConnectionConfig) -> Self {
         Self { addresses, config }
     }
 
+    /// Connect to the remote address using the happy eyeballs algorithm.
     async fn connect(mut self) -> Result<TcpStream, TcpConnectionError> {
         let delay = if self.addresses.is_empty() {
             self.config.happy_eyeballs_timeout
@@ -272,12 +295,15 @@ impl<'c> TcpConnecting<'c> {
 }
 
 /// Represents a single attempt to connect to a remote address.
+///
+/// This exists to allow us to move the SocketAddr but borrow the TcpConnectionConfig.
 struct TcpConnectionAttempt<'c> {
     address: SocketAddr,
     config: &'c TcpConnectionConfig,
 }
 
 impl<'c> TcpConnectionAttempt<'c> {
+    /// Make a single connection attempt.
     async fn connect(self) -> Result<TcpStream, TcpConnectionError> {
         let connect = connect(&self.address, self.config.connect_timeout, self.config)?;
         connect.await
@@ -290,6 +316,7 @@ impl<'c> TcpConnectionAttempt<'c> {
     }
 }
 
+/// Error type for invalid URIs during connection.
 #[derive(Debug, Error)]
 #[error("invalid URI")]
 pub struct InvalidUri {
@@ -616,7 +643,8 @@ mod test {
 
         let transport = TcpConnector::builder()
             .with_config(config)
-            .build::<_, TcpStream>(Resolver(0));
+            .with_resolver(Resolver(0))
+            .build::<TcpStream>();
 
         let result = transport.oneshot(uri).await;
         assert!(result.is_err());
@@ -635,7 +663,8 @@ mod test {
 
         let transport = TcpConnector::builder()
             .with_config(config)
-            .build::<_, TcpStream>(Resolver(port));
+            .with_resolver(Resolver(port))
+            .build::<TcpStream>();
 
         let (stream, _) = connect_transport(uri, transport, bind).await;
 

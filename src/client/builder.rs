@@ -11,11 +11,9 @@ use crate::client::{conn::HttpConnectionBuilder, Client};
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 
-use super::conn::{
-    dns::GaiResolver,
-    transport::{TlsTransport, TransportTlsExt as _},
-    TcpConnector,
-};
+use super::conn::dns::GaiResolver;
+use super::conn::transport::{TlsTransport, TransportTlsExt as _};
+use super::conn::TcpConnector;
 
 /// A builder for a client.
 #[derive(Debug)]
@@ -89,6 +87,14 @@ impl Builder {
         self.pool = None;
         self
     }
+}
+
+impl Builder {
+    /// Use the provided HTTP connection configuration.
+    pub fn with_conn(mut self, conn: crate::client::conn::HttpConnectionBuilder) -> Self {
+        self.conn = conn;
+        self
+    }
 
     /// HTTP connection configuration.
     pub fn conn(&mut self) -> &mut crate::client::conn::HttpConnectionBuilder {
@@ -105,13 +111,15 @@ impl Builder {
             #[cfg(feature = "tls")]
             transport: crate::client::conn::TcpConnector::builder()
                 .with_config(self.tcp)
-                .build_with_gai()
+                .with_gai_resolver()
+                .build()
                 .with_optional_tls(self.tls.map(Arc::new)),
 
             #[cfg(not(feature = "tls"))]
             transport: crate::client::conn::TcpConnector::builder()
                 .with_config(self.tcp)
-                .build_with_gai()
+                .with_gai_resolver()
+                .build()
                 .without_tls(),
 
             protocol: HttpConnectionBuilder::default(),
