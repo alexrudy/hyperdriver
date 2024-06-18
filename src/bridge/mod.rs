@@ -1,4 +1,4 @@
-//! Utilities for bridging to `hyper` traits from other runtimes.
+//! Utilities for bridging to [hyper] traits from other runtimes.
 
 /// Bridge [hyper] and [tokio] I/O traits
 pub mod io;
