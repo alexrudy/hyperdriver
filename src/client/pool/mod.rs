@@ -101,7 +101,7 @@ impl<C: PoolableConnection> Pool<C> {
         inner.waiting.entry(key.clone()).or_default().push_back(tx);
 
         if inner.connecting.contains(&key) {
-            trace!("connection in progress, will wait");
+            trace!("connection in progress elsewhere, will wait");
             connector = None;
             Checkout::new(key, &self.inner, rx, connector, None)
         } else {

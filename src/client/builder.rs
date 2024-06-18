@@ -13,12 +13,12 @@ use crate::client::default_tls_config;
 
 use super::conn::dns::GaiResolver;
 use super::conn::transport::{TlsTransport, TransportTlsExt as _};
-use super::conn::TcpConnector;
+use super::conn::TcpTransport;
 
 /// A builder for a client.
 #[derive(Debug)]
 pub struct Builder {
-    tcp: crate::client::conn::TcpConnectionConfig,
+    tcp: crate::client::conn::TcpTransportConfig,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
@@ -39,13 +39,13 @@ impl Default for Builder {
 
 impl Builder {
     /// Use the provided TCP configuration.
-    pub fn with_tcp(mut self, config: crate::client::conn::TcpConnectionConfig) -> Self {
+    pub fn with_tcp(mut self, config: crate::client::conn::TcpTransportConfig) -> Self {
         self.tcp = config;
         self
     }
 
     /// TCP configuration.
-    pub fn tcp(&mut self) -> &mut crate::client::conn::TcpConnectionConfig {
+    pub fn tcp(&mut self) -> &mut crate::client::conn::TcpTransportConfig {
         &mut self.tcp
     }
 }
@@ -106,17 +106,17 @@ impl Builder {
     /// Build the client.
     pub fn build(
         self,
-    ) -> Client<HttpConnectionBuilder, TlsTransport<TcpConnector<GaiResolver, TcpStream>>> {
+    ) -> Client<HttpConnectionBuilder, TlsTransport<TcpTransport<GaiResolver, TcpStream>>> {
         Client {
             #[cfg(feature = "tls")]
-            transport: crate::client::conn::TcpConnector::builder()
+            transport: crate::client::conn::TcpTransport::builder()
                 .with_config(self.tcp)
                 .with_gai_resolver()
                 .build()
                 .with_optional_tls(self.tls.map(Arc::new)),
 
             #[cfg(not(feature = "tls"))]
-            transport: crate::client::conn::TcpConnector::builder()
+            transport: crate::client::conn::TcpTransport::builder()
                 .with_config(self.tcp)
                 .with_gai_resolver()
                 .build()

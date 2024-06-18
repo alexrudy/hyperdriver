@@ -1,11 +1,11 @@
 //! TCP transport implementation for client connections.
 //!
-//! This module contains the [`TcpConnector`] type, which is a [`tower::Service`] that connects to
-//! remote addresses using TCP. It also contains the [`TcpConnectionConfig`] type, which is used to
+//! This module contains the [`TcpTransport`] type, which is a [`tower::Service`] that connects to
+//! remote addresses using TCP. It also contains the [`TcpTransportConfig`] type, which is used to
 //! configure TCP connections.
 //!
 //! Normally, you will not need to use this module directly. Instead, you can use the [`Client`][crate::client::Client]
-//! type from the [`client`][crate::client] module, which uses the [`TcpConnector`] internally by default.
+//! type from the [`client`][crate::client] module, which uses the [`TcpTransport`] internally by default.
 //!
 //! See [`Client::new_http_tcp`][crate::client::Client::new_tcp_http] for the default constructor which uses the TCP transport.
 
@@ -39,12 +39,15 @@ use crate::info::HasConnectionInfo;
 /// It requires a resolver `R`, which is by default [`GaiResolver`], which uses
 /// the system's DNS resolver to resolve hostnames to IP addresses.
 ///
-/// The connector can be configured with a [`TcpConnectionConfig`] to control
+/// The connector can be configured with a [`TcpTransportConfig`] to control
 /// various aspects of the TCP connection, such as timeouts, buffer sizes, and
 /// local addresses to bind to.
 ///
-/// If the `tls` feature is enabled, the connector can also be configured with
-/// a [`rustls::ClientConfig`] to enable TLS support.
+#[cfg_attr(
+    feature = "tls",
+    doc = "If the `tls` feature is enabled, the connector can also be configured with
+    a [`rustls::ClientConfig`] to enable TLS support"
+)]
 ///
 /// This connector implements the happy-eyeballs algorithm for connecting to
 /// remote addresses, which allows for faster connection times by trying
@@ -52,26 +55,26 @@ use crate::info::HasConnectionInfo;
 ///
 /// # Example
 /// ```no_run
-/// # use hyperdriver::client::conn::TcpConnector;
+/// # use hyperdriver::client::conn::TcpTransport;
 /// # use hyperdriver::client::conn::dns::GaiResolver;
 /// # use tokio::net::TcpStream;
 /// # use tower::ServiceExt as _;
 ///
 /// # async fn run() {
-/// let connector: TcpConnector<GaiResolver, TcpStream> = TcpConnector::default();
+/// let transport: TcpTransport<GaiResolver, TcpStream> = TcpTransport::default();
 ///
 /// let uri = "http://example.com".parse().unwrap();
-/// let stream = connector.oneshot(uri).await.unwrap();
+/// let stream = transport.oneshot(uri).await.unwrap();
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct TcpConnector<R = GaiResolver, IO = TcpStream> {
-    config: Arc<TcpConnectionConfig>,
+pub struct TcpTransport<R = GaiResolver, IO = TcpStream> {
+    config: Arc<TcpTransportConfig>,
     resolver: R,
     stream: PhantomData<fn() -> IO>,
 }
 
-impl<R, IO> Clone for TcpConnector<R, IO>
+impl<R, IO> Clone for TcpTransport<R, IO>
 where
     R: Clone,
 {
@@ -84,44 +87,44 @@ where
     }
 }
 
-impl<IO> Default for TcpConnector<GaiResolver, IO> {
+impl<IO> Default for TcpTransport<GaiResolver, IO> {
     fn default() -> Self {
-        TcpConnector::builder().with_gai_resolver().build()
+        TcpTransport::builder().with_gai_resolver().build()
     }
 }
 
 #[derive(Debug)]
 /// Builder for a TCP connector.
-pub struct TcpConnectorBuilder<R> {
-    config: TcpConnectionConfig,
+pub struct TcpTransportBuilder<R> {
+    config: TcpTransportConfig,
     resolver: R,
 }
 
-impl<R> TcpConnectorBuilder<R> {
+impl<R> TcpTransportBuilder<R> {
     /// Access the TCP connection configuration
-    pub fn config(&mut self) -> &mut TcpConnectionConfig {
+    pub fn config(&mut self) -> &mut TcpTransportConfig {
         &mut self.config
     }
 
     /// Set the TCP connection configuration
-    pub fn with_config(mut self, config: TcpConnectionConfig) -> Self {
+    pub fn with_config(mut self, config: TcpTransportConfig) -> Self {
         self.config = config;
         self
     }
 }
 
-impl<R> TcpConnectorBuilder<R> {
+impl<R> TcpTransportBuilder<R> {
     /// Set the resolver for the TCP connector
-    pub fn with_resolver<R2>(self, resolver: R2) -> TcpConnectorBuilder<R2> {
-        TcpConnectorBuilder {
+    pub fn with_resolver<R2>(self, resolver: R2) -> TcpTransportBuilder<R2> {
+        TcpTransportBuilder {
             config: self.config,
             resolver,
         }
     }
 
     /// Use the default GAI resolver for the TCP connector
-    pub fn with_gai_resolver(self) -> TcpConnectorBuilder<GaiResolver> {
-        TcpConnectorBuilder {
+    pub fn with_gai_resolver(self) -> TcpTransportBuilder<GaiResolver> {
+        TcpTransportBuilder {
             config: self.config,
             resolver: GaiResolver::new(),
         }
@@ -133,13 +136,13 @@ impl<R> TcpConnectorBuilder<R> {
     }
 }
 
-impl<R> TcpConnectorBuilder<R>
+impl<R> TcpTransportBuilder<R>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {
     /// Build a TCP connector with a resolver
-    pub fn build<IO>(self) -> TcpConnector<R, IO> {
-        TcpConnector {
+    pub fn build<IO>(self) -> TcpTransport<R, IO> {
+        TcpTransport {
             config: Arc::new(self.config),
             resolver: self.resolver,
             stream: PhantomData,
@@ -147,26 +150,26 @@ where
     }
 }
 
-impl TcpConnector {
+impl TcpTransport {
     /// Create a new TCP connector builder with the default configuration.
-    pub fn builder() -> TcpConnectorBuilder<()> {
-        TcpConnectorBuilder {
+    pub fn builder() -> TcpTransportBuilder<()> {
+        TcpTransportBuilder {
             config: Default::default(),
             resolver: (),
         }
     }
 }
 
-impl<R, IO> TcpConnector<R, IO> {
+impl<R, IO> TcpTransport<R, IO> {
     /// Get the configuration for the TCP connector.
-    pub fn config(&self) -> &TcpConnectionConfig {
+    pub fn config(&self) -> &TcpTransportConfig {
         &self.config
     }
 }
 
 type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
-impl<R, IO> tower::Service<Uri> for TcpConnector<R, IO>
+impl<R, IO> tower::Service<Uri> for TcpTransport<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error>
         + Clone
@@ -194,13 +197,13 @@ where
             Err(e) => return Box::pin(std::future::ready(Err(e))),
         };
 
-        let connector = std::mem::replace(self, self.clone());
+        let transport = std::mem::replace(self, self.clone());
 
         let span = tracing::trace_span!("tcp", host = %host, port = %port);
 
         Box::pin(
             async move {
-                let stream = connector.connect(host.clone(), port).await?;
+                let stream = transport.connect(host.clone(), port).await?;
 
                 if let Ok(peer_addr) = stream.peer_addr() {
                     trace!(peer.addr = %peer_addr, "tcp connected");
@@ -223,7 +226,7 @@ where
     }
 }
 
-impl<R, IO> TcpConnector<R, IO>
+impl<R, IO> TcpTransport<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {
@@ -260,12 +263,12 @@ where
 /// regardless of whether they are IPv4 or IPv6.
 pub(crate) struct TcpConnecting<'c> {
     addresses: SocketAddrs,
-    config: &'c TcpConnectionConfig,
+    config: &'c TcpTransportConfig,
 }
 
 impl<'c> TcpConnecting<'c> {
     /// Create a new `TcpConnecting` future.
-    pub(crate) fn new(addresses: SocketAddrs, config: &'c TcpConnectionConfig) -> Self {
+    pub(crate) fn new(addresses: SocketAddrs, config: &'c TcpTransportConfig) -> Self {
         Self { addresses, config }
     }
 
@@ -296,10 +299,10 @@ impl<'c> TcpConnecting<'c> {
 
 /// Represents a single attempt to connect to a remote address.
 ///
-/// This exists to allow us to move the SocketAddr but borrow the TcpConnectionConfig.
+/// This exists to allow us to move the SocketAddr but borrow the TcpTransportConfig.
 struct TcpConnectionAttempt<'c> {
     address: SocketAddr,
-    config: &'c TcpConnectionConfig,
+    config: &'c TcpTransportConfig,
 }
 
 impl<'c> TcpConnectionAttempt<'c> {
@@ -311,7 +314,7 @@ impl<'c> TcpConnectionAttempt<'c> {
 }
 
 impl<'c> TcpConnectionAttempt<'c> {
-    fn new(address: SocketAddr, config: &'c TcpConnectionConfig) -> Self {
+    fn new(address: SocketAddr, config: &'c TcpTransportConfig) -> Self {
         Self { address, config }
     }
 }
@@ -394,7 +397,7 @@ impl fmt::Display for TcpConnectionError {
 
 /// Configuration for TCP connections.
 #[derive(Debug, Clone)]
-pub struct TcpConnectionConfig {
+pub struct TcpTransportConfig {
     /// The timeout for connecting to a remote address.
     pub connect_timeout: Option<Duration>,
 
@@ -423,7 +426,7 @@ pub struct TcpConnectionConfig {
     pub recv_buffer_size: Option<usize>,
 }
 
-impl Default for TcpConnectionConfig {
+impl Default for TcpTransportConfig {
     fn default() -> Self {
         Self {
             connect_timeout: Some(Duration::from_secs(10)),
@@ -477,7 +480,7 @@ fn bind_local_address(
 fn connect(
     addr: &SocketAddr,
     connect_timeout: Option<Duration>,
-    config: &TcpConnectionConfig,
+    config: &TcpTransportConfig,
 ) -> Result<impl Future<Output = Result<TcpStream, TcpConnectionError>>, TcpConnectionError> {
     use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 
@@ -639,9 +642,9 @@ mod test {
 
         let uri: Uri = "/path/".parse().unwrap();
 
-        let config = TcpConnectionConfig::default();
+        let config = TcpTransportConfig::default();
 
-        let transport = TcpConnector::builder()
+        let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(Resolver(0))
             .build::<TcpStream>();
@@ -659,9 +662,9 @@ mod test {
 
         let uri: Uri = format!("http://example.com:{port}").parse().unwrap();
 
-        let config = TcpConnectionConfig::default();
+        let config = TcpTransportConfig::default();
 
-        let transport = TcpConnector::builder()
+        let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(Resolver(port))
             .build::<TcpStream>();
