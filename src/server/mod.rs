@@ -376,24 +376,25 @@ where
                     let mut finished_tx = this.connection.clone();
 
                     tokio::spawn(async move {
-                        let shutdown = pin!(shutdown_rx
+                        let mut shutdown = pin!(shutdown_rx
                             .into_future()
                             .fuse()
                             .instrument(conn.span().clone()));
                         let mut conn = pin!(conn);
-                        tokio::select! {
-                            rv = &mut conn => {
-                                if let Err(error) = rv {
-                                    debug!("connection error: {}", error.into());
-                                }
-                                debug!("connection closed");
-                            },
-                            _ = shutdown => {
-                                debug!("connection received shutdown signal");
-                                conn.inner_pin_mut().graceful_shutdown();
-                                //TODO: "connection should continued to be polled until it is finished"
-                                // conn.await;
-                            },
+                        loop {
+                            tokio::select! {
+                                rv = &mut conn.as_mut() => {
+                                    if let Err(error) = rv {
+                                        debug!("connection error: {}", error.into());
+                                    }
+                                    debug!("connection closed");
+                                    break;
+                                },
+                                _ = &mut shutdown => {
+                                    debug!("connection received shutdown signal");
+                                    conn.as_mut().inner_pin_mut().graceful_shutdown();
+                                },
+                            }
                         }
                         finished_tx.send();
                     });
