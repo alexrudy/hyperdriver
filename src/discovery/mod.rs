@@ -1,4 +1,5 @@
-//! Dynamic support for in-process gRPC services based on tonic.
+//! Support for service discovery in process via
+//! a registry using unix domain sockets.
 
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
@@ -35,7 +36,6 @@ pub use transport::SvcScheme;
 pub use transport::TransportBuilder;
 
 /// Service Registry client which will connect to internal services.
-
 pub type Client<B = crate::body::Body> =
     crate::client::Client<HttpConnectionBuilder, TlsTransport<transport::RegistryTransport>, B>;
 

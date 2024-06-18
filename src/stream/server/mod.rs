@@ -56,7 +56,17 @@ pub trait Accept {
 
 /// Extension trait for Accept
 pub trait AcceptExt: Accept {
-    /// Wrap the acceptor in a future that resolves to a single connection
+    /// Wrap the acceptor in a future that resolves to a single connection.
+    ///
+    /// For example, to accept only a single duplex connection, you can do:
+    /// ```
+    /// # use hyperdriver::stream::server::AcceptExt;
+    /// # use hyperdriver::stream::duplex;
+    /// # async fn demo_accept() {
+    /// let (client, acceptor) = duplex::pair("test".parse().unwrap());
+    ///
+    /// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024, None), acceptor.accept()).unwrap();
+    /// # }
     fn accept(self) -> AcceptOne<Self>
     where
         Self: Sized,
