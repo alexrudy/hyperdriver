@@ -1,7 +1,28 @@
-//! A duplex stream which also supports connection info.
+//! A duplex stream suitable for a hyper transport mechanism.
 //!
-//! This is a wrapper around tokio's `DuplexStream`, while providing
-//! a connection info struct which can be used to identify the connection.
+//! This isn't just a plain-old stream, becasue we need to support
+//! multiple connect/accept pairs to fully support the server.
+//!
+//! Right now, this is done with a `DuplexClient` and `DuplexIncoming` pair,
+//! which produce a new duplex stream for each connection, provided via
+//! the `Connect` and `Accept` traits.
+//!
+//! Using the connect and accept parts manually can be a bit tricky, since
+//! the single process must be polling the accept trait in order for the
+//! connect trait to suceed.
+//!
+//! To use these by hand, you will have to poll the accept and the connect futures
+//! together, like so:
+//! ```
+//! # use hyperdriver::stream::duplex::{self, DuplexClient};
+//! # use hyperdriver::stream::server::AcceptExt;
+//! # async fn demo_duplex() {
+//! let (client, incoming) = duplex::pair("test".parse().unwrap());
+//!
+//! let (client_conn, server_conn) = tokio::try_join!(client.connect(1024, None), incoming.accept()).unwrap();
+//!
+//! # }
+//! ```
 
 use core::fmt;
 use std::{
@@ -53,8 +74,7 @@ impl DuplexStream {
     ///
     /// The stream will be created with a buffer, and the `name` and `protocol` will be used to
     /// create the connection info. Normally, this method is not needed, an you should prefer
-    /// using [`DuplexClient`] and [`DuplexIncoming`] together
-    /// to create a client/server pair of duplex streams.
+    /// using [`DuplexClient`] and [`DuplexIncoming`] together to create a client/server pair of duplex streams.
     pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
         let info = info::ConnectionInfo::duplex(name, protocol, max_buf_size).map(|_| DuplexAddr);
@@ -113,7 +133,7 @@ pub struct DuplexClient {
 }
 
 impl DuplexClient {
-    /// Connect to the other half of this duplex stream.
+    /// Connect to the other half of this duplex setup.
     ///
     /// The `max_buf_size` is the maximum size of the buffer used for the stream.
     pub async fn connect(
@@ -169,7 +189,19 @@ impl DuplexConnectionRequest {
     }
 }
 
-/// Stream of incoming connections
+/// Stream of incoming connections, which implements the `Accept` trait.
+///
+/// This can be treated as a stream:
+/// ```
+/// # use hyperdriver::stream::duplex::{self, DuplexClient};
+/// use futures_util::TryStreamExt;
+/// # async fn demo_duplex() {
+/// let (client, mut incoming) = duplex::pair("test".parse().unwrap());
+///
+/// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024, None), incoming.try_next()).unwrap();
+/// assert!(server_conn.is_some());
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct DuplexIncoming {
     receiver: tokio::sync::mpsc::Receiver<DuplexConnectionRequest>,

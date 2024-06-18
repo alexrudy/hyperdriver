@@ -20,7 +20,7 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::client::conn::Connection;
-use crate::client::conn::TcpConnector;
+use crate::client::conn::TcpTransport;
 use crate::client::conn::TlsTransport;
 use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
@@ -116,7 +116,7 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 /// # Ok(())
 /// # }
 /// ```
-pub struct Client<P = HttpConnectionBuilder, T = TlsTransport<TcpConnector>, B = crate::body::Body>
+pub struct Client<P = HttpConnectionBuilder, T = TlsTransport<TcpTransport>, B = crate::body::Body>
 where
     T: Transport,
     P: Protocol<T::IO>,
@@ -172,7 +172,7 @@ where
     }
 }
 
-impl Client<HttpConnectionBuilder, TlsTransport<TcpConnector>> {
+impl Client<HttpConnectionBuilder, TlsTransport<TcpTransport>> {
     /// A client builder for configuring the client.
     pub fn builder() -> builder::Builder {
         builder::Builder::default()

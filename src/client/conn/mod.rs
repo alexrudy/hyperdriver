@@ -10,7 +10,7 @@
 //! trait, effecitively making them a service which accepts a URI and returns a bidirectional stream.
 //!
 //! Two builtin transports are provided:
-//! - [`TcpConnector`]: Connects to a remote server over TCP/IP. This is the default transport, and what
+//! - [`TcpTransport`]: Connects to a remote server over TCP/IP. This is the default transport, and what
 //!     usually powers HTTP connections.
 //! - [`DuplexTransport`]: Connects to a remote server over a duplex stream, which
 //!     is an in-memory stream that can be used for testing or other purposes.
@@ -46,5 +46,5 @@ pub use self::transport::stream::{IntoStream, TransportExt};
 pub use self::transport::tls::TlsTransportWrapper;
 pub use self::transport::{TlsTransport, TransportTlsExt};
 
-pub use self::transport::tcp::{TcpConnectionConfig, TcpConnector};
+pub use self::transport::tcp::{TcpTransport, TcpTransportConfig};
 pub use self::transport::{Transport, TransportStream};

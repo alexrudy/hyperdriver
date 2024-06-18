@@ -136,6 +136,11 @@ path = "tests/server/custombody.rs"
 required-features = ["server"]
 
 [[test]]
+name = "graceful-shutdown"
+path = "tests/server/graceful.rs"
+required-features = ["server"]
+
+[[test]]
 name = "httpbin"
 path = "tests/httpbin.rs"
 required-features = ["client", "tls"]
