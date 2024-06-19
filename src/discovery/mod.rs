@@ -46,10 +46,6 @@ pub enum ConnectionError {
     #[error("Invalid name: {0}")]
     InvalidName(String),
 
-    /// The service is not available. It may have been previously closed.
-    #[error("Service {0} is not available")]
-    ServiceClosed(String),
-
     /// Connection to the service timed out.
     #[error("Connection to {0} timed out")]
     ConnectionTimeout(String, #[source] tokio::time::error::Elapsed),
@@ -58,9 +54,27 @@ pub enum ConnectionError {
     #[error("Invalid URI: {0}")]
     InvalidUri(Uri),
 
+    /// An IO error occured while handshaking with the service.
+    #[error("Handshake with {name}")]
+    Handshake {
+        /// Internal error.
+        #[source]
+        error: io::Error,
+
+        /// Service name.
+        name: String,
+    },
+
     /// An IO error occured while connecting to the service.
-    #[error(transparent)]
-    Io(#[from] io::Error),
+    #[error("Connecting to {name}")]
+    Io {
+        /// Internal IO error.
+        #[source]
+        error: io::Error,
+
+        /// Service name.
+        name: String,
+    },
 }
 
 /// Internal error when something goes wrong during Bind.
@@ -544,7 +558,10 @@ async fn connect_to_handle(
     }
     .map_err(|err| {
         tracing::warn!("failed to complete connection: {}", err);
-        ConnectionError::ServiceClosed(name.into_owned())
+        ConnectionError::Io {
+            name: name.into_owned(),
+            error: err,
+        }
     })?;
 
     Ok(stream)
