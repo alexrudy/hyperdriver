@@ -65,12 +65,26 @@ pub enum ConnectionError {
         name: String,
     },
 
+    /// Error connecting to a duplex socket
+    #[error("Connecting to {name} over a duplex socket")]
+    Duplex {
+        /// Internal error.
+        #[source]
+        error: io::Error,
+
+        /// Service name.
+        name: String,
+    },
+
     /// An IO error occured while connecting to the service.
-    #[error("Connecting to {name}")]
-    Io {
+    #[error("Connecting to {name} at {path}")]
+    Unix {
         /// Internal IO error.
         #[source]
         error: io::Error,
+
+        /// Path to unix socket.
+        path: Utf8PathBuf,
 
         /// Service name.
         name: String,
@@ -449,14 +463,25 @@ impl ServiceHandle {
     async fn connect(
         &self,
         config: &RegistryConfig,
-    ) -> Result<crate::stream::client::Stream, io::Error> {
+        name: Cow<'_, str>,
+    ) -> Result<crate::stream::client::Stream, ConnectionError> {
         match self {
-            ServiceHandle::Duplex { connector, .. } => {
-                Ok(connector.connect(config.buffer_size, None).await?.into())
-            }
+            ServiceHandle::Duplex { connector, .. } => Ok(connector
+                .connect(config.buffer_size, None)
+                .await
+                .map(|stream| stream.into())
+                .map_err(|error| ConnectionError::Duplex {
+                    error,
+                    name: name.into_owned(),
+                }))?,
             ServiceHandle::Unix { path, .. } => tokio::net::UnixStream::connect(path)
                 .await
-                .map(|stream| stream.into()),
+                .map(|stream| stream.into())
+                .map_err(|error| ConnectionError::Unix {
+                    error,
+                    path: path.into(),
+                    name: name.into_owned(),
+                }),
         }
     }
 
@@ -517,7 +542,7 @@ async fn connect_to_handle(
     handle: &ServiceHandle,
     name: Cow<'_, str>,
 ) -> Result<ClientStream, ConnectionError> {
-    let request = handle.connect(config);
+    let request = handle.connect(config, name.clone());
 
     let stream = if let Some(timeout) = &config.connect_timeout {
         tracing::trace!("Waiting for connection to {name} with timeout");
@@ -558,10 +583,7 @@ async fn connect_to_handle(
     }
     .map_err(|err| {
         tracing::warn!("failed to complete connection: {}", err);
-        ConnectionError::Io {
-            name: name.into_owned(),
-            error: err,
-        }
+        err
     })?;
 
     Ok(stream)
