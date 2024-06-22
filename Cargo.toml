@@ -51,11 +51,12 @@ features = ["make", "util"]
 default-features = false
 
 [dev-dependencies]
-static-assertions = { version = "1", package = "static_assertions" }
-tracing-subscriber = "0.3"
-tempfile = "3"
 clap = { version = "4.5.7" }
+color-eyre = "0.6"
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+static-assertions = { version = "1", package = "static_assertions" }
+tempfile = "3"
+tracing-subscriber = "0.3"
 webpki-roots.version = "0.26"
 
 [features]
