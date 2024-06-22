@@ -2,27 +2,29 @@
 //!
 //! This middleware applies to the request stack, but recieves the connection info from the acceptor stack.
 
-use std::{
-    convert::Infallible,
-    fmt,
-    future::{ready, Ready},
-    task::Poll,
-};
+use std::{fmt, task::Poll};
 
 use futures_core::future::BoxFuture;
 use hyper::{Request, Response};
 use tower::{Layer, Service};
 use tracing::Instrument;
 
-use crate::info::HasConnectionInfo;
-
-use super::acceptor::TlsStream;
+use crate::{service::ServiceRef, stream::tls::TlsHandshakeInfo};
 
 /// A middleware which adds TLS connection information to the request extensions.
 #[derive(Debug, Clone, Default)]
-pub struct TlsConnectLayer;
+pub struct TlsConnectionInfoLayer {
+    _priv: (),
+}
 
-impl<S> Layer<S> for TlsConnectLayer {
+impl TlsConnectionInfoLayer {
+    /// Create a new `TlsConnectionInfoLayer`.
+    pub fn new() -> Self {
+        Self { _priv: () }
+    }
+}
+
+impl<S> Layer<S> for TlsConnectionInfoLayer {
     type Service = TlsConnectionInfoService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
@@ -43,16 +45,16 @@ impl<S> TlsConnectionInfoService<S> {
     }
 }
 
-impl<S, IO> Service<&TlsStream<IO>> for TlsConnectionInfoService<S>
+impl<S, IO> Service<&IO> for TlsConnectionInfoService<S>
 where
-    S: Clone + Send + 'static,
-    IO: HasConnectionInfo,
+    S: ServiceRef<IO> + Clone + Send + 'static,
+    IO: TlsHandshakeInfo,
 {
-    type Response = TlsConnection<S>;
+    type Response = TlsConnection<S::Response>;
 
-    type Error = Infallible;
+    type Error = S::Error;
 
-    type Future = Ready<Result<Self::Response, Self::Error>>;
+    type Future = future::TlsConnectionFuture<S, IO>;
 
     fn poll_ready(
         &mut self,
@@ -61,10 +63,69 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, stream: &TlsStream<IO>) -> Self::Future {
-        let inner = self.inner.clone();
-        let rx = stream.rx.clone();
-        ready(Ok(TlsConnection { inner, rx }))
+    fn call(&mut self, stream: &IO) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let rx = stream.recv();
+        future::TlsConnectionFuture::new(inner.call(stream), rx)
+    }
+}
+
+mod future {
+    use std::{future::Future, task::Poll};
+
+    use pin_project::pin_project;
+
+    use crate::info::tls::TlsConnectionInfoReciever;
+    use crate::service::ServiceRef;
+
+    use super::TlsConnection;
+
+    #[pin_project]
+    #[derive(Debug)]
+    pub struct TlsConnectionFuture<S, IO>
+    where
+        S: ServiceRef<IO>,
+    {
+        #[pin]
+        inner: S::Future,
+
+        _io: std::marker::PhantomData<fn(&IO) -> ()>,
+
+        rx: TlsConnectionInfoReciever,
+    }
+
+    impl<S, IO> TlsConnectionFuture<S, IO>
+    where
+        S: ServiceRef<IO>,
+    {
+        pub(super) fn new(inner: S::Future, rx: TlsConnectionInfoReciever) -> Self {
+            Self {
+                inner,
+                rx,
+                _io: std::marker::PhantomData,
+            }
+        }
+    }
+
+    impl<S, IO> Future for TlsConnectionFuture<S, IO>
+    where
+        S: ServiceRef<IO>,
+    {
+        type Output = Result<TlsConnection<S::Response>, S::Error>;
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> Poll<Self::Output> {
+            let this = self.project();
+            match this.inner.poll(cx) {
+                Poll::Ready(Ok(res)) => Poll::Ready(Ok(TlsConnection {
+                    inner: res,
+                    rx: this.rx.clone(),
+                })),
+                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+                Poll::Pending => Poll::Pending,
+            }
+        }
     }
 }
 
@@ -96,7 +157,6 @@ where
         let mut inner = std::mem::replace(&mut self.inner, inner);
 
         let span = tracing::info_span!("TLS");
-        crate::polled_span(&span);
 
         let fut = async move {
             async {

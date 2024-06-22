@@ -7,12 +7,16 @@ pub mod client;
 pub mod server;
 
 use std::{
+    future::poll_fn,
     io,
+    pin::Pin,
     task::{Context, Poll},
 };
 
+use crate::info::tls::TlsConnectionInfoReciever;
 pub use crate::info::TlsConnectionInfo;
 use futures_core::Future;
+use futures_util::FutureExt;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -20,6 +24,20 @@ use tokio::io::{AsyncRead, AsyncWrite};
 pub trait TlsHandshakeStream: AsyncRead + AsyncWrite {
     /// Poll the handshake to completion.
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>>;
+
+    /// Finish the TLS handshake.
+    ///
+    /// This method will drive the connection asynchronosly allowing you to wait
+    /// for the TLS handshake to complete. If this method is not called, the TLS handshake
+    /// will be completed the first time the connection is used.
+    fn finish_handshake(&mut self) -> Pin<Box<dyn Future<Output = Result<(), io::Error>> + '_>> {
+        poll_fn(|cx| self.poll_handshake(cx)).boxed_local()
+    }
+}
+
+/// A stream which can provide information about the TLS handshake.
+pub(crate) trait TlsHandshakeInfo: TlsHandshakeStream {
+    fn recv(&self) -> TlsConnectionInfoReciever;
 }
 
 /// Dispatching wrapper for optionally supporting TLS
@@ -45,6 +63,19 @@ where
         match self {
             TlsBraid::NoTls(_) => Poll::Ready(Ok(())),
             TlsBraid::Tls(ref mut stream) => stream.poll_handshake(cx),
+        }
+    }
+}
+
+impl<Tls, NoTls> TlsHandshakeInfo for TlsBraid<Tls, NoTls>
+where
+    Tls: TlsHandshakeInfo + Unpin,
+    NoTls: AsyncRead + AsyncWrite + Unpin,
+{
+    fn recv(&self) -> TlsConnectionInfoReciever {
+        match self {
+            TlsBraid::NoTls(_) => TlsConnectionInfoReciever::empty(),
+            TlsBraid::Tls(stream) => stream.recv(),
         }
     }
 }

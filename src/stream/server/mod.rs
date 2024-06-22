@@ -27,14 +27,15 @@ use crate::stream::TlsBraid;
 
 #[cfg(feature = "tls")]
 use crate::stream::tls::server::TlsStream;
+#[cfg(feature = "tls")]
+use crate::stream::tls::TlsHandshakeInfo;
+#[cfg(feature = "tls")]
+use crate::stream::tls::TlsHandshakeStream;
 
 mod acceptor;
 mod connector;
 
 pub use acceptor::Acceptor;
-
-#[cfg(feature = "tls")]
-use super::tls::TlsHandshakeStream;
 pub use connector::{Connection, MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService};
 
 /// An async generator of new connections
@@ -168,16 +169,6 @@ where
 }
 
 #[cfg(feature = "tls")]
-impl<IO> Stream<IO>
-where
-    IO: HasConnectionInfo,
-{
-    pub(crate) fn rx(&self) -> &TlsConnectionInfoReciever {
-        &self.tls
-    }
-}
-
-#[cfg(feature = "tls")]
 impl<IO> TlsHandshakeStream for Stream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
@@ -188,6 +179,17 @@ where
             TlsBraid::Tls(stream) => stream.poll_handshake(cx),
             TlsBraid::NoTls(_) => Poll::Ready(Ok(())),
         }
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<IO> TlsHandshakeInfo for Stream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO::Addr: Unpin,
+{
+    fn recv(&self) -> TlsConnectionInfoReciever {
+        self.inner.recv()
     }
 }
 
