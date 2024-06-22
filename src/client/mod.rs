@@ -32,6 +32,7 @@ mod builder;
 
 pub mod conn;
 pub mod pool;
+pub mod stream;
 
 pub use builder::Builder;
 

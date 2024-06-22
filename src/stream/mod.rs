@@ -5,8 +5,6 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
-#[cfg(feature = "client")]
-pub mod client;
 #[cfg(feature = "stream")]
 mod core;
 pub mod duplex;

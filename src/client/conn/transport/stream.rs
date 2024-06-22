@@ -4,9 +4,9 @@ use tokio::io::AsyncWrite;
 
 use tower::Service;
 
+use crate::client::stream::Stream;
 use crate::info::BraidAddr;
 use crate::info::HasConnectionInfo;
-use crate::stream::client::Stream;
 
 use super::Transport;
 use super::TransportStream;
@@ -66,8 +66,8 @@ mod fut {
     use pin_project::pin_project;
 
     use crate::client::conn::{Transport, TransportStream};
+    use crate::client::stream::Stream;
     use crate::info::{BraidAddr, HasConnectionInfo};
-    use crate::stream::client::Stream;
 
     /// Future returned by `IntoStream` transports.
     #[pin_project]

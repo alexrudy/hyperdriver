@@ -16,13 +16,13 @@ use tower::Service;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 use crate::client::pool::PoolableTransport;
+use crate::client::stream::Stream;
 #[cfg(feature = "tls")]
 use crate::info::tls::HasTlsConnectionInfo;
 use crate::info::ConnectionInfo;
 use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
 use crate::info::TlsConnectionInfo;
-use crate::stream::client::Stream;
 #[cfg(all(feature = "tls", feature = "stream"))]
 use crate::stream::tls::TlsHandshakeStream as _;
 
@@ -178,7 +178,7 @@ where
 
 #[cfg(feature = "stream")]
 impl TransportStream<Stream> {
-    /// Create a new transport from a `crate::stream::client::Stream`.
+    /// Create a new transport from a `crate::client::stream::Stream`.
     #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
     pub async fn new_stream(mut stream: Stream) -> io::Result<Self> {
         #[cfg(feature = "tls")]

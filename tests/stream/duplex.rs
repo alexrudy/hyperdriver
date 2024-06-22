@@ -15,7 +15,7 @@ async fn braided_duplex() {
         }
     });
 
-    let mut conn = hyperdriver::stream::client::Stream::from(
+    let mut conn = hyperdriver::client::stream::Stream::from(
         client
             .connect(
                 1024,

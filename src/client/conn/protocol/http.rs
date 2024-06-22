@@ -408,8 +408,8 @@ mod tests {
 
     use super::*;
 
+    use crate::client::stream::Stream;
     use crate::client::{Error, Protocol};
-    use crate::stream::client::Stream;
     use crate::stream::tls::TlsHandshakeStream as _;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};

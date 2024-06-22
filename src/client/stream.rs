@@ -18,7 +18,7 @@ use tokio::net::{TcpStream, UnixStream};
 #[cfg(feature = "tls")]
 use crate::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
-use crate::stream::core::Braid;
+use crate::stream::Braid;
 
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
@@ -28,9 +28,9 @@ use crate::info::HasConnectionInfo;
 use crate::stream::duplex::DuplexStream;
 
 #[cfg(feature = "tls")]
-use super::tls::TlsHandshakeStream;
-#[cfg(feature = "tls")]
 use crate::stream::tls::client::ClientTlsStream;
+#[cfg(feature = "tls")]
+use crate::stream::tls::TlsHandshakeStream;
 
 #[cfg(feature = "stream")]
 /// A stream which can handle multiple different underlying transports, and TLS

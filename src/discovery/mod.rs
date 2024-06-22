@@ -15,11 +15,11 @@ use crate::bridge::rt::TokioExecutor;
 use crate::client::conn::TlsTransport;
 use crate::client::conn::TransportTlsExt;
 #[cfg(feature = "client")]
+use crate::client::stream::Stream as ClientStream;
+#[cfg(feature = "client")]
 use crate::client::HttpConnectionBuilder;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
-#[cfg(feature = "client")]
-use crate::stream::client::Stream as ClientStream;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::mapref::one::{Ref, RefMut};
@@ -464,7 +464,7 @@ impl ServiceHandle {
         &self,
         config: &RegistryConfig,
         name: Cow<'_, str>,
-    ) -> Result<crate::stream::client::Stream, ConnectionError> {
+    ) -> Result<crate::client::stream::Stream, ConnectionError> {
         match self {
             ServiceHandle::Duplex { connector, .. } => Ok(connector
                 .connect(config.buffer_size, None)
