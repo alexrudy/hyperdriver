@@ -3,12 +3,6 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
-#[cfg(feature = "tls")]
-use std::future::poll_fn;
-
-#[cfg(feature = "tls")]
-use std::io;
-
 #[cfg(feature = "stream")]
 use std::net::SocketAddr;
 
@@ -34,10 +28,9 @@ use crate::info::HasConnectionInfo;
 use crate::stream::duplex::DuplexStream;
 
 #[cfg(feature = "tls")]
-use crate::stream::tls::client::ClientTlsStream;
-
+use super::tls::TlsHandshakeStream;
 #[cfg(feature = "tls")]
-use crate::stream::tls::TlsHandshakeStream as _;
+use crate::stream::tls::client::ClientTlsStream;
 
 #[cfg(feature = "stream")]
 /// A stream which can handle multiple different underlying transports, and TLS
@@ -152,26 +145,13 @@ where
 }
 
 #[cfg(feature = "tls")]
-impl<IO> Stream<IO>
+impl<IO> TlsHandshakeStream for Stream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    IO::Addr: Unpin + Clone,
+    IO::Addr: Send + Unpin + Clone,
 {
-    /// Finish the TLS handshake.
-    ///
-    /// This is a no-op if TLS is not enabled. When TLS is enabled, this method
-    /// will drive the connection asynchronosly allowing you to wait for the TLS
-    /// handshake to complete. If this method is not called, the TLS handshake
-    /// will be completed the first time the connection is used.
-    pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        poll_fn(|cx| self.poll_handshake(cx)).await
-    }
-
     #[inline]
-    pub(crate) fn poll_handshake(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
+    fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         self.inner.poll_handshake(cx)
     }
 }

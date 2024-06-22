@@ -22,7 +22,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 /// A stream that supports a TLS handshake.
-pub trait TlsHandshakeStream: AsyncRead + AsyncWrite {
+pub trait TlsHandshakeStream: AsyncRead + AsyncWrite + Send {
     /// Poll the handshake to completion.
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>>;
 
@@ -31,8 +31,10 @@ pub trait TlsHandshakeStream: AsyncRead + AsyncWrite {
     /// This method will drive the connection asynchronosly allowing you to wait
     /// for the TLS handshake to complete. If this method is not called, the TLS handshake
     /// will be completed the first time the connection is used.
-    fn finish_handshake(&mut self) -> Pin<Box<dyn Future<Output = Result<(), io::Error>> + '_>> {
-        poll_fn(|cx| self.poll_handshake(cx)).boxed_local()
+    fn finish_handshake(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), io::Error>> + Send + '_>> {
+        poll_fn(|cx| self.poll_handshake(cx)).boxed()
     }
 }
 
@@ -56,7 +58,7 @@ pub enum TlsBraid<Tls, NoTls> {
 impl<Tls, NoTls> TlsHandshakeStream for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeStream + Unpin,
-    NoTls: AsyncRead + AsyncWrite + Unpin,
+    NoTls: AsyncRead + AsyncWrite + Send + Unpin,
 {
     fn poll_handshake(
         &mut self,
@@ -73,7 +75,7 @@ where
 impl<Tls, NoTls> TlsHandshakeInfo for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeInfo + Unpin,
-    NoTls: AsyncRead + AsyncWrite + Unpin,
+    NoTls: AsyncRead + AsyncWrite + Send + Unpin,
 {
     fn recv(&self) -> TlsConnectionInfoReciever {
         match self {

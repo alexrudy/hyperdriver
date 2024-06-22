@@ -35,8 +35,23 @@ use crate::service::ServiceRef;
 /// # }
 ///
 ///
-#[derive(Debug, Clone, Default)]
-pub struct MakeServiceConnectionInfoLayer;
+#[derive(Clone, Default)]
+pub struct MakeServiceConnectionInfoLayer {
+    _priv: (),
+}
+
+impl MakeServiceConnectionInfoLayer {
+    /// Create a new `MakeServiceConnectionInfoLayer`.
+    pub fn new() -> Self {
+        Self { _priv: () }
+    }
+}
+
+impl fmt::Debug for MakeServiceConnectionInfoLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MakeServiceConnectionInfoLayer").finish()
+    }
+}
 
 impl<S> Layer<S> for MakeServiceConnectionInfoLayer {
     type Service = MakeServiceConnectionInfoService<S>;
@@ -210,7 +225,7 @@ mod tests {
         });
 
         let mut make_service = ServiceBuilder::new()
-            .layer(MakeServiceConnectionInfoLayer)
+            .layer(MakeServiceConnectionInfoLayer::new())
             .service(Shared::new(service));
 
         let (client, incoming) = crate::stream::duplex::pair("test".parse().unwrap());

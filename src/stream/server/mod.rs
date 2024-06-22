@@ -171,8 +171,8 @@ where
 #[cfg(feature = "tls")]
 impl<IO> TlsHandshakeStream for Stream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
-    IO::Addr: Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
+    IO::Addr: Send + Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match &mut self.inner {
@@ -185,8 +185,8 @@ where
 #[cfg(feature = "tls")]
 impl<IO> TlsHandshakeInfo for Stream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
-    IO::Addr: Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
+    IO::Addr: Send + Unpin,
 {
     fn recv(&self) -> TlsConnectionInfoReciever {
         self.inner.recv()

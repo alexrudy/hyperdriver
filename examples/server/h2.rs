@@ -1,17 +1,20 @@
 use std::convert::Infallible;
-use std::future::IntoFuture as _;
 use std::net::{SocketAddr, SocketAddrV4};
-use std::pin::pin;
 use std::sync::Arc;
 
 use hyper::server::conn::http2;
 use hyperdriver::bridge::rt::TokioExecutor;
+use hyperdriver::stream::server::MakeServiceConnectionInfoLayer;
+use hyperdriver::stream::tls::server::TlsConnectionInfoLayer;
+use tower::make::Shared;
+use tower::Layer;
+use tracing_subscriber::EnvFilter;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
-    let cert_data = std::fs::read(format!("minica/{domain}/cert.pem")).unwrap();
+    let cert_data = std::fs::read(format!("examples/server/minica/{domain}/cert.pem")).unwrap();
     let (_, cert) = pem_rfc7468::decode_vec(&cert_data).unwrap();
 
-    let key_data = std::fs::read(format!("minica/{domain}/key.pem")).unwrap();
+    let key_data = std::fs::read(format!("examples/server/minica/{domain}/key.pem")).unwrap();
     let (label, key) = pem_rfc7468::decode_vec(&key_data).unwrap();
 
     let cert = rustls::pki_types::CertificateDer::from(cert);
@@ -32,7 +35,9 @@ fn tls_config(domain: &str) -> rustls::ServerConfig {
 async fn main() {
     use http_body_util::BodyExt;
 
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     let addr = SocketAddr::V4(SocketAddrV4::new([127, 0, 0, 1].into(), 0));
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
@@ -41,33 +46,29 @@ async fn main() {
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming)
         .with_tls(Arc::new(tls_config("localhost")));
 
+    let svc = tower::service_fn(|req: hyperdriver::body::Request| async {
+        let body = req.into_body();
+        let data = body.collect().await.unwrap();
+        Ok::<_, Infallible>(hyperdriver::body::Response::new(
+            hyperdriver::body::Body::from(data.to_bytes()),
+        ))
+    });
+
     let server = hyperdriver::server::Server::new(
         acceptor,
-        hyperdriver::service::make_service_fn(|_| async {
-            Ok::<_, Infallible>(tower::service_fn(|req: hyperdriver::body::Request| async {
-                let body = req.into_body();
-                let data = body.collect().await.unwrap();
-                Ok::<_, Infallible>(hyperdriver::body::Response::new(
-                    hyperdriver::body::Body::from(data.to_bytes()),
-                ))
-            }))
-        }),
+        TlsConnectionInfoLayer::new()
+            .layer(MakeServiceConnectionInfoLayer::new().layer(Shared::new(svc))),
     )
     .with_protocol(http2::Builder::new(TokioExecutor::new()));
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     let handle = tokio::spawn(async move {
-        let mut server = pin!(server.into_future());
-
-        tokio::select! {
-            rv = &mut server => {
-                rv
-            },
-            _ = rx => {
-                Ok(())
-            },
-        }
+        server
+            .with_graceful_shutdown(async move {
+                let _ = rx.await;
+            })
+            .await
     });
     println!("Server listening on {}", addr);
 

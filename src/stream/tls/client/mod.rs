@@ -74,8 +74,8 @@ where
 
 impl<IO> TlsHandshakeStream for ClientTlsStream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
-    IO::Addr: Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
+    IO::Addr: Send + Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         self.handshake(cx, |_, _| Poll::Ready(Ok(())))

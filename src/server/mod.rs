@@ -243,7 +243,7 @@ where
                 Poll::Ready(Ok(Some(conn))) => {
                     tokio::spawn(async move {
                         if let Err(error) = conn.await {
-                            debug!("connection error: {}", error.into());
+                            debug!("connection error: {:?}", error.into());
                         }
                     });
                 }
@@ -397,6 +397,7 @@ where
                             }
                         }
                         finished_tx.send();
+                        tracing::trace!("finished serving connection");
                     });
                 }
                 Poll::Ready(Ok(None)) => {}

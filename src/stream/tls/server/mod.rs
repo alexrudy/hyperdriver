@@ -51,7 +51,7 @@ where
 
 impl<IO> TlsHandshakeStream for TlsStream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
     IO::Addr: Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
@@ -61,7 +61,7 @@ where
 
 impl<IO> TlsHandshakeInfo for TlsStream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
     IO::Addr: Unpin,
 {
     fn recv(&self) -> TlsConnectionInfoReciever {

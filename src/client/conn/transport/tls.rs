@@ -47,7 +47,7 @@ impl<T> tower::Service<Uri> for TlsTransportWrapper<T>
 where
     T: Transport,
     <T as Transport>::IO: HasConnectionInfo + Unpin,
-    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
     type Response = TransportStream<ClientStream<T::IO>>;
     type Error = TlsConnectionError<T::Error>;
@@ -80,6 +80,7 @@ pub(in crate::client::conn::transport) mod future {
     use pin_project::pin_project;
 
     use crate::info::tls::HasTlsConnectionInfo;
+    use crate::stream::tls::TlsHandshakeStream as _;
 
     use super::super::Transport;
     use super::*;
@@ -147,7 +148,7 @@ pub(in crate::client::conn::transport) mod future {
     where
         T: Transport,
         <T as Transport>::IO: HasConnectionInfo + Unpin,
-        <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Unpin,
+        <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
         type Output = Result<TransportStream<ClientStream<T::IO>>, TlsConnectionError<T::Error>>;
 
@@ -215,7 +216,10 @@ mod tests {
 
     use crate::{
         fixtures,
-        stream::{server::AcceptExt, tls::TlsHandshakeExt},
+        stream::{
+            server::AcceptExt,
+            tls::{TlsHandshakeExt, TlsHandshakeStream as _},
+        },
     };
 
     #[tokio::test]
