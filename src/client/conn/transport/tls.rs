@@ -163,10 +163,12 @@ pub(in crate::client::conn::transport) mod future {
                         Poll::Ready(Ok(stream)) => {
                             let stream = stream.into_inner();
                             let stream = ClientStream::new(stream).tls(domain, config.clone());
+                            tracing::trace!("Transport connected. TLS handshake starting");
                             this.state.set(State::Handshake { stream });
                         }
                         Poll::Ready(Err(e)) => {
-                            return Poll::Ready(Err(TlsConnectionError::Connection(e)))
+                            tracing::trace!(?e, "Transport connection error");
+                            return Poll::Ready(Err(TlsConnectionError::Connection(e)));
                         }
                         Poll::Pending => return Poll::Pending,
                     },
@@ -181,10 +183,12 @@ pub(in crate::client::conn::transport) mod future {
                             let info = stream.info();
                             let tls = stream.tls_info().cloned();
 
+                            tracing::trace!(?info, "TLS handshake complete");
                             return Poll::Ready(Ok(TransportStream { stream, info, tls }));
                         }
                         Poll::Ready(Err(e)) => {
-                            return Poll::Ready(Err(TlsConnectionError::Handshake(e)))
+                            tracing::trace!(?e, "Transport handshake error");
+                            return Poll::Ready(Err(TlsConnectionError::Handshake(e)));
                         }
                         Poll::Pending => return Poll::Pending,
                     },
