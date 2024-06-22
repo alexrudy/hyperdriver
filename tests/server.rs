@@ -7,11 +7,11 @@ use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
+use hyperdriver::client::conn::protocol::HttpProtocol;
 use hyperdriver::client::conn::Connection as _;
-use hyperdriver::client::HttpProtocol;
+use hyperdriver::client::conn::Stream;
+use hyperdriver::server::conn::Accept;
 use hyperdriver::service::MakeServiceRef;
-use hyperdriver::stream::client::Stream;
-use hyperdriver::stream::server::Accept;
 
 use hyperdriver::server::{Protocol, Server};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -26,14 +26,15 @@ async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Resp
     )))
 }
 
-async fn connection<P: hyperdriver::client::Protocol<Stream>>(
+async fn connection<P: hyperdriver::client::conn::Protocol<Stream>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
     let stream = client.connect(1024, None).await?;
     let conn = protocol
         .connect(
-            hyperdriver::client::TransportStream::new_stream(stream.into()).await?,
+            hyperdriver::client::conn::transport::TransportStream::new_stream(stream.into())
+                .await?,
             HttpProtocol::Http1,
         )
         .await?;
@@ -110,7 +111,7 @@ async fn echo_h1() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         hyperdriver::service::make_service_fn(|_| async {
@@ -142,7 +143,7 @@ async fn echo_h2() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         hyperdriver::service::make_service_fn(|_| async {
@@ -173,7 +174,7 @@ async fn echo_h1_early_disconnect() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         hyperdriver::service::make_service_fn(|_| async {
@@ -205,7 +206,7 @@ async fn echo_auto_h1() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         hyperdriver::service::make_service_fn(|_| async {
@@ -237,7 +238,7 @@ async fn echo_auto_h2() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::new(incoming);
+    let acceptor = hyperdriver::server::conn::Acceptor::new(incoming);
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         hyperdriver::service::make_service_fn(|_| async {

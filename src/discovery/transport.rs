@@ -10,8 +10,8 @@ use hyper::Uri;
 
 use super::ConnectionError;
 use super::ServiceRegistry;
-use crate::client::TransportStream;
-use crate::stream::client::Stream as ClientStream;
+use crate::client::conn::Stream as ClientStream;
+use crate::client::conn::TransportStream;
 
 pub use builder::TransportBuilder;
 

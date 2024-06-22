@@ -10,7 +10,7 @@ use rustls::ServerConfig;
 
 use crate::info::HasConnectionInfo;
 
-use crate::stream::server::Accept;
+use crate::server::conn::Accept;
 /// TLS Acceptor which uses a [rustls::ServerConfig] to accept connections
 /// and start a TLS handshake.
 ///

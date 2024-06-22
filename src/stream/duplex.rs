@@ -15,7 +15,7 @@
 //! together, like so:
 //! ```
 //! # use hyperdriver::stream::duplex::{self, DuplexClient};
-//! # use hyperdriver::stream::server::AcceptExt;
+//! # use hyperdriver::server::conn::AcceptExt;
 //! # async fn demo_duplex() {
 //! let (client, incoming) = duplex::pair("test".parse().unwrap());
 //!
@@ -38,7 +38,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::info::{self, HasConnectionInfo, Protocol};
 
 #[cfg(all(feature = "server", feature = "stream"))]
-use crate::stream::server::Accept;
+use crate::server::conn::Accept;
 
 /// Address (blank) for a duplex stream
 #[derive(Default, Clone, PartialEq, Eq, Hash)]

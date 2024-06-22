@@ -1,9 +1,5 @@
 //! A server framework to interoperate with hyper-v1, tokio, braid and arnold
 
-#![warn(missing_docs)]
-#![warn(missing_debug_implementations)]
-#![deny(unsafe_code)]
-
 use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::pin::{pin, Pin};
@@ -14,9 +10,9 @@ use std::{fmt, io};
 pub use self::conn::auto::Builder as AutoBuilder;
 use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
+pub use crate::server::conn::Accept;
+use crate::server::conn::Acceptor;
 use crate::service::MakeServiceRef;
-pub use crate::stream::server::Accept;
-use crate::stream::server::Acceptor;
 use futures_util::future::FutureExt as _;
 use http_body::Body;
 use tower::make::Shared;

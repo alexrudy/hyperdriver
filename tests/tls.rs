@@ -5,10 +5,10 @@ use http::Response;
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::client::conn::TransportTlsExt;
+use hyperdriver::client::conn::transport::TransportExt as _;
+use hyperdriver::server::conn::Accept;
 use hyperdriver::service::make_service_fn;
 use hyperdriver::service::MakeServiceRef;
-use hyperdriver::stream::server::Accept;
 use rustls::ServerConfig;
 
 use hyperdriver::server::{Protocol, Server};
@@ -84,7 +84,7 @@ where
 #[tokio::test]
 async fn tls_echo_h1() {
     use hyper::client::conn::http1::Builder;
-    use hyperdriver::client::conn::DuplexTransport;
+    use hyperdriver::client::conn::transport::duplex::DuplexTransport;
     use hyperdriver::Client;
 
     let _ = tracing_subscriber::fmt::try_init();
@@ -92,7 +92,7 @@ async fn tls_echo_h1() {
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
     let acceptor =
-        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(tls_config().into());
+        hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
 
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
@@ -135,7 +135,7 @@ async fn tls_echo_h1() {
 #[tokio::test]
 async fn tls_echo_h2() {
     use hyper::client::conn::http2::Builder;
-    use hyperdriver::client::conn::DuplexTransport;
+    use hyperdriver::client::conn::transport::duplex::DuplexTransport;
     use hyperdriver::Client;
 
     let _ = tracing_subscriber::fmt::try_init();
@@ -143,7 +143,7 @@ async fn tls_echo_h2() {
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
     let acceptor =
-        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(tls_config().into());
+        hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         make_service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),

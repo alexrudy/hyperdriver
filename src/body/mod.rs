@@ -6,8 +6,6 @@
 For reading incoming requests, defer to [hyper::body::Incoming].
 "#
 )]
-#![deny(missing_docs)]
-#![deny(unsafe_code)]
 
 use std::fmt;
 use std::pin::pin;

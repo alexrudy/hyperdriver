@@ -18,7 +18,7 @@ use crate::service::ServiceRef;
 /// # use http::{Request, Response};
 /// # use hyperdriver::Body;
 /// # use hyperdriver::info::ConnectionInfo;
-/// # use hyperdriver::stream::server::MakeServiceConnectionInfoLayer;
+/// # use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
 /// # use tower::Layer;
 /// use hyperdriver::service::{make_service_fn, service_fn};
 /// use tower::make::Shared;
@@ -209,7 +209,7 @@ mod tests {
 
     use tower::{make::Shared, ServiceBuilder};
 
-    use crate::{info::DuplexAddr, stream::server::AcceptExt as _};
+    use crate::{info::DuplexAddr, server::conn::AcceptExt as _};
 
     use super::*;
 

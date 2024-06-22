@@ -6,10 +6,9 @@ use std::task::Poll;
 use futures_util::task::noop_waker;
 use hyperdriver::body::Request;
 use hyperdriver::body::Response;
+use hyperdriver::server::conn::Acceptor;
 use hyperdriver::service::make_service_fn;
 use hyperdriver::stream::duplex::{self, DuplexClient};
-use hyperdriver::stream::server;
-use hyperdriver::stream::server::Acceptor;
 use hyperdriver::Server;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -31,7 +30,7 @@ async fn echo(req: Request) -> Result<Response, BoxError> {
 
 async fn pair() -> (Acceptor, DuplexClient) {
     let (client, incoming) = duplex::pair("test".parse().unwrap());
-    let acceptor = server::Acceptor::from(incoming);
+    let acceptor = Acceptor::from(incoming);
 
     (acceptor, client)
 }

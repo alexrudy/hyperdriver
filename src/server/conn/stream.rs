@@ -15,9 +15,9 @@ use tokio::net::{TcpStream, UnixStream};
 
 use crate::info::{ConnectionInfo, HasConnectionInfo};
 #[cfg(feature = "stream")]
-use crate::stream::core::Braid;
-#[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
+#[cfg(feature = "stream")]
+use crate::stream::Braid;
 
 #[cfg(feature = "tls")]
 use crate::info::tls::TlsConnectionInfoReciever;
@@ -26,17 +26,11 @@ use crate::info::tls::TlsConnectionInfoReciever;
 use crate::stream::TlsBraid;
 
 #[cfg(feature = "tls")]
-use crate::stream::tls::server::TlsStream;
+use crate::server::conn::tls::TlsStream;
 #[cfg(feature = "tls")]
 use crate::stream::tls::TlsHandshakeInfo;
 #[cfg(feature = "tls")]
 use crate::stream::tls::TlsHandshakeStream;
-
-mod acceptor;
-mod connector;
-
-pub use acceptor::Acceptor;
-pub use connector::{Connection, MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService};
 
 /// An async generator of new connections
 pub trait Accept {
@@ -59,7 +53,7 @@ pub trait AcceptExt: Accept {
     ///
     /// For example, to accept only a single duplex connection, you can do:
     /// ```
-    /// # use hyperdriver::stream::server::AcceptExt;
+    /// # use hyperdriver::server::conn::AcceptExt;
     /// # use hyperdriver::stream::duplex;
     /// # async fn demo_accept() {
     /// let (client, acceptor) = duplex::pair("test".parse().unwrap());

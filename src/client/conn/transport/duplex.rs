@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     use crate::info::DuplexAddr;
     use crate::info::HasConnectionInfo as _;
-    use crate::stream::server::AcceptExt as _;
+    use crate::server::conn::AcceptExt as _;
 
     #[tokio::test]
     async fn test_duplex_transport() {

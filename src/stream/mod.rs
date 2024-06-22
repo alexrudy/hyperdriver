@@ -2,17 +2,9 @@
 //! to allow the upstream routing table to select the most appropriate type of
 //! conenction.
 
-#![warn(missing_docs)]
-#![deny(unsafe_code)]
-
-#[cfg(feature = "client")]
-pub mod client;
 #[cfg(feature = "stream")]
 mod core;
 pub mod duplex;
-
-#[cfg(feature = "server")]
-pub mod server;
 
 #[cfg(feature = "tls")]
 pub mod tls;

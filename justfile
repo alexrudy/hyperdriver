@@ -5,10 +5,10 @@ export RUSTDOCFLAGS := "-D warnings"
 
 nightly := "nightly-2024-04-16"
 msrv := "1.74"
-rust := "stable"
+rust := env("RUSTUP_TOOLCHAIN", "stable")
 
 # Run all checks
-all: fmt check deny clippy examples docs test machete udeps msrv
+all: fmt check-all deny clippy examples docs test machete udeps msrv
     @echo "All checks passed 🍻"
 
 # Check for unused dependencies
@@ -19,8 +19,13 @@ udeps:
 machete:
     cargo +{{rust}} machete
 
-# Check compilation across all features
+alias c := check
+# Check compilation
 check:
+    cargo +{{rust}} check --all-targets --all-features
+
+# Check compilation across all features
+check-all:
     cargo +{{rust}} check --all-targets --all-features
     cargo +{{rust}} hack check --no-private --each-feature --no-dev-deps
     cargo +{{rust}} hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile
@@ -33,17 +38,25 @@ clippy:
 examples:
     cargo +{{rust}} check --examples --all-features
 
+alias d := docs
 # Build documentation
 docs:
     cargo +{{rust}} doc --all-features --no-deps
+
+# Build and read documentation
+read: docs
+    cargo +{{rust}} doc --all-features --no-deps --open
 
 # Check support for MSRV
 msrv:
     cargo +{{msrv}} check --all-targets --all-features
     cargo +{{msrv}} doc --all-features --no-deps
 
+
+alias t := test
 # Run cargo tests
 test:
+    cargo +{{rust}} test --all-features --no-run
     cargo +{{rust}} test --all-features
 
 # Run coverage tests

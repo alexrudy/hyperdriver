@@ -12,14 +12,14 @@ use std::sync::Arc;
 
 use crate::bridge::rt::TokioExecutor;
 #[cfg(feature = "client")]
-use crate::client::conn::TlsTransport;
-use crate::client::conn::TransportTlsExt;
+use crate::client::conn::protocol::auto::HttpConnectionBuilder;
+use crate::client::conn::transport::TransportExt as _;
 #[cfg(feature = "client")]
-use crate::client::HttpConnectionBuilder;
+use crate::client::conn::Stream as ClientStream;
+#[cfg(feature = "client")]
+use crate::client::conn::TlsTransport;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
-#[cfg(feature = "client")]
-use crate::stream::client::Stream as ClientStream;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::mapref::one::{Ref, RefMut};
@@ -265,7 +265,7 @@ impl ServiceRegistry {
     pub async fn bind<'a, S>(
         &'a self,
         service: S,
-    ) -> Result<crate::stream::server::Acceptor, BindError>
+    ) -> Result<crate::server::conn::Acceptor, BindError>
     where
         S: Into<Cow<'a, str>>,
     {
@@ -284,7 +284,7 @@ impl ServiceRegistry {
         make_service: M,
         name: S,
     ) -> Result<
-        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::stream::server::Acceptor, B>,
+        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::server::conn::Acceptor, B>,
         BindError,
     >
     where
@@ -391,7 +391,7 @@ impl InnerRegistry {
         &self,
         config: &RegistryConfig,
         service: &str,
-    ) -> Result<crate::stream::server::Acceptor, InternalBindError> {
+    ) -> Result<crate::server::conn::Acceptor, InternalBindError> {
         let mut handle = self.get_mut(config, service);
 
         handle.acceptor()
@@ -425,7 +425,7 @@ impl PidLock {
 #[derive(Debug)]
 enum ServiceHandle {
     Duplex {
-        acceptor: Option<crate::stream::server::Acceptor>,
+        acceptor: Option<crate::server::conn::Acceptor>,
         connector: crate::stream::duplex::DuplexClient,
     },
     Unix {
@@ -464,7 +464,7 @@ impl ServiceHandle {
         &self,
         config: &RegistryConfig,
         name: Cow<'_, str>,
-    ) -> Result<crate::stream::client::Stream, ConnectionError> {
+    ) -> Result<crate::client::conn::Stream, ConnectionError> {
         match self {
             ServiceHandle::Duplex { connector, .. } => Ok(connector
                 .connect(config.buffer_size, None)
@@ -486,7 +486,7 @@ impl ServiceHandle {
     }
 
     /// Create an acceptor for this service.
-    fn acceptor(&mut self) -> Result<crate::stream::server::Acceptor, InternalBindError> {
+    fn acceptor(&mut self) -> Result<crate::server::conn::Acceptor, InternalBindError> {
         match self {
             ServiceHandle::Duplex { acceptor, .. } => {
                 tracing::trace!("Preparing in-process acceptor");

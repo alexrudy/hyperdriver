@@ -5,16 +5,16 @@ use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::rt::TokioExecutor;
 use std::pin::pin;
 
-use hyperdriver::client::conn::DuplexTransport;
-use hyperdriver::client::{HttpConnectionBuilder, PoolConfig};
+use hyperdriver::client::conn::transport::duplex::DuplexTransport;
+use hyperdriver::client::{conn::protocol::auto::HttpConnectionBuilder, PoolConfig};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
 async fn client() -> Result<(), BoxError> {
     let (tx, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor: hyperdriver::stream::server::Acceptor =
-        hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor: hyperdriver::server::conn::Acceptor =
+        hyperdriver::server::conn::Acceptor::from(incoming);
 
     let server = tokio::spawn(serve_one_h1(acceptor));
 
@@ -37,8 +37,8 @@ async fn client() -> Result<(), BoxError> {
 async fn client_h2() -> Result<(), BoxError> {
     let (tx, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor: hyperdriver::stream::server::Acceptor =
-        hyperdriver::stream::server::Acceptor::from(incoming);
+    let acceptor: hyperdriver::server::conn::Acceptor =
+        hyperdriver::server::conn::Acceptor::from(incoming);
 
     let server = tokio::spawn(serve_one_h2(acceptor));
 
@@ -70,7 +70,7 @@ async fn service_ok(
         .body(hyperdriver::body::Body::empty())?)
 }
 
-async fn serve_one_h1(acceptor: hyperdriver::stream::server::Acceptor) -> Result<(), BoxError> {
+async fn serve_one_h1(acceptor: hyperdriver::server::conn::Acceptor) -> Result<(), BoxError> {
     let mut acceptor = pin!(acceptor);
     let stream = acceptor.next().await.ok_or("no connection")??;
 
@@ -84,7 +84,7 @@ async fn serve_one_h1(acceptor: hyperdriver::stream::server::Acceptor) -> Result
     Ok(())
 }
 
-async fn serve_one_h2(acceptor: hyperdriver::stream::server::Acceptor) -> Result<(), BoxError> {
+async fn serve_one_h2(acceptor: hyperdriver::server::conn::Acceptor) -> Result<(), BoxError> {
     let mut acceptor = pin!(acceptor);
     let stream = acceptor.next().await.ok_or("no connection")??;
 

@@ -1,6 +1,11 @@
+//! A simple HTTP client that uses the hyperdriver crate.
+//!
+//! This client can send HTTP requests to a server and print the response.
+//! It provides a simple command-line interface, use `--help` to see the options.
+
 use http::Uri;
 use http_body_util::BodyExt as _;
-use hyperdriver::client::{Client, HttpProtocol};
+use hyperdriver::client::Client;
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
@@ -53,10 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         client = client.with_tls(config);
     }
 
-    let version: HttpProtocol = if args.get_flag("protocol") {
-        HttpProtocol::Http1
+    let version = if args.get_flag("protocol") {
+        http::Version::HTTP_11
     } else {
-        HttpProtocol::Http2
+        http::Version::HTTP_2
     };
 
     let client = client.build();
@@ -89,13 +94,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn send(
     client: Client,
     uri: Uri,
-    version: HttpProtocol,
+    version: http::Version,
     done: tokio::sync::mpsc::Sender<()>,
 ) {
     let req = http::Request::builder()
         .uri(uri.clone())
         .method("GET")
-        .version(version.version())
+        .version(version)
         .body(hyperdriver::body::Body::empty())
         .unwrap();
 

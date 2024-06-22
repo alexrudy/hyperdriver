@@ -1,3 +1,8 @@
+//! A simple HTTP client that sends a request to httpbin.org and prints the response.
+//!
+//! Defaults to sending a GET request to https://www.httpbin.org/ over HTTP/1.1.
+//!
+//! Run with `--help` to see options.
 use clap::arg;
 use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;

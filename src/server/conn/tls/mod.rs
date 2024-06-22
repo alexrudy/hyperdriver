@@ -10,18 +10,18 @@ use futures_core::ready;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
-use super::{TlsHandshakeInfo, TlsHandshakeStream};
 use crate::info::tls::{channel, TlsConnectionInfoReciever, TlsConnectionInfoSender};
 use crate::info::{ConnectionInfo, HasConnectionInfo, TlsConnectionInfo};
+use crate::stream::tls::{TlsHandshakeInfo, TlsHandshakeStream};
 
 pub mod acceptor;
 
-pub mod connector;
+pub mod info;
 #[cfg(feature = "sni")]
 pub mod sni;
 
 pub use self::acceptor::TlsAcceptor;
-pub use self::connector::TlsConnectionInfoLayer;
+pub use self::info::TlsConnectionInfoLayer;
 
 /// State tracks the process of accepting a connection and turning it into a stream.
 enum TlsState<IO> {
@@ -195,11 +195,11 @@ mod tests {
 
     use tracing::Instrument as _;
 
-    use crate::client::conn::DuplexTransport;
+    use crate::client::conn::transport::duplex::DuplexTransport;
+    use crate::client::conn::transport::TransportExt as _;
     use crate::client::conn::Transport as _;
-    use crate::client::conn::TransportTlsExt;
 
-    use crate::stream::server::AcceptExt as _;
+    use crate::server::conn::AcceptExt as _;
 
     #[tokio::test]
     async fn tls_client_server() {
@@ -214,7 +214,7 @@ mod tests {
 
         let (client, incoming) = crate::stream::duplex::pair("test".parse().unwrap());
 
-        let acceptor = crate::stream::server::Acceptor::from(incoming)
+        let acceptor = crate::server::conn::Acceptor::from(incoming)
             .with_tls(crate::fixtures::tls_server_config().into());
 
         let mut client = DuplexTransport::new(1024, None, client)

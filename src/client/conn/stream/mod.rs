@@ -16,21 +16,22 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
 #[cfg(feature = "tls")]
+pub use self::tls::TlsStream;
+
+use crate::info::HasConnectionInfo;
+#[cfg(feature = "tls")]
 use crate::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
-use crate::stream::core::Braid;
-
+use crate::stream::duplex::DuplexStream;
+#[cfg(feature = "tls")]
+use crate::stream::tls::TlsHandshakeStream;
+#[cfg(feature = "stream")]
+use crate::stream::Braid;
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
 
-use crate::info::HasConnectionInfo;
-#[cfg(feature = "stream")]
-use crate::stream::duplex::DuplexStream;
-
 #[cfg(feature = "tls")]
-use super::tls::TlsHandshakeStream;
-#[cfg(feature = "tls")]
-use crate::stream::tls::client::ClientTlsStream;
+pub(crate) mod tls;
 
 #[cfg(feature = "stream")]
 /// A stream which can handle multiple different underlying transports, and TLS
@@ -45,7 +46,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<ClientTlsStream<IO>, IO>,
+    inner: TlsBraid<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -65,7 +66,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<ClientTlsStream<IO>, IO>,
+    inner: TlsBraid<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -139,7 +140,7 @@ where
         };
 
         Stream {
-            inner: TlsBraid::Tls(ClientTlsStream::new(core, domain, config)),
+            inner: TlsBraid::Tls(TlsStream::new(core, domain, config)),
         }
     }
 }

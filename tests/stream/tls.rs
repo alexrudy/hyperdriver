@@ -42,7 +42,7 @@ async fn braided_tls() {
     let addr = incoming.local_addr().unwrap();
 
     let server =
-        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(Arc::new(tls_config()));
+        hyperdriver::server::conn::Acceptor::from(incoming).with_tls(Arc::new(tls_config()));
 
     tokio::spawn(async move {
         let mut incoming = server.fuse();
@@ -53,7 +53,7 @@ async fn braided_tls() {
         }
     });
 
-    let mut conn = hyperdriver::stream::client::Stream::connect(addr)
+    let mut conn = hyperdriver::client::conn::Stream::connect(addr)
         .await
         .unwrap()
         .tls(

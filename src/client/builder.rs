@@ -6,23 +6,23 @@ use tokio::net::TcpStream;
 #[cfg(feature = "tls")]
 use rustls::ClientConfig;
 
-use crate::client::{conn::HttpConnectionBuilder, Client};
+use crate::client::{conn::protocol::auto::HttpConnectionBuilder, Client};
 
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 
 use super::conn::dns::GaiResolver;
-use super::conn::transport::{TlsTransport, TransportTlsExt as _};
-use super::conn::TcpTransport;
+use super::conn::transport::tcp::TcpTransport;
+use super::conn::transport::{TlsTransport, TransportExt as _};
 
 /// A builder for a client.
 #[derive(Debug)]
 pub struct Builder {
-    tcp: crate::client::conn::TcpTransportConfig,
+    tcp: crate::client::conn::transport::tcp::TcpTransportConfig,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
-    conn: crate::client::conn::HttpConnectionBuilder,
+    conn: HttpConnectionBuilder,
 }
 
 impl Default for Builder {
@@ -39,13 +39,16 @@ impl Default for Builder {
 
 impl Builder {
     /// Use the provided TCP configuration.
-    pub fn with_tcp(mut self, config: crate::client::conn::TcpTransportConfig) -> Self {
+    pub fn with_tcp(
+        mut self,
+        config: crate::client::conn::transport::tcp::TcpTransportConfig,
+    ) -> Self {
         self.tcp = config;
         self
     }
 
     /// TCP configuration.
-    pub fn tcp(&mut self) -> &mut crate::client::conn::TcpTransportConfig {
+    pub fn tcp(&mut self) -> &mut crate::client::conn::transport::tcp::TcpTransportConfig {
         &mut self.tcp
     }
 }
@@ -91,13 +94,16 @@ impl Builder {
 
 impl Builder {
     /// Use the provided HTTP connection configuration.
-    pub fn with_conn(mut self, conn: crate::client::conn::HttpConnectionBuilder) -> Self {
+    pub fn with_conn(
+        mut self,
+        conn: crate::client::conn::protocol::auto::HttpConnectionBuilder,
+    ) -> Self {
         self.conn = conn;
         self
     }
 
     /// HTTP connection configuration.
-    pub fn conn(&mut self) -> &mut crate::client::conn::HttpConnectionBuilder {
+    pub fn conn(&mut self) -> &mut crate::client::conn::protocol::auto::HttpConnectionBuilder {
         &mut self.conn
     }
 }
@@ -109,14 +115,14 @@ impl Builder {
     ) -> Client<HttpConnectionBuilder, TlsTransport<TcpTransport<GaiResolver, TcpStream>>> {
         Client {
             #[cfg(feature = "tls")]
-            transport: crate::client::conn::TcpTransport::builder()
+            transport: crate::client::conn::transport::tcp::TcpTransport::builder()
                 .with_config(self.tcp)
                 .with_gai_resolver()
                 .build()
                 .with_optional_tls(self.tls.map(Arc::new)),
 
             #[cfg(not(feature = "tls"))]
-            transport: crate::client::conn::TcpTransport::builder()
+            transport: crate::client::conn::transport::tcp::TcpTransport::builder()
                 .with_config(self.tcp)
                 .with_gai_resolver()
                 .build()

@@ -1,11 +1,18 @@
+//! An echoing HTTP/2 server with TLS.
+//!
+//! The TLS is set up with `minica`, a minimal CA for testing purposes.
+//!
+//! `minica` is set to use `example.com` as the domain, so clients should
+//! connect with that domain name.
+
 use std::convert::Infallible;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
 use hyper::server::conn::http2;
 use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::stream::server::MakeServiceConnectionInfoLayer;
-use hyperdriver::stream::tls::server::TlsConnectionInfoLayer;
+use hyperdriver::server::conn::tls::TlsConnectionInfoLayer;
+use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
 use tower::make::Shared;
 use tower::Layer;
 use tracing_subscriber::EnvFilter;
@@ -43,7 +50,7 @@ async fn main() {
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming)
+    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming)
         .with_tls(Arc::new(tls_config("localhost")));
 
     let svc = tower::service_fn(|req: hyperdriver::body::Request| async {

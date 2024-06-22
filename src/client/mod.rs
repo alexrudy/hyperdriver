@@ -1,14 +1,12 @@
 //! HTTP client library for Rust, built on top of [hyper].
 
-#![warn(missing_docs)]
-#![warn(missing_debug_implementations)]
-#![deny(unsafe_code)]
-
 use std::fmt;
 use std::future::poll_fn;
 use std::future::Future;
 use std::task::Poll;
 
+use self::conn::Protocol;
+use self::conn::Transport;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use http::uri::Port;
@@ -19,8 +17,12 @@ use http::Version;
 use thiserror::Error;
 use tracing::warn;
 
+use crate::client::conn::connection::ConnectionError;
+use crate::client::conn::protocol::auto::HttpConnectionBuilder;
+use crate::client::conn::protocol::HttpProtocol;
+use crate::client::conn::transport::tcp::TcpTransport;
+use crate::client::conn::transport::TransportStream;
 use crate::client::conn::Connection;
-use crate::client::conn::TcpTransport;
 use crate::client::conn::TlsTransport;
 use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
@@ -35,12 +37,6 @@ pub mod pool;
 
 pub use builder::Builder;
 
-pub use conn::protocol::HttpProtocol;
-pub use conn::ConnectionError;
-pub use conn::HttpConnectionBuilder;
-pub use conn::Protocol;
-pub use conn::Transport;
-pub use conn::TransportStream;
 pub use pool::Config as PoolConfig;
 
 /// Client error type.
