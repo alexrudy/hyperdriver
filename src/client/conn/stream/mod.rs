@@ -16,21 +16,19 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
 
 #[cfg(feature = "tls")]
-use crate::info::HasTlsConnectionInfo;
-#[cfg(feature = "stream")]
-use crate::stream::Braid;
-
-#[cfg(feature = "tls")]
-use crate::stream::TlsBraid;
+pub use self::tls::TlsStream;
 
 use crate::info::HasConnectionInfo;
+#[cfg(feature = "tls")]
+use crate::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
-
-#[cfg(feature = "tls")]
-use crate::client::conn::stream::tls::TlsStream;
 #[cfg(feature = "tls")]
 use crate::stream::tls::TlsHandshakeStream;
+#[cfg(feature = "stream")]
+use crate::stream::Braid;
+#[cfg(feature = "tls")]
+use crate::stream::TlsBraid;
 
 #[cfg(feature = "tls")]
 pub(crate) mod tls;
