@@ -1,3 +1,10 @@
+//! An echoing HTTP/2 server with TLS.
+//!
+//! The TLS is set up with `minica`, a minimal CA for testing purposes.
+//!
+//! `minica` is set to use `example.com` as the domain, so clients should
+//! connect with that domain name.
+
 use std::convert::Infallible;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;

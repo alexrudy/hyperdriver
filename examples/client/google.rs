@@ -1,3 +1,5 @@
+//! A simple example of using the `hyperdriver` crate to make a request to a website.
+
 use http::Uri;
 use http_body_util::BodyExt as _;
 use hyperdriver::client::Client;

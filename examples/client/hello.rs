@@ -1,3 +1,8 @@
+//! A simple HTTP client that uses the hyperdriver crate.
+//!
+//! This client can send HTTP requests to a server and print the response.
+//! It provides a simple command-line interface, use `--help` to see the options.
+
 use http::Uri;
 use http_body_util::BodyExt as _;
 use hyperdriver::client::{Client, HttpProtocol};

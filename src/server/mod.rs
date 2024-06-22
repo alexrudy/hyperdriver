@@ -1,9 +1,5 @@
 //! A server framework to interoperate with hyper-v1, tokio, braid and arnold
 
-#![warn(missing_docs)]
-#![warn(missing_debug_implementations)]
-#![deny(unsafe_code)]
-
 use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::pin::{pin, Pin};

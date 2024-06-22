@@ -2,9 +2,6 @@
 //! to allow the upstream routing table to select the most appropriate type of
 //! conenction.
 
-#![warn(missing_docs)]
-#![deny(unsafe_code)]
-
 #[cfg(feature = "stream")]
 mod core;
 pub mod duplex;

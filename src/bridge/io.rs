@@ -51,6 +51,7 @@ where
         cx: &mut Context<'_>,
         mut buf: hyper::rt::ReadBufCursor<'_>,
     ) -> Poll<Result<(), Error>> {
+        #[allow(unsafe_code)]
         let n = unsafe {
             let mut tbuf = tokio::io::ReadBuf::uninit(buf.as_mut());
             match tokio::io::AsyncRead::poll_read(self.project().inner, cx, &mut tbuf) {
@@ -59,6 +60,7 @@ where
             }
         };
 
+        #[allow(unsafe_code)]
         unsafe {
             buf.advance(n);
         }
@@ -109,6 +111,7 @@ where
         tbuf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let filled = tbuf.filled().len();
+        #[allow(unsafe_code)]
         let sub_filled = unsafe {
             let mut buf = hyper::rt::ReadBuf::uninit(tbuf.unfilled_mut());
 
@@ -121,6 +124,7 @@ where
         let n_filled = filled + sub_filled;
         // At least sub_filled bytes had to have been initialized.
         let n_init = sub_filled;
+        #[allow(unsafe_code)]
         unsafe {
             tbuf.assume_init(n_init);
             tbuf.set_filled(n_filled);

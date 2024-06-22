@@ -26,6 +26,7 @@ fn pid_file_in_use(path: &Utf8Path) -> Result<bool, io::Error> {
             })?;
 
             // SAFETY: I dunno? Libc is probably fine.
+            #[allow(unsafe_code)]
             let errno = unsafe { libc::kill(pid, 0) };
 
             if errno == 0 {
@@ -85,6 +86,7 @@ impl PidFile {
         }
 
         // SAFETY: What could go wrong?
+        #[allow(unsafe_code)]
         let pid = unsafe { libc::getpid() };
 
         if pid <= 0 {
