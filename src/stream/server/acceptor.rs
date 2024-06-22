@@ -29,7 +29,7 @@ use crate::stream::{core::Braid, duplex::DuplexIncoming};
 use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
 
 /// Accept incoming connections for streams which might
-/// be wrapped in TLS. Use [`Acceptor::tls`] to enable TLS.
+/// be wrapped in TLS. Use [`Acceptor::with_tls`] to enable TLS.
 #[cfg(feature = "stream")]
 #[derive(Debug)]
 #[pin_project]

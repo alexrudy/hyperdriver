@@ -13,6 +13,7 @@ use std::{
     task::{Context, Poll},
 };
 
+#[cfg(feature = "server")]
 use crate::info::tls::TlsConnectionInfoReciever;
 pub use crate::info::TlsConnectionInfo;
 use futures_core::Future;
@@ -36,6 +37,7 @@ pub trait TlsHandshakeStream: AsyncRead + AsyncWrite {
 }
 
 /// A stream which can provide information about the TLS handshake.
+#[cfg(feature = "server")]
 pub(crate) trait TlsHandshakeInfo: TlsHandshakeStream {
     fn recv(&self) -> TlsConnectionInfoReciever;
 }
@@ -67,6 +69,7 @@ where
     }
 }
 
+#[cfg(feature = "server")]
 impl<Tls, NoTls> TlsHandshakeInfo for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeInfo + Unpin,

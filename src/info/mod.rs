@@ -370,8 +370,8 @@ impl ConnectionInfo<DuplexAddr> {
         ConnectionInfo {
             protocol,
             authority: Some(name),
-            local_addr: DuplexAddr,
-            remote_addr: DuplexAddr,
+            local_addr: DuplexAddr::new(),
+            remote_addr: DuplexAddr::new(),
             buffer_size: Some(buffer_size),
         }
     }
