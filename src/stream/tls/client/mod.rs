@@ -17,10 +17,8 @@ use crate::info::{ConnectionInfo, HasConnectionInfo};
 use super::TlsHandshakeStream;
 use crate::info::TlsConnectionInfo;
 
-#[cfg(feature = "connector")]
 mod connector;
 
-#[cfg(feature = "connector")]
 pub use connector::TlsConnector;
 
 enum State<IO> {
@@ -76,21 +74,11 @@ where
 
 impl<IO> TlsHandshakeStream for ClientTlsStream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
-    IO::Addr: Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
+    IO::Addr: Send + Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         self.handshake(cx, |_, _| Poll::Ready(Ok(())))
-    }
-}
-
-impl<IO> ClientTlsStream<IO>
-where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
-{
-    /// Finish the TLS handshake.
-    pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
     }
 }
 
@@ -136,6 +124,7 @@ where
                     // Take some action here when the handshake happens
                     let (_, client_info) = stream.get_ref();
                     let info = TlsConnectionInfo::client(client_info);
+
                     self.tls = Some(info);
 
                     // Back to processing the stream

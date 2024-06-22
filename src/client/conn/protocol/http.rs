@@ -410,6 +410,7 @@ mod tests {
 
     use crate::client::{Error, Protocol};
     use crate::stream::client::Stream;
+    use crate::stream::tls::TlsHandshakeStream as _;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};
     use static_assertions::assert_impl_all;

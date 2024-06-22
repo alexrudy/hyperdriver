@@ -44,6 +44,7 @@ impl<T: fmt::Display> fmt::Debug for DebugLiteral<T> {
 }
 
 #[allow(unused)]
+#[track_caller]
 pub(crate) fn polled_span(span: &tracing::Span) {
     dispatcher::get_default(|dispatch| {
         let id = span.id().expect("Missing ID; this is a bug");
@@ -85,10 +86,15 @@ pub(crate) mod fixtures {
             _ => panic!("unknown key type"),
         };
 
-        ServerConfig::builder()
+        let mut cfg = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert], key)
-            .unwrap()
+            .unwrap();
+
+        cfg.alpn_protocols.push(b"h2".to_vec());
+        cfg.alpn_protocols.push(b"http/1.1".to_vec());
+
+        cfg
     }
 
     fn tls_root_store() -> rustls::RootCertStore {
@@ -105,7 +111,11 @@ pub(crate) mod fixtures {
     }
 
     pub(crate) fn tls_client_config() -> rustls::ClientConfig {
-        let config = rustls::ClientConfig::builder().with_root_certificates(tls_root_store());
-        config.with_no_client_auth()
+        let mut config = rustls::ClientConfig::builder()
+            .with_root_certificates(tls_root_store())
+            .with_no_client_auth();
+        config.alpn_protocols.push(b"h2".to_vec());
+        config.alpn_protocols.push(b"http/1.1".to_vec());
+        config
     }
 }

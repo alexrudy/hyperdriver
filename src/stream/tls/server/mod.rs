@@ -10,7 +10,7 @@ use futures_core::ready;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
-use super::TlsHandshakeStream;
+use super::{TlsHandshakeInfo, TlsHandshakeStream};
 use crate::info::tls::{channel, TlsConnectionInfoReciever, TlsConnectionInfoSender};
 use crate::info::{ConnectionInfo, HasConnectionInfo, TlsConnectionInfo};
 
@@ -21,7 +21,7 @@ pub mod connector;
 pub mod sni;
 
 pub use self::acceptor::TlsAcceptor;
-pub use self::connector::TlsConnectLayer;
+pub use self::connector::TlsConnectionInfoLayer;
 
 /// State tracks the process of accepting a connection and turning it into a stream.
 enum TlsState<IO> {
@@ -51,11 +51,21 @@ where
 
 impl<IO> TlsHandshakeStream for TlsStream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
     IO::Addr: Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         self.handshake(cx, |_, _| Poll::Ready(Ok(())))
+    }
+}
+
+impl<IO> TlsHandshakeInfo for TlsStream<IO>
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
+    IO::Addr: Unpin,
+{
+    fn recv(&self) -> TlsConnectionInfoReciever {
+        self.rx.clone()
     }
 }
 
@@ -169,5 +179,87 @@ where
             TlsState::Handshake(_) => Poll::Ready(Ok(())),
             TlsState::Streaming(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::convert::Infallible;
+
+    use http::Response;
+
+    use tower::make::Shared;
+    use tower::Service;
+
+    use tracing::Instrument as _;
+
+    use crate::client::conn::DuplexTransport;
+    use crate::client::conn::Transport as _;
+    use crate::client::conn::TransportTlsExt;
+
+    use crate::stream::server::AcceptExt as _;
+
+    #[tokio::test]
+    async fn tls_client_server() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let _ = color_eyre::install();
+
+        let _guard = tracing::info_span!("tls").entered();
+
+        let service = tower::service_fn(|_: http::Request<crate::Body>| async {
+            Ok::<_, Infallible>(Response::new(crate::Body::empty()))
+        });
+
+        let (client, incoming) = crate::stream::duplex::pair("test".parse().unwrap());
+
+        let acceptor = crate::stream::server::Acceptor::from(incoming)
+            .with_tls(crate::fixtures::tls_server_config().into());
+
+        let mut client = DuplexTransport::new(1024, None, client)
+            .with_tls(crate::fixtures::tls_client_config().into());
+
+        let client = async move {
+            let conn = client
+                .connect("https://example.com".parse().unwrap())
+                .await
+                .unwrap();
+
+            tracing::debug!("client connected");
+
+            let (mut stream, _) = conn.into_parts();
+            stream.finish_handshake().await.unwrap();
+
+            tracing::debug!("client handshake finished");
+
+            stream
+        }
+        .instrument(tracing::info_span!("client"));
+
+        let server = async move {
+            let mut conn = acceptor.accept().await.unwrap();
+
+            tracing::debug!("server accepted");
+
+            let mut make_service = Shared::new(service);
+
+            let mut svc = Service::call(&mut make_service, &conn).await.unwrap();
+            tracing::debug!("server connected");
+
+            conn.finish_handshake().await.unwrap();
+            tracing::debug!("server handshake finished");
+
+            let _ = tower::Service::call(&mut svc, http::Request::new(crate::Body::empty()))
+                .await
+                .unwrap();
+
+            tracing::debug!("server request handled");
+            conn
+        }
+        .instrument(tracing::info_span!("server"));
+
+        let (stream, conn) = tokio::join!(client, server);
+        drop((stream, conn));
     }
 }

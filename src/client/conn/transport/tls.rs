@@ -47,7 +47,7 @@ impl<T> tower::Service<Uri> for TlsTransportWrapper<T>
 where
     T: Transport,
     <T as Transport>::IO: HasConnectionInfo + Unpin,
-    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
     type Response = TransportStream<ClientStream<T::IO>>;
     type Error = TlsConnectionError<T::Error>;
@@ -80,6 +80,7 @@ pub(in crate::client::conn::transport) mod future {
     use pin_project::pin_project;
 
     use crate::info::tls::HasTlsConnectionInfo;
+    use crate::stream::tls::TlsHandshakeStream as _;
 
     use super::super::Transport;
     use super::*;
@@ -147,7 +148,7 @@ pub(in crate::client::conn::transport) mod future {
     where
         T: Transport,
         <T as Transport>::IO: HasConnectionInfo + Unpin,
-        <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Unpin,
+        <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
         type Output = Result<TransportStream<ClientStream<T::IO>>, TlsConnectionError<T::Error>>;
 
@@ -163,10 +164,12 @@ pub(in crate::client::conn::transport) mod future {
                         Poll::Ready(Ok(stream)) => {
                             let stream = stream.into_inner();
                             let stream = ClientStream::new(stream).tls(domain, config.clone());
+                            tracing::trace!("Transport connected. TLS handshake starting");
                             this.state.set(State::Handshake { stream });
                         }
                         Poll::Ready(Err(e)) => {
-                            return Poll::Ready(Err(TlsConnectionError::Connection(e)))
+                            tracing::trace!(?e, "Transport connection error");
+                            return Poll::Ready(Err(TlsConnectionError::Connection(e)));
                         }
                         Poll::Pending => return Poll::Pending,
                     },
@@ -181,10 +184,12 @@ pub(in crate::client::conn::transport) mod future {
                             let info = stream.info();
                             let tls = stream.tls_info().cloned();
 
+                            tracing::trace!(?info, "TLS handshake complete");
                             return Poll::Ready(Ok(TransportStream { stream, info, tls }));
                         }
                         Poll::Ready(Err(e)) => {
-                            return Poll::Ready(Err(TlsConnectionError::Handshake(e)))
+                            tracing::trace!(?e, "Transport handshake error");
+                            return Poll::Ready(Err(TlsConnectionError::Handshake(e)));
                         }
                         Poll::Pending => return Poll::Pending,
                     },
@@ -211,7 +216,10 @@ mod tests {
 
     use crate::{
         fixtures,
-        stream::{server::AcceptExt, tls::TlsHandshakeExt},
+        stream::{
+            server::AcceptExt,
+            tls::{TlsHandshakeExt, TlsHandshakeStream as _},
+        },
     };
 
     #[tokio::test]
@@ -227,7 +235,7 @@ mod tests {
 
         let mut config = fixtures::tls_server_config();
         config.alpn_protocols.push(b"h2".to_vec());
-        let accept = crate::stream::server::Acceptor::new(server).tls(config.into());
+        let accept = crate::stream::server::Acceptor::new(server).with_tls(config.into());
 
         let uri = "https://example.com/".parse().unwrap();
 

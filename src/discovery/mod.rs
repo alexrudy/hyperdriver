@@ -580,11 +580,7 @@ async fn connect_to_handle(
             }
             Ok(Err(error)) => Err(error),
         }
-    }
-    .map_err(|err| {
-        tracing::warn!("failed to complete connection: {}", err);
-        err
-    })?;
+    }?;
 
     Ok(stream)
 }

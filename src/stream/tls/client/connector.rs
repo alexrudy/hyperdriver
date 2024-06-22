@@ -8,7 +8,7 @@ use rustls::ClientConfig;
 use tokio::net::TcpStream;
 use tower::Service;
 
-use super::TlsStream;
+use super::ClientTlsStream;
 
 /// A connector which can be used to create TLS streams from TCP connections.
 ///
@@ -32,7 +32,7 @@ where
     P::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     P::Future: Send + 'static,
 {
-    type Response = TlsStream<TcpStream>;
+    type Response = ClientTlsStream<TcpStream>;
 
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -57,7 +57,7 @@ where
         let fut = async move {
             let stream = conn.await.map_err(Into::into)?;
             let connect = tokio_rustls::TlsConnector::from(tls).connect(domain?, stream);
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(TlsStream::from(connect))
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(ClientTlsStream::from(connect))
         };
         Box::pin(fut)
     }

@@ -88,7 +88,7 @@ mod tests {
         let info = io.info();
 
         assert_eq!(info.protocol, None);
-        assert_eq!(info.local_addr, DuplexAddr);
-        assert_eq!(info.remote_addr, DuplexAddr);
+        assert_eq!(info.local_addr, DuplexAddr::new());
+        assert_eq!(info.remote_addr, DuplexAddr::new());
     }
 }

@@ -29,7 +29,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .action(clap::ArgAction::SetTrue)
                 .help("Use HTTP/1.1"),
         )
-        .arg(clap::Arg::new("requests").short('n').long("count"))
+        .arg(
+            clap::Arg::new("requests")
+                .short('n')
+                .long("count")
+                .value_parser(clap::value_parser!(usize)),
+        )
         .get_matches();
 
     let mut client = Client::builder();

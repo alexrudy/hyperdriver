@@ -23,6 +23,8 @@ use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
 use crate::info::TlsConnectionInfo;
 use crate::stream::client::Stream;
+#[cfg(all(feature = "tls", feature = "stream"))]
+use crate::stream::tls::TlsHandshakeStream as _;
 
 #[cfg(feature = "tls")]
 use self::tls::TlsTransportWrapper;
@@ -72,6 +74,7 @@ where
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + 'static,
+    IO::Addr: Send,
 {
     type IO = IO;
     type Error = T::Error;
@@ -409,7 +412,7 @@ impl<T> Service<Uri> for TlsTransport<T>
 where
     T: Transport,
     <T as Transport>::IO: HasConnectionInfo + Unpin,
-    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Unpin,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
     type Response = TransportStream<Stream<T::IO>>;
 
@@ -526,7 +529,7 @@ mod future {
     where
         T: Transport,
         <T as Transport>::IO: HasConnectionInfo + Unpin,
-        <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Unpin,
+        <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
         #[cfg(feature = "tls")]
         type Output = Result<

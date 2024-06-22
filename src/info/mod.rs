@@ -370,8 +370,8 @@ impl ConnectionInfo<DuplexAddr> {
         ConnectionInfo {
             protocol,
             authority: Some(name),
-            local_addr: DuplexAddr,
-            remote_addr: DuplexAddr,
+            local_addr: DuplexAddr::new(),
+            remote_addr: DuplexAddr::new(),
             buffer_size: Some(buffer_size),
         }
     }
@@ -555,8 +555,8 @@ mod tests {
         let info = ConnectionInfo::<DuplexAddr>::default();
         assert_eq!(info.protocol, None);
         assert_eq!(info.authority, None);
-        assert_eq!(info.local_addr, DuplexAddr);
-        assert_eq!(info.remote_addr, DuplexAddr);
+        assert_eq!(info.local_addr, DuplexAddr::new());
+        assert_eq!(info.remote_addr, DuplexAddr::new());
         assert_eq!(info.buffer_size, None);
     }
 
