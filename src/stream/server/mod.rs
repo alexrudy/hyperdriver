@@ -29,15 +29,13 @@ use crate::stream::TlsBraid;
 use crate::stream::tls::server::TlsStream;
 
 mod acceptor;
-#[cfg(feature = "tls")]
 mod connector;
 
 pub use acceptor::Acceptor;
-#[cfg(feature = "tls")]
-pub use connector::{Connection, StartConnectionInfoLayer, StartConnectionInfoService};
 
 #[cfg(feature = "tls")]
 use super::tls::TlsHandshakeStream;
+pub use connector::{Connection, MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService};
 
 /// An async generator of new connections
 pub trait Accept {
