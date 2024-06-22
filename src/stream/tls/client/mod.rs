@@ -85,16 +85,6 @@ where
 impl<IO> ClientTlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
-{
-    /// Finish the TLS handshake.
-    pub async fn finish_handshake(&mut self) -> io::Result<()> {
-        futures_util::future::poll_fn(|cx| self.handshake(cx, |_, _| Poll::Ready(Ok(())))).await
-    }
-}
-
-impl<IO> ClientTlsStream<IO>
-where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     IO::Addr: Clone,
 {
     /// Create a new TLS stream from the given IO, with a domain name and TLS configuration.
@@ -134,6 +124,7 @@ where
                     // Take some action here when the handshake happens
                     let (_, client_info) = stream.get_ref();
                     let info = TlsConnectionInfo::client(client_info);
+
                     self.tls = Some(info);
 
                     // Back to processing the stream
