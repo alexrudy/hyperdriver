@@ -42,6 +42,10 @@ examples:
 docs:
     cargo +{{rust}} doc --all-features --no-deps
 
+# Build and read documentation
+read: docs
+    cargo +{{rust}} doc --all-features --no-deps --open
+
 # Check support for MSRV
 msrv:
     cargo +{{msrv}} check --all-targets --all-features
