@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use hyper::server::conn::http2;
 use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::stream::server::MakeServiceConnectionInfoLayer;
-use hyperdriver::stream::tls::server::TlsConnectionInfoLayer;
+use hyperdriver::server::conn::tls::TlsConnectionInfoLayer;
+use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
 use tower::make::Shared;
 use tower::Layer;
 use tracing_subscriber::EnvFilter;
@@ -50,7 +50,7 @@ async fn main() {
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming)
+    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming)
         .with_tls(Arc::new(tls_config("localhost")));
 
     let svc = tower::service_fn(|req: hyperdriver::body::Request| async {

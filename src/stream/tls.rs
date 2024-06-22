@@ -1,9 +1,6 @@
 //! Support for braided streams which include Transport Layer security
 //! and so involve a negotiation component.
 
-#[cfg(feature = "server")]
-pub mod server;
-
 use std::{
     future::poll_fn,
     io,

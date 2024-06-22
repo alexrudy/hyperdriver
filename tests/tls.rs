@@ -6,9 +6,9 @@ use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::TransportTlsExt;
+use hyperdriver::server::conn::Accept;
 use hyperdriver::service::make_service_fn;
 use hyperdriver::service::MakeServiceRef;
-use hyperdriver::stream::server::Accept;
 use rustls::ServerConfig;
 
 use hyperdriver::server::{Protocol, Server};
@@ -92,7 +92,7 @@ async fn tls_echo_h1() {
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
     let acceptor =
-        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(tls_config().into());
+        hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
 
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
@@ -143,7 +143,7 @@ async fn tls_echo_h2() {
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
     let acceptor =
-        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(tls_config().into());
+        hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         make_service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),

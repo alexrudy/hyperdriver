@@ -23,10 +23,10 @@ use super::Stream;
 use crate::info::HasConnectionInfo;
 
 #[cfg(feature = "stream")]
-use crate::stream::{core::Braid, duplex::DuplexIncoming};
+use crate::stream::{duplex::DuplexIncoming, Braid};
 
 #[cfg(feature = "tls")]
-use crate::stream::tls::server::TlsAcceptor as RawTlsAcceptor;
+use crate::server::conn::tls::TlsAcceptor as RawTlsAcceptor;
 
 /// Accept incoming connections for streams which might
 /// be wrapped in TLS. Use [`Acceptor::with_tls`] to enable TLS.

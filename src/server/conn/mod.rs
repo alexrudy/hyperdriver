@@ -14,10 +14,18 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
 use crate::server::Protocol;
+pub use acceptor::Acceptor;
+pub use info::{MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService};
+pub use stream::{Accept, AcceptExt, AcceptOne, Stream};
 
+mod acceptor;
 /// HTTP connection builder with automatic protocol detection.
 pub mod auto;
 mod connecting;
+mod info;
+mod stream;
+#[cfg(feature = "tls")]
+pub mod tls;
 
 /// Errors that can occur when handling connections.
 #[derive(Debug, Error)]

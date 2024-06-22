@@ -191,7 +191,7 @@ mod tests {
     use crate::client::conn::TransportTlsExt;
 
     use crate::info::TlsConnectionInfo;
-    use crate::stream::server::AcceptExt as _;
+    use crate::server::conn::AcceptExt as _;
     use crate::stream::tls::TlsHandshakeStream as _;
 
     #[tokio::test]
@@ -209,7 +209,7 @@ mod tests {
 
         let (client, incoming) = crate::stream::duplex::pair("test".parse().unwrap());
 
-        let acceptor = crate::stream::server::Acceptor::from(incoming)
+        let acceptor = crate::server::conn::Acceptor::from(incoming)
             .with_tls(crate::fixtures::tls_server_config().into());
 
         let mut client = DuplexTransport::new(1024, None, client)

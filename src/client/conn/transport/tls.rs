@@ -216,10 +216,8 @@ mod tests {
 
     use crate::{
         fixtures,
-        stream::{
-            server::AcceptExt,
-            tls::{TlsHandshakeExt, TlsHandshakeStream as _},
-        },
+        server::conn::AcceptExt,
+        stream::tls::{TlsHandshakeExt, TlsHandshakeStream as _},
     };
 
     #[tokio::test]
@@ -235,7 +233,7 @@ mod tests {
 
         let mut config = fixtures::tls_server_config();
         config.alpn_protocols.push(b"h2".to_vec());
-        let accept = crate::stream::server::Acceptor::new(server).with_tls(config.into());
+        let accept = crate::server::conn::Acceptor::new(server).with_tls(config.into());
 
         let uri = "https://example.com/".parse().unwrap();
 

@@ -265,7 +265,7 @@ impl ServiceRegistry {
     pub async fn bind<'a, S>(
         &'a self,
         service: S,
-    ) -> Result<crate::stream::server::Acceptor, BindError>
+    ) -> Result<crate::server::conn::Acceptor, BindError>
     where
         S: Into<Cow<'a, str>>,
     {
@@ -284,7 +284,7 @@ impl ServiceRegistry {
         make_service: M,
         name: S,
     ) -> Result<
-        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::stream::server::Acceptor, B>,
+        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::server::conn::Acceptor, B>,
         BindError,
     >
     where
@@ -391,7 +391,7 @@ impl InnerRegistry {
         &self,
         config: &RegistryConfig,
         service: &str,
-    ) -> Result<crate::stream::server::Acceptor, InternalBindError> {
+    ) -> Result<crate::server::conn::Acceptor, InternalBindError> {
         let mut handle = self.get_mut(config, service);
 
         handle.acceptor()
@@ -425,7 +425,7 @@ impl PidLock {
 #[derive(Debug)]
 enum ServiceHandle {
     Duplex {
-        acceptor: Option<crate::stream::server::Acceptor>,
+        acceptor: Option<crate::server::conn::Acceptor>,
         connector: crate::stream::duplex::DuplexClient,
     },
     Unix {
@@ -486,7 +486,7 @@ impl ServiceHandle {
     }
 
     /// Create an acceptor for this service.
-    fn acceptor(&mut self) -> Result<crate::stream::server::Acceptor, InternalBindError> {
+    fn acceptor(&mut self) -> Result<crate::server::conn::Acceptor, InternalBindError> {
         match self {
             ServiceHandle::Duplex { acceptor, .. } => {
                 tracing::trace!("Preparing in-process acceptor");

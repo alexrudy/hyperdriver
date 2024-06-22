@@ -6,9 +6,6 @@
 mod core;
 pub mod duplex;
 
-#[cfg(feature = "server")]
-pub mod server;
-
 #[cfg(feature = "tls")]
 pub mod tls;
 

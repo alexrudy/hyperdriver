@@ -114,7 +114,7 @@ mod tests {
     use super::*;
 
     use crate::client::conn::DuplexTransport;
-    use crate::stream::server::AcceptExt as _;
+    use crate::server::conn::AcceptExt as _;
     use tower::ServiceExt as _;
 
     #[tokio::test]
