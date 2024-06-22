@@ -12,10 +12,10 @@ use std::sync::Arc;
 
 use crate::bridge::rt::TokioExecutor;
 #[cfg(feature = "client")]
+use crate::client::conn::Stream as ClientStream;
+#[cfg(feature = "client")]
 use crate::client::conn::TlsTransport;
 use crate::client::conn::TransportTlsExt;
-#[cfg(feature = "client")]
-use crate::client::stream::Stream as ClientStream;
 #[cfg(feature = "client")]
 use crate::client::HttpConnectionBuilder;
 use crate::pidfile::PidFile;
@@ -464,7 +464,7 @@ impl ServiceHandle {
         &self,
         config: &RegistryConfig,
         name: Cow<'_, str>,
-    ) -> Result<crate::client::stream::Stream, ConnectionError> {
+    ) -> Result<crate::client::conn::Stream, ConnectionError> {
         match self {
             ServiceHandle::Duplex { connector, .. } => Ok(connector
                 .connect(config.buffer_size, None)

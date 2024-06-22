@@ -53,7 +53,7 @@ async fn braided_tls() {
         }
     });
 
-    let mut conn = hyperdriver::client::stream::Stream::connect(addr)
+    let mut conn = hyperdriver::client::conn::Stream::connect(addr)
         .await
         .unwrap()
         .tls(

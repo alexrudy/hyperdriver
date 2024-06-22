@@ -6,7 +6,7 @@ use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
 
 use super::{TlsConnectionError, Transport, TransportStream};
-use crate::client::stream::Stream as ClientStream;
+use crate::client::conn::Stream as ClientStream;
 use crate::info::HasConnectionInfo;
 
 /// Transport via TLS

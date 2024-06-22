@@ -1,9 +1,5 @@
 //! HTTP client library for Rust, built on top of [hyper].
 
-#![warn(missing_docs)]
-#![warn(missing_debug_implementations)]
-#![deny(unsafe_code)]
-
 use std::fmt;
 use std::future::poll_fn;
 use std::future::Future;
@@ -32,7 +28,6 @@ mod builder;
 
 pub mod conn;
 pub mod pool;
-pub mod stream;
 
 pub use builder::Builder;
 

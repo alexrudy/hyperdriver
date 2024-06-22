@@ -1,8 +1,6 @@
 //! Support for braided streams which include Transport Layer security
 //! and so involve a negotiation component.
 
-#[cfg(feature = "client")]
-pub mod client;
 #[cfg(feature = "server")]
 pub mod server;
 

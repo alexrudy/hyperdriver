@@ -20,7 +20,7 @@ async fn braided_tcp() {
         }
     });
 
-    let mut conn = hyperdriver::client::stream::Stream::connect(addr)
+    let mut conn = hyperdriver::client::conn::Stream::connect(addr)
         .await
         .unwrap();
 

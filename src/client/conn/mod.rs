@@ -34,17 +34,20 @@
 
 pub mod dns;
 pub(crate) mod protocol;
+pub(crate) mod stream;
 pub(crate) mod transport;
 
 pub use self::protocol::http::{ConnectionError, HttpConnectionBuilder};
 pub use self::protocol::{Connection, Protocol, ProtocolRequest};
+#[cfg(feature = "tls")]
+pub use self::stream::tls::TlsStream;
+pub use self::stream::Stream;
 #[cfg(feature = "stream")]
 pub use self::transport::duplex::DuplexTransport;
 #[cfg(feature = "stream")]
 pub use self::transport::stream::{IntoStream, TransportExt};
+pub use self::transport::tcp::{TcpTransport, TcpTransportConfig};
 #[cfg(feature = "tls")]
 pub use self::transport::tls::TlsTransportWrapper;
 pub use self::transport::{TlsTransport, TransportTlsExt};
-
-pub use self::transport::tcp::{TcpTransport, TcpTransportConfig};
 pub use self::transport::{Transport, TransportStream};

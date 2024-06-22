@@ -17,7 +17,7 @@ async fn braided_unix() {
         }
     });
 
-    let mut conn = hyperdriver::client::stream::Stream::from(
+    let mut conn = hyperdriver::client::conn::Stream::from(
         tokio::net::UnixStream::connect(dir.path().join("braid.sock"))
             .await
             .unwrap(),

@@ -8,7 +8,7 @@ use http_body_util::BodyExt as _;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Connection as _;
-use hyperdriver::client::stream::Stream;
+use hyperdriver::client::conn::Stream;
 use hyperdriver::client::HttpProtocol;
 use hyperdriver::service::MakeServiceRef;
 use hyperdriver::stream::server::Accept;

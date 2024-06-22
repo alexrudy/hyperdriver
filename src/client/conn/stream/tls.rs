@@ -3,10 +3,10 @@
 
 use core::task::{Context, Poll};
 use std::sync::Arc;
+use std::task::ready;
 use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
-use futures_core::ready;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, ToSocketAddrs};
@@ -14,12 +14,8 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 use crate::info::tls::HasTlsConnectionInfo;
 use crate::info::{ConnectionInfo, HasConnectionInfo};
 
-use super::TlsHandshakeStream;
 use crate::info::TlsConnectionInfo;
-
-mod connector;
-
-pub use connector::TlsConnector;
+use crate::stream::tls::TlsHandshakeStream;
 
 enum State<IO> {
     Handshake(tokio_rustls::Connect<IO>),
@@ -41,7 +37,7 @@ impl<IO> fmt::Debug for State<IO> {
 /// the handshake won't be completed until the first read/write
 /// request to the underlying stream.
 #[derive(Debug)]
-pub struct ClientTlsStream<IO>
+pub struct TlsStream<IO>
 where
     IO: HasConnectionInfo,
 {
@@ -50,7 +46,7 @@ where
     tls: Option<TlsConnectionInfo>,
 }
 
-impl<IO> HasConnectionInfo for ClientTlsStream<IO>
+impl<IO> HasConnectionInfo for TlsStream<IO>
 where
     IO: HasConnectionInfo,
     IO::Addr: Clone,
@@ -62,7 +58,7 @@ where
     }
 }
 
-impl<IO> HasTlsConnectionInfo for ClientTlsStream<IO>
+impl<IO> HasTlsConnectionInfo for TlsStream<IO>
 where
     IO: HasConnectionInfo,
     IO::Addr: Clone,
@@ -72,7 +68,7 @@ where
     }
 }
 
-impl<IO> TlsHandshakeStream for ClientTlsStream<IO>
+impl<IO> TlsHandshakeStream for TlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
     IO::Addr: Send + Unpin,
@@ -82,7 +78,7 @@ where
     }
 }
 
-impl<IO> ClientTlsStream<IO>
+impl<IO> TlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     IO::Addr: Clone,
@@ -98,7 +94,7 @@ where
     }
 }
 
-impl ClientTlsStream<TcpStream> {
+impl TlsStream<TcpStream> {
     /// Connect to the given tcp address, using the given domain name and TLS configuration.
     pub async fn connect(
         addr: impl ToSocketAddrs,
@@ -110,7 +106,7 @@ impl ClientTlsStream<TcpStream> {
     }
 }
 
-impl<IO> ClientTlsStream<IO>
+impl<IO> TlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
 {
@@ -139,7 +135,7 @@ where
     }
 }
 
-impl<IO> From<tokio_rustls::Connect<IO>> for ClientTlsStream<IO>
+impl<IO> From<tokio_rustls::Connect<IO>> for TlsStream<IO>
 where
     IO: HasConnectionInfo,
     IO::Addr: Clone,
@@ -157,7 +153,7 @@ where
     }
 }
 
-impl<IO> AsyncRead for ClientTlsStream<IO>
+impl<IO> AsyncRead for TlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     IO::Addr: Unpin,
@@ -172,7 +168,7 @@ where
     }
 }
 
-impl<IO> AsyncWrite for ClientTlsStream<IO>
+impl<IO> AsyncWrite for TlsStream<IO>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     IO::Addr: Unpin,

@@ -13,10 +13,10 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tower::Service;
 
+use crate::client::conn::Stream;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 use crate::client::pool::PoolableTransport;
-use crate::client::stream::Stream;
 #[cfg(feature = "tls")]
 use crate::info::tls::HasTlsConnectionInfo;
 use crate::info::ConnectionInfo;

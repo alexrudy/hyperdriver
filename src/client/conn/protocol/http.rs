@@ -408,7 +408,7 @@ mod tests {
 
     use super::*;
 
-    use crate::client::stream::Stream;
+    use crate::client::conn::Stream;
     use crate::client::{Error, Protocol};
     use crate::stream::tls::TlsHandshakeStream as _;
 

@@ -28,9 +28,12 @@ use crate::info::HasConnectionInfo;
 use crate::stream::duplex::DuplexStream;
 
 #[cfg(feature = "tls")]
-use crate::stream::tls::client::ClientTlsStream;
+use crate::client::conn::stream::tls::TlsStream;
 #[cfg(feature = "tls")]
 use crate::stream::tls::TlsHandshakeStream;
+
+#[cfg(feature = "tls")]
+pub(crate) mod tls;
 
 #[cfg(feature = "stream")]
 /// A stream which can handle multiple different underlying transports, and TLS
@@ -45,7 +48,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<ClientTlsStream<IO>, IO>,
+    inner: TlsBraid<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -65,7 +68,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<ClientTlsStream<IO>, IO>,
+    inner: TlsBraid<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -139,7 +142,7 @@ where
         };
 
         Stream {
-            inner: TlsBraid::Tls(ClientTlsStream::new(core, domain, config)),
+            inner: TlsBraid::Tls(TlsStream::new(core, domain, config)),
         }
     }
 }
