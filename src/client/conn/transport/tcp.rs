@@ -55,7 +55,7 @@ use crate::info::HasConnectionInfo;
 ///
 /// # Example
 /// ```no_run
-/// # use hyperdriver::client::conn::TcpTransport;
+/// # use hyperdriver::client::conn::transport::tcp::TcpTransport;
 /// # use hyperdriver::client::conn::dns::GaiResolver;
 /// # use tokio::net::TcpStream;
 /// # use tower::ServiceExt as _;
@@ -568,7 +568,7 @@ mod test {
     use tokio::net::TcpListener;
     use tower::Service;
 
-    use crate::client::Transport;
+    use crate::client::conn::Transport;
 
     use super::*;
 

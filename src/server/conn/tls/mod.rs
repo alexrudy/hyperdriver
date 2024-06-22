@@ -195,9 +195,9 @@ mod tests {
 
     use tracing::Instrument as _;
 
-    use crate::client::conn::DuplexTransport;
+    use crate::client::conn::transport::duplex::DuplexTransport;
+    use crate::client::conn::transport::TransportExt as _;
     use crate::client::conn::Transport as _;
-    use crate::client::conn::TransportTlsExt;
 
     use crate::server::conn::AcceptExt as _;
 

@@ -5,7 +5,7 @@ use http::Response;
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::client::conn::TransportTlsExt;
+use hyperdriver::client::conn::transport::TransportExt as _;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::service::make_service_fn;
 use hyperdriver::service::MakeServiceRef;
@@ -84,7 +84,7 @@ where
 #[tokio::test]
 async fn tls_echo_h1() {
     use hyper::client::conn::http1::Builder;
-    use hyperdriver::client::conn::DuplexTransport;
+    use hyperdriver::client::conn::transport::duplex::DuplexTransport;
     use hyperdriver::Client;
 
     let _ = tracing_subscriber::fmt::try_init();
@@ -135,7 +135,7 @@ async fn tls_echo_h1() {
 #[tokio::test]
 async fn tls_echo_h2() {
     use hyper::client::conn::http2::Builder;
-    use hyperdriver::client::conn::DuplexTransport;
+    use hyperdriver::client::conn::transport::duplex::DuplexTransport;
     use hyperdriver::Client;
 
     let _ = tracing_subscriber::fmt::try_init();

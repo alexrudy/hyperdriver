@@ -7,9 +7,9 @@ use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
+use hyperdriver::client::conn::protocol::HttpProtocol;
 use hyperdriver::client::conn::Connection as _;
 use hyperdriver::client::conn::Stream;
-use hyperdriver::client::HttpProtocol;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::service::MakeServiceRef;
 
@@ -26,14 +26,15 @@ async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Resp
     )))
 }
 
-async fn connection<P: hyperdriver::client::Protocol<Stream>>(
+async fn connection<P: hyperdriver::client::conn::Protocol<Stream>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
     let stream = client.connect(1024, None).await?;
     let conn = protocol
         .connect(
-            hyperdriver::client::TransportStream::new_stream(stream.into()).await?,
+            hyperdriver::client::conn::transport::TransportStream::new_stream(stream.into())
+                .await?,
             HttpProtocol::Http1,
         )
         .await?;

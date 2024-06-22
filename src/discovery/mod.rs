@@ -12,12 +12,12 @@ use std::sync::Arc;
 
 use crate::bridge::rt::TokioExecutor;
 #[cfg(feature = "client")]
+use crate::client::conn::protocol::auto::HttpConnectionBuilder;
+use crate::client::conn::transport::TransportExt as _;
+#[cfg(feature = "client")]
 use crate::client::conn::Stream as ClientStream;
 #[cfg(feature = "client")]
 use crate::client::conn::TlsTransport;
-use crate::client::conn::TransportTlsExt;
-#[cfg(feature = "client")]
-use crate::client::HttpConnectionBuilder;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
 

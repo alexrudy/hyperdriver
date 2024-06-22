@@ -1,14 +1,26 @@
+//! Protocol describes how http requests and responses are transmitted over a connection.
+//!
+//! There are three protocols provided here: HTTP/1.1, HTTP/2, and an automatically
+//! negotiated protocol which can be either HTTP/1.1 or HTTP/2 based on the connection
+//! protocol and ALPN negotiation.
+
 use std::future::Future;
 
-use futures_util::future::BoxFuture;
-use futures_util::FutureExt;
-use hyper::body::Incoming;
+use futures_core::future::BoxFuture;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 use tower::Service;
 
+use super::connection::ConnectionError;
+use super::connection::HttpConnection;
 use super::transport::TransportStream;
+use super::Connection;
+use crate::bridge::io::TokioIo;
 use crate::info::HasConnectionInfo;
 
-pub(super) mod http;
+pub mod auto;
+pub use hyper::client::conn::http1;
+pub use hyper::client::conn::http2;
 
 /// A request to establish a connection using a specific HTTP protocol
 /// over a given transport.
@@ -134,34 +146,86 @@ impl From<::http::Version> for HttpProtocol {
     }
 }
 
-/// A connection to a remote server which can send and recieve HTTP requests/responses.
-///
-/// Underneath, it may not use HTTP as the connection protocol, and it may use any appropriate
-/// transport protocol to connect to the server.
-pub trait Connection {
-    /// The error type for this connection
-    type Error: std::error::Error + Send + Sync + 'static;
+impl<IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http1::Builder
+where
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    type Response = HttpConnection;
 
-    /// The future type returned by this service
-    type Future: Future<Output = Result<::http::Response<Incoming>, Self::Error>> + Send + 'static;
+    type Error = ConnectionError;
+    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
 
-    /// Send a request to the remote server and return the response.
-    fn send_request(&mut self, request: crate::body::Request) -> Self::Future;
-
-    /// Poll the connection to see if it is ready to accept a new request.
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>>;
-
-    /// Future which resolves when the connection is ready to accept a new request.
-    fn when_ready(&mut self) -> BoxFuture<'_, Result<(), Self::Error>>
-    where
-        Self: Send,
-    {
-        futures_util::future::poll_fn(|cx| self.poll_ready(cx)).boxed()
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
     }
 
-    /// What HTTP version is this connection using?
-    fn version(&self) -> ::http::Version;
+    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
+        let builder = self.clone();
+        let stream = req.transport.into_inner();
+
+        Box::pin(async move {
+            let (sender, conn) = builder
+                .handshake(TokioIo::new(stream))
+                .await
+                .map_err(|err| ConnectionError::Handshake(err.into()))?;
+            tokio::spawn(async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(%err, "h1 connection driver error");
+                    } else {
+                        tracing::debug!(%err, "h1 connection driver error");
+                    }
+                }
+            });
+            Ok(HttpConnection::h1(sender))
+        })
+    }
+}
+
+impl<E, IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http2::Builder<E>
+where
+    E: hyper::rt::bounds::Http2ClientConnExec<crate::body::Body, TokioIo<IO>>
+        + Unpin
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    type Response = HttpConnection;
+
+    type Error = ConnectionError;
+    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
+        let builder = self.clone();
+        let stream = req.transport.into_inner();
+
+        Box::pin(async move {
+            let (sender, conn) = builder
+                .handshake(TokioIo::new(stream))
+                .await
+                .map_err(|err| ConnectionError::Handshake(err.into()))?;
+            tokio::spawn(async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(%err, "h2 connection driver error");
+                    } else {
+                        tracing::debug!(%err, "h2 connection driver error");
+                    }
+                }
+            });
+            Ok(HttpConnection::h2(sender))
+        })
+    }
 }

@@ -1,18 +1,13 @@
-//! HTTP connection handling.
+//! Auto-switching HTTP/1 and HTTP/2 connections.
 
-use ::http::{Response, Version};
-use futures_util::future::BoxFuture;
-use hyper::body::Incoming;
-use std::fmt;
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
-use crate::client::conn::Connection;
+use crate::client::conn::connection::ConnectionError;
+use crate::client::conn::connection::HttpConnection;
 use crate::client::conn::TransportStream;
-use crate::client::pool::PoolableConnection;
 use crate::info::HasConnectionInfo;
 
 use super::HttpProtocol;
@@ -58,9 +53,7 @@ impl HttpConnectionBuilder {
             }
         });
         trace!("handshake complete");
-        Ok(HttpConnection {
-            inner: InnerConnection::H2(sender),
-        })
+        Ok(HttpConnection::h2(sender))
     }
 
     async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection, ConnectionError>
@@ -79,9 +72,7 @@ impl HttpConnectionBuilder {
             }
         });
         trace!("handshake complete");
-        Ok(HttpConnection {
-            inner: InnerConnection::H1(sender),
-        })
+        Ok(HttpConnection::h1(sender))
     }
 
     #[tracing::instrument(name = "tls", skip_all)]
@@ -150,94 +141,6 @@ where
     }
 }
 
-impl<IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http1::Builder
-where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
-{
-    type Response = HttpConnection;
-
-    type Error = ConnectionError;
-    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
-        let builder = self.clone();
-        let stream = req.transport.into_inner();
-
-        Box::pin(async move {
-            let (sender, conn) = builder
-                .handshake(TokioIo::new(stream))
-                .await
-                .map_err(|err| ConnectionError::Handshake(err.into()))?;
-            tokio::spawn(async {
-                if let Err(err) = conn.await {
-                    if err.is_user() {
-                        tracing::error!(%err, "h1 connection driver error");
-                    } else {
-                        tracing::debug!(%err, "h1 connection driver error");
-                    }
-                }
-            });
-            Ok(HttpConnection {
-                inner: InnerConnection::H1(sender),
-            })
-        })
-    }
-}
-
-impl<E, IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http2::Builder<E>
-where
-    E: hyper::rt::bounds::Http2ClientConnExec<crate::body::Body, TokioIo<IO>>
-        + Unpin
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
-{
-    type Response = HttpConnection;
-
-    type Error = ConnectionError;
-    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
-        let builder = self.clone();
-        let stream = req.transport.into_inner();
-
-        Box::pin(async move {
-            let (sender, conn) = builder
-                .handshake(TokioIo::new(stream))
-                .await
-                .map_err(|err| ConnectionError::Handshake(err.into()))?;
-            tokio::spawn(async {
-                if let Err(err) = conn.await {
-                    if err.is_user() {
-                        tracing::error!(%err, "h2 connection driver error");
-                    } else {
-                        tracing::debug!(%err, "h2 connection driver error");
-                    }
-                }
-            });
-            Ok(HttpConnection {
-                inner: InnerConnection::H2(sender),
-            })
-        })
-    }
-}
-
 mod future {
     use std::fmt;
     use std::future::Future;
@@ -248,12 +151,12 @@ mod future {
     use futures_util::FutureExt;
     use tokio::io::{AsyncRead, AsyncWrite};
 
+    use crate::client::conn::connection::ConnectionError;
+    use crate::client::conn::protocol::HttpProtocol;
     use crate::client::conn::TransportStream;
-    use crate::client::HttpProtocol;
     use crate::info::HasConnectionInfo;
     use crate::DebugLiteral;
 
-    use super::ConnectionError;
     use super::HttpConnection;
     use super::HttpConnectionBuilder;
 
@@ -303,103 +206,6 @@ mod future {
     }
 }
 
-/// An HTTP connection.
-pub struct HttpConnection {
-    inner: InnerConnection,
-}
-
-impl fmt::Debug for HttpConnection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HttpConnection")
-            .field("version", &self.version())
-            .finish()
-    }
-}
-
-enum InnerConnection {
-    H2(hyper::client::conn::http2::SendRequest<crate::body::Body>),
-    H1(hyper::client::conn::http1::SendRequest<crate::body::Body>),
-}
-
-impl Connection for HttpConnection {
-    type Error = hyper::Error;
-
-    type Future = BoxFuture<'static, Result<Response<Incoming>, hyper::Error>>;
-
-    fn send_request(&mut self, request: crate::body::Request) -> Self::Future {
-        match &mut self.inner {
-            InnerConnection::H2(conn) => Box::pin(conn.send_request(request)),
-            InnerConnection::H1(conn) => Box::pin(conn.send_request(request)),
-        }
-    }
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        match &mut self.inner {
-            InnerConnection::H2(conn) => conn.poll_ready(cx),
-            InnerConnection::H1(conn) => conn.poll_ready(cx),
-        }
-    }
-
-    fn version(&self) -> http::Version {
-        match &self.inner {
-            InnerConnection::H2(_) => Version::HTTP_2,
-            InnerConnection::H1(_) => Version::HTTP_11,
-        }
-    }
-}
-
-impl PoolableConnection for HttpConnection {
-    fn is_open(&self) -> bool {
-        match &self.inner {
-            InnerConnection::H2(ref conn) => conn.is_ready(),
-            InnerConnection::H1(ref conn) => conn.is_ready(),
-        }
-    }
-
-    fn can_share(&self) -> bool {
-        match &self.inner {
-            InnerConnection::H2(_) => true,
-            InnerConnection::H1(_) => false,
-        }
-    }
-
-    fn reuse(&mut self) -> Option<Self> {
-        match &self.inner {
-            InnerConnection::H2(conn) => Some(Self {
-                inner: InnerConnection::H2(conn.clone()),
-            }),
-            InnerConnection::H1(_) => None,
-        }
-    }
-}
-
-/// Error returned when a connection could not be established.
-#[derive(Debug, Error)]
-pub enum ConnectionError {
-    /// Error connecting to the remote host via TCP
-    #[error(transparent)]
-    Connecting(Box<dyn std::error::Error + Send + Sync + 'static>),
-
-    /// Error completing the handshake.
-    #[error("handshake: {0}")]
-    Handshake(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
-
-    /// Connection was cancelled, probably because another one was established.
-    #[error("connection cancelled")]
-    Canceled(#[source] hyper::Error),
-
-    /// Connection was closed.
-    #[error("connection closed")]
-    Closed(#[source] hyper::Error),
-
-    /// Connection timed out.
-    #[error("connection timeout")]
-    Timeout,
-}
-
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -408,11 +214,15 @@ mod tests {
 
     use super::*;
 
-    use crate::client::conn::Stream;
-    use crate::client::{Error, Protocol};
+    use crate::client::conn::connection::ConnectionError;
+    use crate::client::conn::Protocol as _;
+    use crate::client::conn::{protocol::HttpProtocol, Connection as _, Stream};
+    use crate::client::pool::PoolableConnection as _;
+    use crate::client::Error;
     use crate::stream::tls::TlsHandshakeStream as _;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};
+    use http::Version;
     use static_assertions::assert_impl_all;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tower::Service;

@@ -10,10 +10,15 @@
 //! trait, effecitively making them a service which accepts a URI and returns a bidirectional stream.
 //!
 //! Two builtin transports are provided:
-//! - [`TcpTransport`]: Connects to a remote server over TCP/IP. This is the default transport, and what
+//! - [`transport::tcp::TcpTransport`]: Connects to a remote server over TCP/IP. This is the default transport, and what
 //!     usually powers HTTP connections.
-//! - [`DuplexTransport`]: Connects to a remote server over a duplex stream, which
+//! - [`transport::duplex::DuplexTransport`]: Connects to a remote server over a duplex stream, which
 //!     is an in-memory stream that can be used for testing or other purposes.
+//!
+//! ## Stream
+//!
+//! The stream is a bidirectional stream of bytes, which is used to send and receive data over the connection.
+//! The stream is a low-level abstraction, and is used by the transport to send and receive data.
 //!
 //! ## Protocol
 //!
@@ -32,22 +37,14 @@
 //! future which resolves to a response. The connection is responsible for encoding and decoding the request
 //! and response objects, and for sending and receiving the data over the transport.
 
+pub mod connection;
 pub mod dns;
-pub(crate) mod protocol;
-pub(crate) mod stream;
-pub(crate) mod transport;
+pub mod protocol;
+pub mod stream;
+pub mod transport;
 
-pub use self::protocol::http::{ConnectionError, HttpConnectionBuilder};
-pub use self::protocol::{Connection, Protocol, ProtocolRequest};
-#[cfg(feature = "tls")]
-pub use self::stream::tls::TlsStream;
+pub use self::connection::Connection;
+pub use self::protocol::{Protocol, ProtocolRequest};
 pub use self::stream::Stream;
-#[cfg(feature = "stream")]
-pub use self::transport::duplex::DuplexTransport;
-#[cfg(feature = "stream")]
-pub use self::transport::stream::{IntoStream, TransportExt};
-pub use self::transport::tcp::{TcpTransport, TcpTransportConfig};
-#[cfg(feature = "tls")]
-pub use self::transport::tls::TlsTransportWrapper;
-pub use self::transport::{TlsTransport, TransportTlsExt};
+pub use self::transport::{TlsTransport, TransportExt as _};
 pub use self::transport::{Transport, TransportStream};

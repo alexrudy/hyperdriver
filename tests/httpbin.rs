@@ -1,5 +1,5 @@
 use http_body_util::BodyExt as _;
-use hyperdriver::client::{conn::TcpTransportConfig, Client};
+use hyperdriver::client::{conn::transport::tcp::TcpTransportConfig, Client};
 
 /// Make a request to httpbin.org
 async fn httpbin_request(

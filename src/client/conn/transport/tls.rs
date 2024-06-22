@@ -1,3 +1,5 @@
+//! Wrap a transport with TLS
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};

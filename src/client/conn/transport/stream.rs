@@ -46,21 +46,6 @@ where
     }
 }
 
-/// Extension trait for Transports to provide a method to convert them into a transport
-/// which uses a hyperdriver Braided stream.
-pub trait TransportExt: Transport {
-    /// Wrap the transport in a converter which produces a Stream
-    fn into_stream(self) -> IntoStream<Self>
-    where
-        Self::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + Send + 'static,
-        <<Self as Transport>::IO as HasConnectionInfo>::Addr: Into<BraidAddr>,
-    {
-        IntoStream::new(self)
-    }
-}
-
-impl<T> TransportExt for T where T: Transport {}
-
 mod fut {
 
     use pin_project::pin_project;
@@ -113,7 +98,8 @@ mod fut {
 mod tests {
     use super::*;
 
-    use crate::client::conn::DuplexTransport;
+    use crate::client::conn::transport::duplex::DuplexTransport;
+    use crate::client::conn::transport::TransportExt as _;
     use crate::server::conn::AcceptExt as _;
     use tower::ServiceExt as _;
 

@@ -186,9 +186,9 @@ mod tests {
     use tower::make::Shared;
     use tower::Service;
 
-    use crate::client::conn::DuplexTransport;
+    use crate::client::conn::transport::duplex::DuplexTransport;
+    use crate::client::conn::transport::TransportExt as _;
     use crate::client::conn::Transport as _;
-    use crate::client::conn::TransportTlsExt;
 
     use crate::info::TlsConnectionInfo;
     use crate::server::conn::AcceptExt as _;

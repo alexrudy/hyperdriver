@@ -1,3 +1,7 @@
+//! Transport streams for connecting to remote servers.
+//!
+//! Transports are responsible for establishing a connection to a remote server, shuffling bytes back and forth,
+
 use std::future::Future;
 use std::io;
 #[cfg(feature = "tls")]
@@ -13,12 +17,16 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tower::Service;
 
+#[cfg(feature = "stream")]
+pub use self::stream::IntoStream;
 use crate::client::conn::Stream;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 use crate::client::pool::PoolableTransport;
 #[cfg(feature = "tls")]
 use crate::info::tls::HasTlsConnectionInfo;
+#[cfg(feature = "stream")]
+use crate::info::BraidAddr;
 use crate::info::ConnectionInfo;
 use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
@@ -30,14 +38,14 @@ use crate::stream::tls::TlsHandshakeStream as _;
 use self::tls::TlsTransportWrapper;
 
 #[cfg(feature = "stream")]
-pub(crate) mod duplex;
+pub mod duplex;
 
 #[cfg(feature = "stream")]
 pub(crate) mod stream;
 
-pub(crate) mod tcp;
+pub mod tcp;
 #[cfg(feature = "tls")]
-pub(crate) mod tls;
+pub mod tls;
 
 /// A transport provides data transmission between two endpoints.
 ///
@@ -91,6 +99,59 @@ where
         Service::poll_ready(self, cx)
     }
 }
+
+/// Extension trait for Transports to provide additional configuration options.
+pub trait TransportExt: Transport {
+    #[cfg(feature = "stream")]
+    /// Wrap the transport in a converter which produces a Stream
+    fn into_stream(self) -> IntoStream<Self>
+    where
+        Self::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        <<Self as Transport>::IO as HasConnectionInfo>::Addr: Into<BraidAddr>,
+    {
+        IntoStream::new(self)
+    }
+
+    #[cfg(feature = "tls")]
+    /// Wrap the transport in a TLS layer.
+    fn with_tls(self, config: Arc<ClientConfig>) -> TlsTransport<Self>
+    where
+        Self: Sized,
+    {
+        TlsTransport::new(self).with_tls(config)
+    }
+
+    #[cfg(feature = "tls")]
+    /// Wrap the transport in a TLS layer configured with a default client configuration.
+    fn with_default_tls(self) -> TlsTransport<Self>
+    where
+        Self: Sized,
+    {
+        TlsTransport::new(self).with_default_tls()
+    }
+
+    /// Wrap the transport in a no-TLS layer.
+    fn without_tls(self) -> TlsTransport<Self>
+    where
+        Self: Sized,
+    {
+        TlsTransport::new(self)
+    }
+
+    #[cfg(feature = "tls")]
+    /// Wrap the transport in a TLS layer if the given config is `Some`, otherwise wrap it in a no-TLS layer.
+    fn with_optional_tls(self, config: Option<Arc<ClientConfig>>) -> TlsTransport<Self>
+    where
+        Self: Sized,
+    {
+        match config {
+            Some(config) => self.with_tls(config),
+            None => self.without_tls(),
+        }
+    }
+}
+
+impl<T> TransportExt for T where T: Transport {}
 
 /// A wrapper around an IO stream which provides additional information about the connection.
 ///
@@ -290,18 +351,24 @@ where
     }
 }
 
+/// An error returned when a TLS connection attempt fails
 #[cfg(feature = "tls")]
 #[derive(Debug, Error)]
 pub enum TlsConnectionError<E> {
+    /// An error occured while trying to connect via the underlying transport
+    /// before any TLS handshake was attempted.
     #[error(transparent)]
     Connection(#[from] E),
 
+    /// An error occured during the TLS handshake.
     #[error("TLS handshake failed: {0}")]
     Handshake(#[source] std::io::Error),
 
+    /// The request did not contain a domain, making TLS certificate verification impossible.
     #[error("No domain found in URI")]
     NoDomain,
 
+    /// The TLS feature is disabled, but TLS was requested.
     #[error("TLS is not enabled, can't connect to https")]
     TlsDisabled,
 }
@@ -562,49 +629,6 @@ mod future {
         }
     }
 }
-
-/// Extension trait which provides access to TLS configuration methods.
-pub trait TransportTlsExt: Transport {
-    #[cfg(feature = "tls")]
-    /// Wrap the transport in a TLS layer.
-    fn with_tls(self, config: Arc<ClientConfig>) -> TlsTransport<Self>
-    where
-        Self: Sized,
-    {
-        TlsTransport::new(self).with_tls(config)
-    }
-
-    #[cfg(feature = "tls")]
-    /// Wrap the transport in a TLS layer configured with a default client configuration.
-    fn with_default_tls(self) -> TlsTransport<Self>
-    where
-        Self: Sized,
-    {
-        TlsTransport::new(self).with_default_tls()
-    }
-
-    /// Wrap the transport in a no-TLS layer.
-    fn without_tls(self) -> TlsTransport<Self>
-    where
-        Self: Sized,
-    {
-        TlsTransport::new(self)
-    }
-
-    #[cfg(feature = "tls")]
-    /// Wrap the transport in a TLS layer if the given config is `Some`, otherwise wrap it in a no-TLS layer.
-    fn with_optional_tls(self, config: Option<Arc<ClientConfig>>) -> TlsTransport<Self>
-    where
-        Self: Sized,
-    {
-        match config {
-            Some(config) => self.with_tls(config),
-            None => self.without_tls(),
-        }
-    }
-}
-
-impl<T> TransportTlsExt for T where T: Transport {}
 
 #[cfg(test)]
 mod tests {

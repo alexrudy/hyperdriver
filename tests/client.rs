@@ -5,8 +5,8 @@ use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::rt::TokioExecutor;
 use std::pin::pin;
 
-use hyperdriver::client::conn::DuplexTransport;
-use hyperdriver::client::{HttpConnectionBuilder, PoolConfig};
+use hyperdriver::client::conn::transport::duplex::DuplexTransport;
+use hyperdriver::client::{conn::protocol::auto::HttpConnectionBuilder, PoolConfig};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
