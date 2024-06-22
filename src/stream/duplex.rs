@@ -41,8 +41,23 @@ use crate::info::{self, HasConnectionInfo, Protocol};
 use crate::stream::server::Accept;
 
 /// Address (blank) for a duplex stream
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub struct DuplexAddr;
+#[derive(Default, Clone, PartialEq, Eq, Hash)]
+pub struct DuplexAddr {
+    _priv: (),
+}
+
+impl fmt::Debug for DuplexAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DuplexAddr")
+    }
+}
+
+impl DuplexAddr {
+    /// Create a new duplex address
+    pub fn new() -> Self {
+        Self { _priv: () }
+    }
+}
 
 impl fmt::Display for DuplexAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -77,7 +92,8 @@ impl DuplexStream {
     /// using [`DuplexClient`] and [`DuplexIncoming`] together to create a client/server pair of duplex streams.
     pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info = info::ConnectionInfo::duplex(name, protocol, max_buf_size).map(|_| DuplexAddr);
+        let info =
+            info::ConnectionInfo::duplex(name, protocol, max_buf_size).map(|_| DuplexAddr::new());
         (
             DuplexStream {
                 inner: a,
