@@ -5,7 +5,7 @@ export RUSTDOCFLAGS := "-D warnings"
 
 nightly := "nightly-2024-04-16"
 msrv := "1.74"
-rust := "stable"
+rust := env("RUST_TOOLCHAIN", "stable")
 
 # Run all checks
 all: fmt check deny clippy examples docs test machete udeps msrv
