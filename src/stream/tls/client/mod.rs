@@ -17,10 +17,8 @@ use crate::info::{ConnectionInfo, HasConnectionInfo};
 use super::TlsHandshakeStream;
 use crate::info::TlsConnectionInfo;
 
-#[cfg(feature = "connector")]
 mod connector;
 
-#[cfg(feature = "connector")]
 pub use connector::TlsConnector;
 
 enum State<IO> {
