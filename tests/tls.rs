@@ -91,7 +91,8 @@ async fn tls_echo_h1() {
 
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming).tls(tls_config().into());
+    let acceptor =
+        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(tls_config().into());
 
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
@@ -141,7 +142,8 @@ async fn tls_echo_h2() {
 
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::stream::server::Acceptor::from(incoming).tls(tls_config().into());
+    let acceptor =
+        hyperdriver::stream::server::Acceptor::from(incoming).with_tls(tls_config().into());
     let server = hyperdriver::server::Server::new_with_protocol(
         acceptor,
         make_service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),

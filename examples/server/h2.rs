@@ -39,7 +39,7 @@ async fn main() {
     let addr = incoming.local_addr().unwrap();
 
     let acceptor = hyperdriver::stream::server::Acceptor::from(incoming)
-        .tls(Arc::new(tls_config("localhost")));
+        .with_tls(Arc::new(tls_config("localhost")));
 
     let server = hyperdriver::server::Server::new(
         acceptor,

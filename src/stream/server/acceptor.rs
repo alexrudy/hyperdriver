@@ -102,7 +102,7 @@ impl<A> Acceptor<A> {
     /// # Arguments
     ///
     /// * `config` - The TLS server configuration to use.
-    pub fn tls(self, config: Arc<ServerConfig>) -> Self {
+    pub fn with_tls(self, config: Arc<ServerConfig>) -> Self {
         let core = match self.inner {
             AcceptorInner::NoTls(core) => core,
             AcceptorInner::Tls(_) => panic!("Acceptor::tls called twice"),

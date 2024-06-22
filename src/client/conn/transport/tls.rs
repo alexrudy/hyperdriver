@@ -227,7 +227,7 @@ mod tests {
 
         let mut config = fixtures::tls_server_config();
         config.alpn_protocols.push(b"h2".to_vec());
-        let accept = crate::stream::server::Acceptor::new(server).tls(config.into());
+        let accept = crate::stream::server::Acceptor::new(server).with_tls(config.into());
 
         let uri = "https://example.com/".parse().unwrap();
 
