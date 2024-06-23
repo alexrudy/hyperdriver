@@ -14,6 +14,7 @@ use tokio::net::ToSocketAddrs;
 use tracing::instrument::Instrumented;
 use tracing::{debug, Instrument};
 
+pub use self::builder::Builder;
 pub use self::conn::auto::Builder as AutoBuilder;
 pub use self::conn::Accept;
 #[cfg(feature = "stream")]
@@ -64,8 +65,8 @@ impl<A, P, S, B> fmt::Debug for Server<A, P, S, B> {
 
 impl Server<(), (), (), ()> {
     /// Create a new server builder.
-    pub fn builder() -> builder::Builder {
-        builder::Builder::new()
+    pub fn builder() -> Builder {
+        Builder::new()
     }
 }
 
