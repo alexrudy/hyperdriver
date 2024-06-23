@@ -282,7 +282,7 @@ impl<'c> TcpConnecting<'c> {
                 .map(|duration| duration / (self.addresses.len()) as u32)
         };
 
-        let mut attempts = EyeballSet::new(delay);
+        let mut attempts = EyeballSet::new(delay, self.config.happy_eyeballs_timeout);
 
         while let Some(address) = self.addresses.pop() {
             let span: tracing::Span = tracing::trace_span!("connect", %address);

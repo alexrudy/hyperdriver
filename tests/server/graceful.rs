@@ -7,7 +7,6 @@ use futures_util::task::noop_waker;
 use hyperdriver::body::Request;
 use hyperdriver::body::Response;
 use hyperdriver::server::conn::Acceptor;
-use hyperdriver::service::make_service_fn;
 use hyperdriver::stream::duplex::{self, DuplexClient};
 use hyperdriver::Server;
 
@@ -40,10 +39,11 @@ async fn before_request() {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let (acceptor, _) = pair().await;
 
-    let server = Server::new(
-        acceptor,
-        make_service_fn(|_| async { Ok::<_, BoxError>(tower::service_fn(echo)) }),
-    );
+    let server = Server::builder()
+        .with_acceptor(acceptor)
+        .with_shared_service(tower::service_fn(echo))
+        .with_auto_http()
+        .build();
 
     let serve = server.with_graceful_shutdown(async {
         if rx.await.is_err() {

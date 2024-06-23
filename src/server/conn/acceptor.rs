@@ -75,8 +75,13 @@ enum AcceptorInner<A> {
 #[derive(Debug)]
 #[pin_project(project = AcceptorProj)]
 pub enum AcceptorCore {
+    /// A TCP listener.
     Tcp(#[pin] TcpListener),
+
+    /// A duplex listener.
     Duplex(#[pin] DuplexIncoming),
+
+    /// A Unix listener.
     Unix(#[pin] UnixListener),
 }
 

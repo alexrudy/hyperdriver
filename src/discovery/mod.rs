@@ -279,27 +279,41 @@ impl ServiceRegistry {
     }
 
     /// Create a server which will bind to a service by name.
-    pub async fn server<'a, M, S, B>(
+    pub async fn server<'a, S, M, B>(
         &'a self,
         make_service: M,
         name: S,
     ) -> Result<
-        crate::server::Server<M, AutoBuilder<TokioExecutor>, crate::server::conn::Acceptor, B>,
+        crate::server::Server<crate::server::conn::Acceptor, AutoBuilder<TokioExecutor>, M, B>,
         BindError,
     >
     where
         S: Into<Cow<'a, str>>,
     {
         let acceptor = self.bind(name.into()).await?;
-        Ok(crate::server::Server::new(acceptor, make_service))
+        Ok(crate::server::Server::builder()
+            .with_acceptor(acceptor)
+            .with_auto_http()
+            .with_make_service(make_service)
+            .with_body()
+            .build())
     }
 
     /// Create a server which will use a registry transport to proxy requests to services.
     pub fn router<A, B>(
         &self,
         acceptor: A,
-    ) -> crate::server::Server<Shared<Client>, AutoBuilder<TokioExecutor>, A, B> {
-        crate::server::Server::new(acceptor, Shared::new(self.client()))
+    ) -> crate::server::Server<A, AutoBuilder<TokioExecutor>, Shared<Client>, B>
+    where
+        A: crate::server::conn::Accept,
+        B: http_body::Body,
+    {
+        crate::server::Server::builder()
+            .with_acceptor(acceptor)
+            .with_auto_http()
+            .with_shared_service(self.client())
+            .with_body()
+            .build()
     }
 
     /// Connect to a service by name.

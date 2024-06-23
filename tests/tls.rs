@@ -7,7 +7,6 @@ use http_body_util::BodyExt as _;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::transport::TransportExt as _;
 use hyperdriver::server::conn::Accept;
-use hyperdriver::service::make_service_fn;
 use hyperdriver::service::MakeServiceRef;
 use rustls::ServerConfig;
 
@@ -56,8 +55,8 @@ async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Resp
     )))
 }
 
-fn serve_gracefully<S, P, A, B>(
-    server: Server<S, P, A, B>,
+fn serve_gracefully<A, P, S, B>(
+    server: Server<A, P, S, B>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeServiceRef<A::Conn, B> + Send + 'static,
@@ -94,11 +93,11 @@ async fn tls_echo_h1() {
     let acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
 
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        make_service_fn(|_| async { Ok::<_, BoxError>(tower::service_fn(echo)) }),
-        hyperdriver::server::conn::http1::Builder::new(),
-    );
+    let server = hyperdriver::server::Server::builder()
+        .with_acceptor(acceptor)
+        .with_shared_service(tower::service_fn(echo))
+        .with_http1()
+        .build();
 
     let handle = serve_gracefully(server);
 
@@ -144,11 +143,11 @@ async fn tls_echo_h2() {
 
     let acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        make_service_fn(|_| async { Ok::<_, hyper::Error>(tower::service_fn(echo)) }),
-        hyperdriver::server::conn::http2::Builder::new(TokioExecutor::new()),
-    );
+    let server = hyperdriver::server::Server::builder()
+        .with_acceptor(acceptor)
+        .with_shared_service(tower::service_fn(echo))
+        .with_http2()
+        .build();
 
     let guard = serve_gracefully(server);
 
