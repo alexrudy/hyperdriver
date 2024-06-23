@@ -21,6 +21,38 @@ use super::conn::tls::info::TlsConnectionInfoService;
 ///
 /// The builder uses the same set of generic types as the server to track the
 /// required components.
+///
+/// To build a simple server, you can use the `with_shared_service` method:
+/// ```rust
+/// use hyperdriver::stream::duplex;
+/// use hyperdriver::server::Builder;
+/// use hyperdriver::Body;
+/// use tower::service_fn;
+///
+/// #[derive(Debug)]
+/// struct MyError;
+///
+/// impl std::fmt::Display for MyError {
+///    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         f.write_str("MyError")
+///   }
+/// }
+///
+/// impl std::error::Error for MyError {}
+///
+/// # async fn example() {
+/// let (_, incoming) = duplex::pair("server.test".parse().unwrap());
+/// let server = Builder::new()
+///     .with_acceptor(incoming)
+///     .with_shared_service(service_fn(|req| async move {
+///        Ok::<_, MyError>(http::Response::new(Body::empty()))
+///    }))
+///    .with_auto_http()
+///    .build();
+///
+/// server.await.unwrap();
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct Builder<A = NeedsAcceptor, P = NeedsProtocol, S = NeedsService, B = crate::Body> {
     acceptor: A,

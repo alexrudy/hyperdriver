@@ -65,6 +65,39 @@ impl<A, P, S, B> fmt::Debug for Server<A, P, S, B> {
 
 impl Server<(), (), (), ()> {
     /// Create a new server builder.
+    ///
+    ///
+    /// To build a simple server, you can use the `with_shared_service` method:
+    /// ```rust
+    /// use hyperdriver::stream::duplex;
+    /// use hyperdriver::Server;
+    /// use hyperdriver::Body;
+    /// use tower::service_fn;
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError;
+    ///
+    /// impl std::fmt::Display for MyError {
+    ///    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         f.write_str("MyError")
+    ///   }
+    /// }
+    ///
+    /// impl std::error::Error for MyError {}
+    ///
+    /// # async fn example() {
+    /// let (_, incoming) = duplex::pair("server.test".parse().unwrap());
+    /// let server = Server::builder()
+    ///     .with_acceptor(incoming)
+    ///     .with_shared_service(service_fn(|req| async move {
+    ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
+    ///    }))
+    ///    .with_auto_http()
+    ///    .build();
+    ///
+    /// server.await.unwrap();
+    /// # }
+
     pub fn builder() -> Builder {
         Builder::new()
     }
