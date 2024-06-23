@@ -67,7 +67,11 @@ async fn custom_body_server() {
     let (_, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
     let service = CustomService.adapt_custom_body();
 
-    let server = hyperdriver::server::Server::new_shared(incoming, service);
+    let server = hyperdriver::server::Server::builder()
+        .with_acceptor(incoming)
+        .with_auto_http()
+        .with_shared_service(service)
+        .build();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 

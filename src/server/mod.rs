@@ -7,18 +7,23 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
-pub use self::conn::auto::Builder as AutoBuilder;
-use self::conn::Connection;
-use crate::bridge::rt::TokioExecutor;
-pub use crate::server::conn::Accept;
-use crate::server::conn::Acceptor;
-use crate::service::MakeServiceRef;
 use futures_util::future::FutureExt as _;
 use http_body::Body;
-use tower::make::Shared;
+#[cfg(feature = "stream")]
+use tokio::net::ToSocketAddrs;
 use tracing::instrument::Instrumented;
 use tracing::{debug, Instrument};
 
+pub use self::conn::auto::Builder as AutoBuilder;
+pub use self::conn::Accept;
+#[cfg(feature = "stream")]
+use self::conn::Acceptor;
+use self::conn::Connection;
+#[cfg(feature = "stream")]
+use crate::bridge::rt::TokioExecutor;
+use crate::service::MakeServiceRef;
+
+mod builder;
 pub mod conn;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -44,44 +49,42 @@ pub trait Protocol<S, IO> {
 
 /// A server that can accept connections, and run each connection
 /// using a [tower::Service].
-pub struct Server<S, P, A, B> {
+pub struct Server<A, P, S, B> {
     incoming: A,
-    make_service: S,
     protocol: P,
+    make_service: S,
     body: PhantomData<fn(B) -> ()>,
 }
 
-impl<S, P, A, B> fmt::Debug for Server<S, P, A, B> {
+impl<A, P, S, B> fmt::Debug for Server<A, P, S, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Server").finish()
     }
 }
-impl<S, P, A, B> Server<S, P, A, B> {
-    /// Set the protocol to use for serving connections.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Server<S, P2, A, B> {
-        Server {
-            incoming: self.incoming,
-            make_service: self.make_service,
-            protocol,
-            body: PhantomData,
-        }
-    }
 
+impl Server<(), (), (), ()> {
+    /// Create a new server builder.
+    pub fn builder() -> builder::Builder {
+        builder::Builder::new()
+    }
+}
+
+impl<A, P, S, B> Server<A, P, S, B> {
     /// Create a new server with the given `MakeService` and `Acceptor`, and a custom [Protocol].
     ///
     /// The default protocol is [AutoBuilder], which can serve both HTTP/1 and HTTP/2 connections,
     /// and will automatically detect the protocol used by the client.
-    pub fn new_with_protocol(incoming: A, make_service: S, protocol: P) -> Self {
+    pub fn new(incoming: A, protocol: P, make_service: S) -> Self {
         Self {
             incoming,
-            make_service,
             protocol,
+            make_service,
             body: PhantomData,
         }
     }
 
     /// Shutdown the server gracefully when the given future resolves.
-    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<S, P, A, B, F>
+    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<A, P, S, B, F>
     where
         S: MakeServiceRef<A::Conn, B>,
         P: Protocol<S::Service, A::Conn>,
@@ -93,47 +96,30 @@ impl<S, P, A, B> Server<S, P, A, B> {
     }
 }
 
-impl<S, A, B> Server<S, AutoBuilder<TokioExecutor>, A, B> {
-    /// Create a new server with the given `MakeService` and `Acceptor`.
-    pub fn new(incoming: A, make_service: S) -> Self {
-        Self {
-            incoming,
-            make_service,
-            protocol: AutoBuilder::new(TokioExecutor::new()),
-            body: PhantomData,
-        }
-    }
-}
-
-impl<S, B> Server<S, AutoBuilder<TokioExecutor>, Acceptor<tokio::net::TcpListener>, B> {
+#[cfg(feature = "stream")]
+impl<S, B> Server<Acceptor, AutoBuilder<TokioExecutor>, S, B> {
     /// Bind a new server to the given address.
-    pub async fn bind(addr: std::net::SocketAddr, make_service: S) -> io::Result<Self> {
+    pub async fn bind<A: ToSocketAddrs>(addr: A, make_service: S) -> io::Result<Self> {
         let incoming = tokio::net::TcpListener::bind(addr).await?;
-        let accept = Acceptor::new(incoming);
-        Ok(Server::new(accept, make_service))
+        let accept = Acceptor::from(incoming);
+
+        Ok(Server::builder()
+            .with_acceptor(accept)
+            .with_auto_http()
+            .with_make_service(make_service)
+            .with_body()
+            .build())
     }
 }
 
-impl<S, A, B> Server<Shared<S>, AutoBuilder<TokioExecutor>, A, B> {
-    /// Create a new server with the given `Service` and `Acceptor`. The service will be cloned for each connection.
-    pub fn new_shared(incoming: A, service: S) -> Self {
-        Self {
-            incoming,
-            make_service: Shared::new(service),
-            protocol: AutoBuilder::new(TokioExecutor::new()),
-            body: PhantomData,
-        }
-    }
-}
-
-impl<S, P, A, B> IntoFuture for Server<S, P, A, B>
+impl<A, P, S, B> IntoFuture for Server<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
     B: Body,
 {
-    type IntoFuture = Serving<S, P, A, B>;
+    type IntoFuture = Serving<A, P, S, B>;
     type Output = Result<(), ServerError>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -148,12 +134,12 @@ where
 #[derive(Debug)]
 #[pin_project::pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Serving<S, P, A, B>
+pub struct Serving<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
     A: Accept,
 {
-    server: Server<S, P, A, B>,
+    server: Server<A, P, S, B>,
 
     #[pin]
     state: State<A::Conn, S::Future>,
@@ -171,7 +157,7 @@ enum State<S, F> {
     },
 }
 
-impl<S, P, A, B> Serving<S, P, A, B>
+impl<A, P, S, B> Serving<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
@@ -224,7 +210,7 @@ where
     }
 }
 
-impl<S, P, A, B> Future for Serving<S, P, A, B>
+impl<A, P, S, B> Future for Serving<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
@@ -293,13 +279,13 @@ fn close() -> (CloseSender, CloseReciever) {
 
 /// A server that can accept connections, and run each connection, and can also process graceful shutdown signals.
 #[pin_project::pin_project]
-pub struct GracefulShutdown<S, P, A, B, F>
+pub struct GracefulShutdown<A, P, S, B, F>
 where
     S: MakeServiceRef<A::Conn, B>,
     A: Accept,
 {
     #[pin]
-    server: Serving<S, P, A, B>,
+    server: Serving<A, P, S, B>,
 
     #[pin]
     signal: F,
@@ -312,7 +298,7 @@ where
     connection: CloseSender,
 }
 
-impl<S, P, A, B, F> GracefulShutdown<S, P, A, B, F>
+impl<A, P, S, B, F> GracefulShutdown<A, P, S, B, F>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
@@ -320,7 +306,7 @@ where
     B: Body,
     F: Future<Output = ()>,
 {
-    fn new(server: Server<S, P, A, B>, signal: F) -> Self {
+    fn new(server: Server<A, P, S, B>, signal: F) -> Self {
         let (tx, rx) = close();
         let (tx2, rx2) = close();
         Self {
@@ -334,7 +320,7 @@ where
     }
 }
 
-impl<S, P, A, B, F> fmt::Debug for GracefulShutdown<S, P, A, B, F>
+impl<A, P, S, B, F> fmt::Debug for GracefulShutdown<A, P, S, B, F>
 where
     S: MakeServiceRef<A::Conn, B>,
     A: Accept,
@@ -344,7 +330,7 @@ where
     }
 }
 
-impl<S, P, A, Body, F> Future for GracefulShutdown<S, P, A, Body, F>
+impl<A, P, S, Body, F> Future for GracefulShutdown<A, P, S, Body, F>
 where
     S: MakeServiceRef<A::Conn, Body>,
     P: Protocol<S::Service, A::Conn>,
@@ -490,7 +476,11 @@ mod tests {
 
         let (_, incoming) = duplex::pair("server.test".parse().unwrap());
 
-        let server = Server::new(incoming, svc);
+        let server = Server::builder()
+            .with_acceptor(incoming)
+            .with_make_service(svc)
+            .with_auto_http()
+            .build();
 
         server.into_future();
     }

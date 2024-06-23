@@ -8,6 +8,7 @@
 
 use std::collections::VecDeque;
 use std::future::IntoFuture;
+use std::time::Instant;
 use std::{fmt, future::Future, marker::PhantomData, time::Duration};
 
 use futures_core::future::BoxFuture;
@@ -25,6 +26,9 @@ use tracing::trace;
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq)]
 pub enum HappyEyeballsError<T> {
+    /// The timeout was reached.
+    Timeout(Duration),
+
     /// No progress can be made.
     NoProgress,
 
@@ -40,6 +44,7 @@ where
         match self {
             Self::NoProgress => write!(f, "no progress can be made"),
             Self::Error(e) => write!(f, "error: {}", e),
+            Self::Timeout(d) => write!(f, "timeout: {}ms", d.as_millis()),
         }
     }
 }
@@ -71,7 +76,9 @@ type HappyEyeballsResult<T, E> = Result<T, HappyEyeballsError<E>>;
 pub struct EyeballSet<F, T, E> {
     queue: VecDeque<F>,
     tasks: FuturesUnordered<F>,
+    delay: Option<Duration>,
     timeout: Option<Duration>,
+    started: Option<Instant>,
     initial_concurrency: Option<usize>,
     error: Option<HappyEyeballsError<E>>,
     result: PhantomData<fn() -> T>,
@@ -82,11 +89,13 @@ impl<F, T, E> EyeballSet<F, T, E> {
     ///
     /// The timeout is the amount of time between individual connection attempts.
     #[allow(dead_code)]
-    pub fn new(timeout: Option<Duration>) -> Self {
+    pub fn new(delay: Option<Duration>, timeout: Option<Duration>) -> Self {
         Self {
             queue: VecDeque::new(),
             tasks: FuturesUnordered::new(),
+            delay,
             timeout,
+            started: None,
             initial_concurrency: None,
             error: None,
             result: PhantomData,
@@ -127,6 +136,8 @@ where
     F: Future<Output = Result<T, E>>,
 {
     async fn join_next(&mut self) -> Eyeball<T> {
+        self.started.get_or_insert_with(Instant::now);
+
         match self.tasks.next().await {
             Some(Ok(stream)) => Eyeball::Ok(stream),
             Some(Err(e)) if self.error.is_none() => {
@@ -146,7 +157,7 @@ where
     }
 
     async fn join_next_with_timeout(&mut self) -> Eyeball<T> {
-        if let Some(timeout) = self.timeout {
+        if let Some(timeout) = self.delay {
             match tokio::time::timeout(timeout, self.join_next()).await {
                 Ok(outcome) => outcome,
                 Err(elapsed) => Eyeball::Timeout(elapsed),
@@ -156,8 +167,7 @@ where
         }
     }
 
-    /// Finish the happy eyeballs algorithm, returning the first successful connection.
-    pub async fn finish(&mut self) -> HappyEyeballsResult<T, E> {
+    async fn process_all(&mut self) -> HappyEyeballsResult<T, E> {
         for _ in 0..self.initial_concurrency.unwrap_or(self.queue.len()) {
             if let Some(future) = self.queue.pop_front() {
                 self.tasks.push(future);
@@ -172,10 +182,10 @@ where
         }
 
         loop {
-            match self.join_next_with_timeout().await {
+            match self.join_next().await {
                 Eyeball::Ok(outcome) => return Ok(outcome),
                 Eyeball::Error => continue,
-                Eyeball::Timeout(_) => return Err(HappyEyeballsError::NoProgress),
+                Eyeball::Timeout(_) => panic!("unexpected timeout"),
                 Eyeball::Exhausted => {
                     return self
                         .error
@@ -184,6 +194,22 @@ where
                         .unwrap_or(Err(HappyEyeballsError::NoProgress))
                 }
             }
+        }
+    }
+
+    /// Finish the happy eyeballs algorithm, returning the first successful connection.
+    pub async fn finish(&mut self) -> HappyEyeballsResult<T, E> {
+        let result = match self.timeout {
+            Some(timeout) => tokio::time::timeout(timeout, self.process_all()).await,
+            None => Ok(self.process_all().await),
+        };
+
+        match result {
+            Ok(Ok(outcome)) => Ok(outcome),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(HappyEyeballsError::Timeout(
+                self.started.unwrap_or_else(Instant::now).elapsed(),
+            )),
         }
     }
 }
@@ -221,7 +247,7 @@ mod tests {
 
     #[tokio::test]
     async fn one_future_success() {
-        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         let future = async { Ok::<_, String>(5) };
 
@@ -235,7 +261,8 @@ mod tests {
 
     #[tokio::test]
     async fn one_future_error() {
-        let mut eyeballs: EyeballSet<_, (), &str> = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs: EyeballSet<_, (), &str> =
+            EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         let future = async { Err::<(), _>("error") };
 
@@ -250,7 +277,8 @@ mod tests {
 
     #[tokio::test]
     async fn one_future_timeout() {
-        let mut eyeballs: EyeballSet<_, (), &str> = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs: EyeballSet<_, (), &str> =
+            EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         let future = pending();
         eyeballs.push(future);
@@ -258,14 +286,14 @@ mod tests {
         let result = eyeballs.await;
         assert!(matches!(
             result.unwrap_err(),
-            HappyEyeballsError::NoProgress
+            HappyEyeballsError::Timeout(_)
         ));
     }
 
     #[tokio::test]
     async fn empty_set() {
         let eyeballs: EyeballSet<Pending<Result<(), &str>>, (), &str> =
-            EyeballSet::new(Some(Duration::ZERO));
+            EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         assert!(eyeballs.is_empty());
         let result = eyeballs.await;
@@ -277,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_futures_success() {
-        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         let future1 = ready(Err::<u32, String>("error".into()));
         let future2 = ready(Ok::<_, String>(5));
@@ -291,7 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_futures_until_finished() {
-        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         let future1 = ready(Err::<u32, String>("error".into()));
         let future2 = ready(Ok::<_, String>(5));
@@ -310,7 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_futures_error() {
-        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO));
+        let mut eyeballs = EyeballSet::new(Some(Duration::ZERO), Some(Duration::ZERO));
 
         let future1 = ready(Err::<u32, &str>("error 1"));
         let future2 = ready(Err::<u32, &str>("error 2"));
@@ -327,7 +355,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_timeout() {
-        let mut eyeballs = EyeballSet::new(None);
+        let mut eyeballs = EyeballSet::new(None, None);
 
         let future1 = ready(Err::<u32, &str>("error 1"));
         let future2 = ready(Err::<u32, &str>("error 2"));

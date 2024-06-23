@@ -15,6 +15,8 @@ use tokio::io::AsyncWrite;
 
 use crate::server::Protocol;
 pub use acceptor::Acceptor;
+#[cfg(feature = "stream")]
+pub use acceptor::AcceptorCore;
 pub use info::{MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService};
 pub use stream::{Accept, AcceptExt, AcceptOne, Stream};
 

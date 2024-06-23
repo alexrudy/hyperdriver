@@ -7,14 +7,7 @@
 
 use std::convert::Infallible;
 use std::net::{SocketAddr, SocketAddrV4};
-use std::sync::Arc;
 
-use hyper::server::conn::http2;
-use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::server::conn::tls::TlsConnectionInfoLayer;
-use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
-use tower::make::Shared;
-use tower::Layer;
 use tracing_subscriber::EnvFilter;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
@@ -50,9 +43,6 @@ async fn main() {
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming)
-        .with_tls(Arc::new(tls_config("localhost")));
-
     let svc = tower::service_fn(|req: hyperdriver::body::Request| async {
         let body = req.into_body();
         let data = body.collect().await.unwrap();
@@ -61,12 +51,15 @@ async fn main() {
         ))
     });
 
-    let server = hyperdriver::server::Server::new(
-        acceptor,
-        TlsConnectionInfoLayer::new()
-            .layer(MakeServiceConnectionInfoLayer::new().layer(Shared::new(svc))),
-    )
-    .with_protocol(http2::Builder::new(TokioExecutor::new()));
+    let server = hyperdriver::server::Server::builder()
+        .with_incoming(incoming)
+        .with_tls(tls_config("localhost"))
+        .with_shared_service(svc)
+        .with_connection_info()
+        .with_tls_connection_info()
+        .with_http2()
+        .with_body()
+        .build();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 

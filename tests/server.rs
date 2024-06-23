@@ -48,7 +48,7 @@ fn hello_world() -> hyperdriver::body::Request {
         .unwrap()
 }
 
-fn serve<S, P, A, B>(server: Server<S, P, A, B>) -> impl Future<Output = Result<(), BoxError>>
+fn serve<A, P, S, B>(server: Server<A, P, S, B>) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeServiceRef<A::Conn, B> + Send + 'static,
     S::Future: Send + 'static,
@@ -79,8 +79,8 @@ where
     }
 }
 
-fn serve_gracefully<S, P, A, B>(
-    server: Server<S, P, A, B>,
+fn serve_gracefully<A, P, S, B>(
+    server: Server<A, P, S, B>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeServiceRef<A::Conn, B> + Send + 'static,
@@ -111,14 +111,11 @@ async fn echo_h1() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        hyperdriver::service::make_service_fn(|_| async {
-            Ok::<_, BoxError>(tower::service_fn(echo))
-        }),
-        hyperdriver::server::conn::http1::Builder::new(),
-    );
+    let server = hyperdriver::server::Server::builder()
+        .with_incoming(incoming)
+        .with_http1()
+        .with_shared_service(tower::service_fn(echo))
+        .build();
 
     let handle = serve_gracefully(server);
 
@@ -143,14 +140,11 @@ async fn echo_h2() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        hyperdriver::service::make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(tower::service_fn(echo))
-        }),
-        hyperdriver::server::conn::http2::Builder::new(TokioExecutor::new()),
-    );
+    let server = hyperdriver::server::Server::builder()
+        .with_incoming(incoming)
+        .with_http2()
+        .with_shared_service(tower::service_fn(echo))
+        .build();
 
     let guard = serve_gracefully(server);
 
@@ -174,14 +168,11 @@ async fn echo_h1_early_disconnect() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        hyperdriver::service::make_service_fn(|_| async {
-            Ok::<_, BoxError>(tower::service_fn(echo))
-        }),
-        hyperdriver::server::conn::http1::Builder::new(),
-    );
+    let server = hyperdriver::server::Server::builder()
+        .with_incoming(incoming)
+        .with_http1()
+        .with_shared_service(tower::service_fn(echo))
+        .build();
 
     let handle = serve(server);
 
@@ -206,14 +197,11 @@ async fn echo_auto_h1() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::server::conn::Acceptor::from(incoming);
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        hyperdriver::service::make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(tower::service_fn(echo))
-        }),
-        hyperdriver::server::conn::auto::Builder::new(TokioExecutor::new()),
-    );
+    let server = hyperdriver::Server::builder()
+        .with_incoming(incoming)
+        .with_auto_http()
+        .with_shared_service(tower::service_fn(echo))
+        .build();
 
     let handle = serve_gracefully(server);
 
@@ -238,15 +226,11 @@ async fn echo_auto_h2() {
 
     let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
 
-    let acceptor = hyperdriver::server::conn::Acceptor::new(incoming);
-    let server = hyperdriver::server::Server::new_with_protocol(
-        acceptor,
-        hyperdriver::service::make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(tower::service_fn(echo))
-        }),
-        hyperdriver::server::conn::auto::Builder::new(TokioExecutor::new()),
-    );
-
+    let server = hyperdriver::Server::builder()
+        .with_incoming(incoming)
+        .with_auto_http()
+        .with_shared_service(tower::service_fn(echo))
+        .build();
     let handle = serve_gracefully(server);
 
     let mut conn = connection(
