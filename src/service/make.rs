@@ -1,10 +1,15 @@
-use super::http::HttpService;
-use http_body::Body as HttpBody;
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
+
+use super::http::HttpService;
+use http_body::Body as HttpBody;
 use tower::Service;
+
+use tower::{layer::layer_fn, Layer, ServiceExt};
 
 pub trait Sealed<Conn> {}
 
@@ -135,4 +140,114 @@ impl<F> fmt::Debug for MakeServiceFn<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MakeServiceFn").finish()
     }
+}
+
+type BoxFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
+type ServiceRef<T, S, E> =
+    dyn for<'a> tower::Service<&'a T, Response = S, Error = E, Future = BoxFuture<S, E>> + Send;
+
+/// A boxed `ServiceRef`.
+pub struct BoxMakeServiceRef<Target, Service, MakeServiceError> {
+    inner: Box<ServiceRef<Target, Service, MakeServiceError>>,
+}
+
+impl<T, S, E> fmt::Debug for BoxMakeServiceRef<T, S, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BoxMakeServiceRef").finish()
+    }
+}
+
+impl<T, S, E> BoxMakeServiceRef<T, S, E> {
+    /// Create a new `BoxMakeServiceRef`.
+    pub fn new<U, F>(inner: U) -> Self
+    where
+        U: for<'a> Service<&'a T, Response = S, Error = E, Future = F> + Send + 'static,
+        F: Future<Output = Result<S, E>> + Send + 'static,
+        T: 'static,
+    {
+        let inner = Box::new(inner.map_future(|f| Box::pin(f) as _));
+        Self { inner }
+    }
+}
+
+impl<T, S, E> Service<&T> for BoxMakeServiceRef<T, S, E> {
+    type Response = S;
+    type Error = E;
+    type Future = BoxFuture<S, E>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, target: &T) -> Self::Future {
+        self.inner.call(target)
+    }
+}
+
+/// A [`Layer`] that wraps an inner [`MakeServiceRef`] and returns a boxed [`MakeServiceRef`].
+pub struct BoxMakeServiceLayer<InnerMakeService, Target, InnerService, MakeServiceError> {
+    boxed: Arc<
+        dyn Layer<
+                InnerMakeService,
+                Service = BoxMakeServiceRef<Target, InnerService, MakeServiceError>,
+            > + Send
+            + Sync
+            + 'static,
+    >,
+}
+
+impl<In, T, U, E> BoxMakeServiceLayer<In, T, U, E> {
+    /// Create a new [`BoxMakeServiceLayer`].
+    pub fn new<L, F>(inner_layer: L) -> Self
+    where
+        L: Layer<In> + Send + Sync + 'static,
+        L::Service: for<'a> Service<&'a T, Response = U, Error = E, Future = F> + Send + 'static,
+        F: Future<Output = Result<U, E>> + Send + 'static,
+        T: 'static,
+    {
+        let layer = layer_fn(move |inner: In| {
+            let out = inner_layer.layer(inner);
+            BoxMakeServiceRef::new(out)
+        });
+
+        Self {
+            boxed: Arc::new(layer),
+        }
+    }
+}
+
+impl<In, T, U, E> Layer<In> for BoxMakeServiceLayer<In, T, U, E> {
+    type Service = BoxMakeServiceRef<T, U, E>;
+
+    fn layer(&self, inner: In) -> Self::Service {
+        self.boxed.layer(inner)
+    }
+}
+
+impl<In, T, U, E> Clone for BoxMakeServiceLayer<In, T, U, E> {
+    fn clone(&self) -> Self {
+        Self {
+            boxed: Arc::clone(&self.boxed),
+        }
+    }
+}
+
+impl<In, T, U, E> fmt::Debug for BoxMakeServiceLayer<In, T, U, E> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("BoxMakeServiceLayer").finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    use static_assertions::assert_impl_all;
+
+    assert_impl_all!(BoxMakeServiceLayer<(), (), (), ()>: Clone, Send, Sync);
+    assert_impl_all!(BoxMakeServiceRef<(), (), ()>: Send);
 }

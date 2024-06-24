@@ -2,7 +2,7 @@ use bytes::Bytes;
 use futures_util::FutureExt;
 use http_body::Body;
 use http_body_util::combinators::UnsyncBoxBody;
-use hyperdriver::body::AdaptCustomBodyExt;
+use hyperdriver::{body::AdaptCustomBodyExt, info::DuplexAddr};
 use pin_project::pin_project;
 
 #[pin_project]
@@ -56,6 +56,11 @@ impl tower::Service<http::Request<CustomBody>> for CustomService {
     }
 
     fn call(&mut self, req: http::Request<CustomBody>) -> Self::Future {
+        let info = req
+            .extensions()
+            .get::<hyperdriver::info::ConnectionInfo<DuplexAddr>>()
+            .unwrap();
+        assert_eq!(*info.remote_addr(), DuplexAddr::new());
         let mut incoming_body = req.into_body();
         let body = CustomBody(incoming_body.0.take());
         std::future::ready(Ok(http::Response::new(body)))
@@ -71,6 +76,7 @@ async fn custom_body_server() {
         .with_acceptor(incoming)
         .with_auto_http()
         .with_shared_service(service)
+        .with_connection_info()
         .build();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
