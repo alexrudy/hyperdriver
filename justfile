@@ -28,7 +28,7 @@ check:
 check-all:
     cargo +{{rust}} check --all-targets --all-features
     cargo +{{rust}} hack check --no-private --each-feature --no-dev-deps
-    cargo +{{rust}} hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile
+    cargo +{{rust}} hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile,tls-ring,tls-aws-lc
 
 # Run clippy
 clippy:
@@ -56,12 +56,12 @@ msrv:
 alias t := test
 # Run cargo tests
 test:
-    cargo +{{rust}} test --all-features --no-run
-    cargo +{{rust}} test --all-features
+    cargo +{{rust}} test --features axum,sni,tls,tls-ring --no-run
+    cargo +{{rust}} test --features axum,sni,tls,tls-ring
 
 # Run coverage tests
 coverage:
-    cargo +{{rust}} tarpaulin -o html --all-features
+    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring
 
 # Run deny checks
 deny:

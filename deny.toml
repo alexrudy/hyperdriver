@@ -32,7 +32,6 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 skip-tree = ["windows-targets", "windows-sys"]
 skip = ["sync_wrapper"]
-deny = ["aws-lc-sys"]
 
 [sources]
 unknown-registry = "warn"

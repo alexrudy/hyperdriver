@@ -46,13 +46,13 @@ tracing = { version = "^0.1" }
 
 [dependencies.rustls]
 version = "0.23"
-features = ["tls12", "ring"]
+features = ["tls12"]
 default-features = false
 optional = true
 
 [dependencies.tokio-rustls]
 version = "0.26"
-features = ["tls12", "ring"]
+features = ["tls12"]
 default-features = false
 optional = true
 
@@ -90,27 +90,29 @@ discovery = [
 pidfile = ["dep:libc"]
 sni = []
 stream = []
-tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
+tls = ["dep:rustls-native-certs"]
+tls-ring = ["rustls/ring", "tokio-rustls/ring"]
+tls-aws-lc = ["rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs"]
 
 [[example]]
 name = "google"
 path = "examples/client/google.rs"
-required-features = ["client", "tls"]
+required-features = ["client", "tls", "tls-ring"]
 
 [[example]]
 name = "hello"
 path = "examples/client/hello.rs"
-required-features = ["client", "tls"]
+required-features = ["client", "tls", "tls-ring"]
 
 [[example]]
 name = "httpbin"
 path = "examples/client/httpbin.rs"
-required-features = ["client", "tls"]
+required-features = ["client", "tls", "tls-ring"]
 
 [[example]]
 name = "h2-server"
 path = "examples/server/h2.rs"
-required-features = ["server", "tls"]
+required-features = ["server", "tls", "tls-ring"]
 
 [[test]]
 name = "stream-duplex"
@@ -125,7 +127,7 @@ required-features = ["stream"]
 [[test]]
 name = "stream-tls"
 path = "tests/stream/tls.rs"
-required-features = ["stream", "tls"]
+required-features = ["stream", "tls", "tls-ring"]
 
 [[test]]
 name = "stream-unix"
@@ -155,12 +157,12 @@ required-features = ["server"]
 [[test]]
 name = "httpbin"
 path = "tests/httpbin.rs"
-required-features = ["client", "tls"]
+required-features = ["client", "tls", "tls-ring"]
 
 [[test]]
 name = "tls"
 path = "tests/tls.rs"
-required-features = ["server", "tls", "client"]
+required-features = ["client", "server", "tls", "tls-ring"]
 
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]
