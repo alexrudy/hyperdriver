@@ -76,8 +76,7 @@ async fn custom_body_server() {
         .with_acceptor(incoming)
         .with_auto_http()
         .with_shared_service(service)
-        .with_connection_info()
-        .build();
+        .with_connection_info();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 

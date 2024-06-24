@@ -96,8 +96,7 @@ async fn tls_echo_h1() {
     let server = hyperdriver::server::Server::builder()
         .with_acceptor(acceptor)
         .with_shared_service(tower::service_fn(echo))
-        .with_http1()
-        .build();
+        .with_http1();
 
     let handle = serve_gracefully(server);
 
@@ -146,8 +145,7 @@ async fn tls_echo_h2() {
     let server = hyperdriver::server::Server::builder()
         .with_acceptor(acceptor)
         .with_shared_service(tower::service_fn(echo))
-        .with_http2()
-        .build();
+        .with_http2();
 
     let guard = serve_gracefully(server);
 

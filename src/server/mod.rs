@@ -33,8 +33,7 @@
 //!    let server = hyperdriver::server::Server::builder()
 //!     .with_incoming(incoming)
 //!     .with_http1()
-//!     .with_shared_service(tower::service_fn(echo))
-//!     .build();
+//!     .with_shared_service(tower::service_fn(echo));
 //!
 //!     server.await.unwrap();
 //! }
@@ -46,6 +45,7 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
+use builder::{NeedsAcceptor, NeedsProtocol, NeedsService};
 use futures_util::future::FutureExt as _;
 use http_body::Body;
 #[cfg(feature = "stream")]
@@ -53,7 +53,6 @@ use tokio::net::ToSocketAddrs;
 use tracing::instrument::Instrumented;
 use tracing::{debug, Instrument};
 
-pub use self::builder::Builder;
 pub use self::conn::auto::Builder as AutoBuilder;
 pub use self::conn::Accept;
 #[cfg(feature = "stream")]
@@ -108,7 +107,7 @@ pub trait Protocol<S, IO> {
 ///   connection stream (to facilitate connection information).
 /// - `B` is the body type for the service.
 pub struct Server<A, P, S, B> {
-    incoming: A,
+    acceptor: A,
     protocol: P,
     make_service: S,
     body: PhantomData<fn(B) -> ()>,
@@ -149,14 +148,18 @@ impl Server<(), (), (), ()> {
     ///     .with_shared_service(service_fn(|req| async move {
     ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
     ///    }))
-    ///    .with_auto_http()
-    ///    .build();
+    ///    .with_auto_http();
     ///
     /// server.await.unwrap();
     /// # }
     /// ```
-    pub fn builder() -> Builder {
-        Builder::new()
+    pub fn builder<B>() -> Server<NeedsAcceptor, NeedsProtocol, NeedsService, B> {
+        Server {
+            acceptor: Default::default(),
+            protocol: Default::default(),
+            make_service: Default::default(),
+            body: Default::default(),
+        }
     }
 }
 
@@ -165,9 +168,9 @@ impl<A, P, S, B> Server<A, P, S, B> {
     ///
     /// The default protocol is [AutoBuilder], which can serve both HTTP/1 and HTTP/2 connections,
     /// and will automatically detect the protocol used by the client.
-    pub fn new(incoming: A, protocol: P, make_service: S) -> Self {
+    pub fn new(acceptor: A, protocol: P, make_service: S) -> Self {
         Self {
-            incoming,
+            acceptor,
             protocol,
             make_service,
             body: PhantomData,
@@ -203,9 +206,7 @@ impl<A, P, S, B> Server<A, P, S, B> {
     ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
     ///    }))
     ///    .with_auto_http()
-    ///    .build();
-    ///
-    /// server.with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await.unwrap();
+    ///    .with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await.unwrap();
     /// # }
     /// ```
     pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<A, P, S, B, F>
@@ -230,9 +231,7 @@ impl<S, B> Server<Acceptor, AutoBuilder<TokioExecutor>, S, B> {
         Ok(Server::builder()
             .with_acceptor(accept)
             .with_auto_http()
-            .with_make_service(make_service)
-            .with_body()
-            .build())
+            .with_make_service(make_service))
     }
 }
 
@@ -302,7 +301,7 @@ where
                 ready!(me.server.make_service.poll_ready_ref(cx)).map_err(ServerError::ready)?;
                 me.state.set(State::Accepting);
             }
-            StateProj::Accepting => match ready!(Pin::new(&mut me.server.incoming).poll_accept(cx))
+            StateProj::Accepting => match ready!(Pin::new(&mut me.server.acceptor).poll_accept(cx))
             {
                 Ok(stream) => {
                     let future = me.server.make_service.make_service_ref(&stream);
@@ -606,8 +605,7 @@ mod tests {
         let server = Server::builder()
             .with_acceptor(incoming)
             .with_make_service(svc)
-            .with_auto_http()
-            .build();
+            .with_auto_http();
 
         server.into_future();
     }

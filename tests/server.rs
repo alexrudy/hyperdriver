@@ -114,8 +114,7 @@ async fn echo_h1() {
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
         .with_http1()
-        .with_shared_service(tower::service_fn(echo))
-        .build();
+        .with_shared_service(tower::service_fn(echo));
 
     let handle = serve_gracefully(server);
 
@@ -143,8 +142,7 @@ async fn echo_h2() {
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
         .with_http2()
-        .with_shared_service(tower::service_fn(echo))
-        .build();
+        .with_shared_service(tower::service_fn(echo));
 
     let guard = serve_gracefully(server);
 
@@ -171,8 +169,7 @@ async fn echo_h1_early_disconnect() {
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
         .with_http1()
-        .with_shared_service(tower::service_fn(echo))
-        .build();
+        .with_shared_service(tower::service_fn(echo));
 
     let handle = serve(server);
 
@@ -200,8 +197,7 @@ async fn echo_auto_h1() {
     let server = hyperdriver::Server::builder()
         .with_incoming(incoming)
         .with_auto_http()
-        .with_shared_service(tower::service_fn(echo))
-        .build();
+        .with_shared_service(tower::service_fn(echo));
 
     let handle = serve_gracefully(server);
 
@@ -229,8 +225,7 @@ async fn echo_auto_h2() {
     let server = hyperdriver::Server::builder()
         .with_incoming(incoming)
         .with_auto_http()
-        .with_shared_service(tower::service_fn(echo))
-        .build();
+        .with_shared_service(tower::service_fn(echo));
     let handle = serve_gracefully(server);
 
     let mut conn = connection(
