@@ -57,9 +57,7 @@ async fn main() {
         .with_shared_service(svc)
         .with_connection_info()
         .with_tls_connection_info()
-        .with_http2()
-        .with_body()
-        .build();
+        .with_http2();
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 

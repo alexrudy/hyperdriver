@@ -294,9 +294,7 @@ impl ServiceRegistry {
         Ok(crate::server::Server::builder()
             .with_acceptor(acceptor)
             .with_auto_http()
-            .with_make_service(make_service)
-            .with_body()
-            .build())
+            .with_make_service(make_service))
     }
 
     /// Create a server which will use a registry transport to proxy requests to services.
@@ -312,8 +310,6 @@ impl ServiceRegistry {
             .with_acceptor(acceptor)
             .with_auto_http()
             .with_shared_service(self.client())
-            .with_body()
-            .build()
     }
 
     /// Connect to a service by name.

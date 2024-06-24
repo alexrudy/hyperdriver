@@ -42,8 +42,7 @@ async fn before_request() {
     let server = Server::builder()
         .with_acceptor(acceptor)
         .with_shared_service(tower::service_fn(echo))
-        .with_auto_http()
-        .build();
+        .with_auto_http();
 
     let serve = server.with_graceful_shutdown(async {
         if rx.await.is_err() {

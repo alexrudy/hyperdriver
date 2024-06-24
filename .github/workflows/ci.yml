@@ -40,7 +40,7 @@ jobs:
           - name: cargo check
             run: cargo check --all-targets --all-features
           - name: cargo hack check
-            run: cargo hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni
+            run: cargo hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,tls-ring,tls-aws-lc
             hack: true
           - name: cargo hack check --each-feature
             run: cargo hack check --no-private --each-feature --no-dev-deps
@@ -91,10 +91,10 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
 
       - name: Build cargo tests
-        run: cargo test --all-features --no-run
+        run: cargo test --features axum,sni,tls,tls-ring --no-run
 
       - name: Run cargo test
-        run: cargo test --all-features
+        run: cargo test --features axum,sni,tls,tls-ring
 
   lints:
     name: Lints
