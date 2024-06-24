@@ -90,7 +90,7 @@ discovery = [
 pidfile = ["dep:libc"]
 sni = []
 stream = []
-tls = ["dep:rustls-native-certs"]
+tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
 tls-ring = ["rustls/ring", "tokio-rustls/ring"]
 tls-aws-lc = ["rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs"]
 
