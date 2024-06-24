@@ -85,7 +85,7 @@ where
     IO: HasConnectionInfo + Send + 'static,
     IO::Addr: Clone + Send + Sync + 'static,
 {
-    type Response = Connection<C::Response, IO::Addr>;
+    type Response = ConnectionWithInfo<C::Response, IO::Addr>;
 
     type Error = C::Error;
 
@@ -144,7 +144,7 @@ mod future {
         S: ServiceRef<IO>,
         IO: HasConnectionInfo,
     {
-        type Output = Result<Connection<S::Response, IO::Addr>, S::Error>;
+        type Output = Result<ConnectionWithInfo<S::Response, IO::Addr>, S::Error>;
 
         fn poll(
             self: std::pin::Pin<&mut Self>,
@@ -153,7 +153,7 @@ mod future {
             let this = self.project();
 
             match this.inner.poll(cx) {
-                Poll::Ready(Ok(inner)) => Poll::Ready(Ok(Connection {
+                Poll::Ready(Ok(inner)) => Poll::Ready(Ok(ConnectionWithInfo {
                     inner,
                     info: this.info.take(),
                 })),
@@ -168,12 +168,12 @@ mod future {
 ///
 /// This service wraps the request/response service, not the connector service.
 #[derive(Debug, Clone)]
-pub struct Connection<S, A> {
+pub struct ConnectionWithInfo<S, A> {
     inner: S,
     info: Option<ConnectionInfo<A>>,
 }
 
-impl<S, A, BIn, BOut> Service<Request<BIn>> for Connection<S, A>
+impl<S, A, BIn, BOut> Service<Request<BIn>> for ConnectionWithInfo<S, A>
 where
     S: Service<Request<BIn>, Response = Response<BOut>> + Clone + Send + 'static,
     S::Future: Send,
