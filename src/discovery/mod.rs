@@ -526,7 +526,7 @@ impl ServiceHandle {
                     match error.kind() {
                         io::ErrorKind::NotFound => {}
                         _ => {
-                            tracing::error!("Unable to remove socket: {}", error);
+                            tracing::error!("Unable to remove socket: {:#}", error);
                             return Err(InternalBindError::SocketResetError(path.clone(), error));
                         }
                     }
@@ -540,7 +540,7 @@ impl ServiceHandle {
                             InternalBindError::AlreadyBound
                         }
                         _ => {
-                            tracing::error!("Unable to bind socket: {}", error);
+                            tracing::error!("Unable to bind socket: {:#}", error);
                             InternalBindError::SocketResetError(path.clone(), error)
                         }
                     })
