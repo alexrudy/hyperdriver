@@ -9,7 +9,7 @@ use crate::info::Protocol;
 pub(crate) use self::channel::{channel, TlsConnectionInfoReciever, TlsConnectionInfoSender};
 
 /// Information about a TLS connection.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TlsConnectionInfo {
     /// The server name used for this connection, as provided by the SNI
     /// extension.

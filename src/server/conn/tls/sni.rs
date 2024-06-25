@@ -38,7 +38,7 @@ where
 }
 
 /// Error returned when validating the SNI from TLS connection information.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum ValidateSNIError {
     /// The SNI did not match the host header.
     #[error("TLS SNI \"{sni}\" does not match HOST header \"{host}\"")]
@@ -138,11 +138,12 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
         .and_then(|s| s.parse().ok());
 
     // Grab the TLS connection info
-    //TODO: Fix the type of the connection info address
-    let tls = req
-        .extensions_mut()
-        .get_mut::<TlsConnectionInfo>()
-        .expect("Missing connection info extension - misconfiguration?");
+    let tls = req.extensions_mut().get_mut::<TlsConnectionInfo>();
+
+    let Some(tls) = tls else {
+        tracing::warn!("Request had no TLS connection info, inferring not a TLS request");
+        return None;
+    };
 
     if let Some(sni) = tls
         .server_name
@@ -169,4 +170,83 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handle_no_sni() {
+        let mut req = Request::new(());
+        req.headers_mut()
+            .insert(header::HOST, "example.com".parse().unwrap());
+        req.extensions_mut().insert(TlsConnectionInfo {
+            server_name: None,
+            ..TlsConnectionInfo::default()
+        });
+
+        let error = handle(&mut req).unwrap();
+
+        assert_eq!(
+            error,
+            ValidateSNIError::MissingSNI {
+                host: "example.com".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_handle_no_host() {
+        let mut req = Request::new(());
+        req.extensions_mut().insert(TlsConnectionInfo {
+            server_name: Some("example.com".into()),
+            ..TlsConnectionInfo::default()
+        });
+
+        assert!(handle(&mut req).is_none(), "Missing HOST should not error");
+    }
+
+    #[test]
+    fn test_handle_mismatched_sni() {
+        let mut req = Request::new(());
+        req.headers_mut()
+            .insert(header::HOST, "example.com".parse().unwrap());
+        req.extensions_mut().insert(TlsConnectionInfo {
+            server_name: Some("example.org".into()),
+            ..TlsConnectionInfo::default()
+        });
+
+        let error = handle(&mut req).unwrap();
+
+        assert_eq!(
+            error,
+            ValidateSNIError::InvalidSNI {
+                host: "example.com".into(),
+                sni: "example.org".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_handle_matching_sni() {
+        let mut req = Request::new(());
+        req.headers_mut()
+            .insert(header::HOST, "example.com".parse().unwrap());
+        req.extensions_mut().insert(TlsConnectionInfo {
+            server_name: Some("example.com".into()),
+            ..TlsConnectionInfo::default()
+        });
+
+        assert!(handle(&mut req).is_none());
+    }
+
+    #[test]
+    fn test_handle_missing_tls_info() {
+        let mut req = Request::new(());
+        req.headers_mut()
+            .insert(header::HOST, "example.com".parse().unwrap());
+
+        assert!(handle(&mut req).is_none());
+    }
 }
