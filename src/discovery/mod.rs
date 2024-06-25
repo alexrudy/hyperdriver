@@ -152,8 +152,9 @@ impl std::error::Error for BindError {
 }
 
 /// Service discovery mechanism for services registered.
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum ServiceDiscovery {
     /// Discover services in the same process, using an in-memory store and transport.
     #[default]
@@ -167,21 +168,22 @@ pub enum ServiceDiscovery {
 }
 
 /// Configuration for the service registry.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct RegistryConfig {
     /// Service discovery mechanism.
     pub service_discovery: ServiceDiscovery,
 
     /// Connection timeout when finding a service.
-    #[serde(with = "humantime_serde")]
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub connect_timeout: Option<std::time::Duration>,
 
     /// Buffer size for in-memory transports.
     pub buffer_size: usize,
 
     /// Proxy service timeout
-    #[serde(with = "humantime_serde")]
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub proxy_timeout: std::time::Duration,
 
     /// Proxy concurrency limit
