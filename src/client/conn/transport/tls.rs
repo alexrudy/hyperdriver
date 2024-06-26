@@ -6,6 +6,7 @@ use std::task::{Context, Poll};
 
 use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{TlsConnectionError, Transport, TransportStream};
 use crate::client::conn::Stream as ClientStream;
@@ -48,7 +49,7 @@ impl<T> TlsTransportWrapper<T> {
 impl<T> tower::Service<Uri> for TlsTransportWrapper<T>
 where
     T: Transport,
-    <T as Transport>::IO: HasConnectionInfo + Unpin,
+    <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
     type Response = TransportStream<ClientStream<T::IO>>;
@@ -80,6 +81,7 @@ pub(in crate::client::conn::transport) mod future {
     use std::task::{Context, Poll};
 
     use pin_project::pin_project;
+    use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::info::tls::HasTlsConnectionInfo;
     use crate::stream::tls::TlsHandshakeStream as _;
@@ -149,7 +151,7 @@ pub(in crate::client::conn::transport) mod future {
     impl<T> Future for TlsConnectionFuture<T>
     where
         T: Transport,
-        <T as Transport>::IO: HasConnectionInfo + Unpin,
+        <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
         <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
         type Output = Result<TransportStream<ClientStream<T::IO>>, TlsConnectionError<T::Error>>;
