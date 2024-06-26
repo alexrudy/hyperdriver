@@ -7,7 +7,6 @@ use std::str::FromStr;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use http::uri::Authority;
 use tokio::net::{TcpStream, UnixStream};
 
 #[cfg(feature = "tls")]
@@ -300,12 +299,6 @@ impl From<DuplexAddr> for BraidAddr {
 #[cfg(feature = "stream")]
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo<Addr = BraidAddr> {
-    /// The protocol used for this connection.
-    pub protocol: Option<Protocol>,
-
-    /// The authority name for the server.
-    pub authority: Option<Authority>,
-
     /// The local address for this connection.
     pub local_addr: Addr,
 
@@ -320,12 +313,6 @@ pub struct ConnectionInfo<Addr = BraidAddr> {
 #[cfg(not(feature = "stream"))]
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo<Addr> {
-    /// The protocol used for this connection.
-    pub protocol: Option<Protocol>,
-
-    /// The authority name for the server.
-    pub authority: Option<Authority>,
-
     /// The local address for this connection.
     pub local_addr: Addr,
 
@@ -342,8 +329,6 @@ where
 {
     fn default() -> Self {
         Self {
-            protocol: None,
-            authority: None,
             local_addr: Addr::default(),
             remote_addr: Addr::default(),
             buffer_size: None,
@@ -353,10 +338,8 @@ where
 
 #[cfg(feature = "stream")]
 impl ConnectionInfo<BraidAddr> {
-    pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>, buffer_size: usize) -> Self {
+    pub(crate) fn duplex(buffer_size: usize) -> Self {
         ConnectionInfo {
-            protocol,
-            authority: Some(name),
             local_addr: BraidAddr::Duplex,
             remote_addr: BraidAddr::Duplex,
             buffer_size: Some(buffer_size),
@@ -366,10 +349,8 @@ impl ConnectionInfo<BraidAddr> {
 
 #[cfg(not(feature = "stream"))]
 impl ConnectionInfo<DuplexAddr> {
-    pub(crate) fn duplex(name: Authority, protocol: Option<Protocol>, buffer_size: usize) -> Self {
+    pub(crate) fn duplex(buffer_size: usize) -> Self {
         ConnectionInfo {
-            protocol,
-            authority: Some(name),
             local_addr: DuplexAddr::new(),
             remote_addr: DuplexAddr::new(),
             buffer_size: Some(buffer_size),
@@ -394,8 +375,6 @@ impl<Addr> ConnectionInfo<Addr> {
         F: Fn(Addr) -> T,
     {
         ConnectionInfo {
-            protocol: self.protocol,
-            authority: self.authority,
             local_addr: f(self.local_addr),
             remote_addr: f(self.remote_addr),
             buffer_size: self.buffer_size,
@@ -414,8 +393,6 @@ where
         let remote_addr = stream.peer_addr()?;
 
         Ok(Self {
-            protocol: None,
-            authority: None,
             local_addr: local_addr.into(),
             remote_addr: remote_addr.into(),
             buffer_size: None,
@@ -443,8 +420,6 @@ where
         };
 
         Ok(Self {
-            protocol: None,
-            authority: None,
             local_addr: local_addr.into(),
             remote_addr: remote_addr.into(),
             buffer_size: None,
@@ -553,8 +528,7 @@ mod tests {
     #[test]
     fn connection_info_default() {
         let info = ConnectionInfo::<DuplexAddr>::default();
-        assert_eq!(info.protocol, None);
-        assert_eq!(info.authority, None);
+
         assert_eq!(info.local_addr, DuplexAddr::new());
         assert_eq!(info.remote_addr, DuplexAddr::new());
         assert_eq!(info.buffer_size, None);
@@ -572,16 +546,13 @@ mod tests {
     #[test]
     fn connection_info_map() {
         let info = ConnectionInfo {
-            protocol: Some(Protocol::http(Version::HTTP_11)),
-            authority: Some("example.com".parse().unwrap()),
             local_addr: "local",
             remote_addr: "remote",
             buffer_size: Some(1024),
         };
 
         let mapped = info.map(|addr| addr.to_string());
-        assert_eq!(mapped.protocol, Some(Protocol::http(Version::HTTP_11)));
-        assert_eq!(mapped.authority, Some("example.com".parse().unwrap()));
+
         assert_eq!(mapped.local_addr, "local".to_string());
     }
 

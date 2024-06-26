@@ -28,7 +28,7 @@ async fn echo(req: Request) -> Result<Response, BoxError> {
 }
 
 async fn pair() -> (Acceptor, DuplexClient) {
-    let (client, incoming) = duplex::pair("test".parse().unwrap());
+    let (client, incoming) = duplex::pair();
     let acceptor = Acceptor::from(incoming);
 
     (acceptor, client)

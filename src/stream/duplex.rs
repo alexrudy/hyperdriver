@@ -17,9 +17,9 @@
 //! # use hyperdriver::stream::duplex::{self, DuplexClient};
 //! # use hyperdriver::server::conn::AcceptExt;
 //! # async fn demo_duplex() {
-//! let (client, incoming) = duplex::pair("test".parse().unwrap());
+//! let (client, incoming) = duplex::pair();
 //!
-//! let (client_conn, server_conn) = tokio::try_join!(client.connect(1024, None), incoming.accept()).unwrap();
+//! let (client_conn, server_conn) = tokio::try_join!(client.connect(1024), incoming.accept()).unwrap();
 //!
 //! # }
 //! ```
@@ -31,11 +31,10 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use http::uri::Authority;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::info::{self, HasConnectionInfo, Protocol};
+use crate::info::{self, HasConnectionInfo};
 
 #[cfg(all(feature = "server", feature = "stream"))]
 use crate::server::conn::Accept;
@@ -90,10 +89,9 @@ impl DuplexStream {
     /// The stream will be created with a buffer, and the `name` and `protocol` will be used to
     /// create the connection info. Normally, this method is not needed, an you should prefer
     /// using [`DuplexClient`] and [`DuplexIncoming`] together to create a client/server pair of duplex streams.
-    pub fn new(name: Authority, protocol: Option<Protocol>, max_buf_size: usize) -> (Self, Self) {
+    pub fn new(max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info =
-            info::ConnectionInfo::duplex(name, protocol, max_buf_size).map(|_| DuplexAddr::new());
+        let info = info::ConnectionInfo::duplex(max_buf_size).map(|_| DuplexAddr::new());
         (
             DuplexStream {
                 inner: a,
@@ -144,7 +142,6 @@ impl AsyncWrite for DuplexStream {
 /// and recieve data between multiple clients and a server.
 #[derive(Debug, Clone)]
 pub struct DuplexClient {
-    name: Authority,
     sender: tokio::sync::mpsc::Sender<DuplexConnectionRequest>,
 }
 
@@ -152,13 +149,9 @@ impl DuplexClient {
     /// Connect to the other half of this duplex setup.
     ///
     /// The `max_buf_size` is the maximum size of the buffer used for the stream.
-    pub async fn connect(
-        &self,
-        max_buf_size: usize,
-        protocol: Option<Protocol>,
-    ) -> Result<DuplexStream, io::Error> {
+    pub async fn connect(&self, max_buf_size: usize) -> Result<DuplexStream, io::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let request = DuplexConnectionRequest::new(self.name.clone(), tx, max_buf_size, protocol);
+        let request = DuplexConnectionRequest::new(tx, max_buf_size);
         self.sender
             .send(request)
             .await
@@ -169,25 +162,13 @@ impl DuplexClient {
 
 /// Gets sent to server to create connection
 struct DuplexConnectionRequest {
-    name: Authority,
     ack: tokio::sync::oneshot::Sender<DuplexStream>,
     max_buf_size: usize,
-    protocol: Option<Protocol>,
 }
 
 impl DuplexConnectionRequest {
-    fn new(
-        name: Authority,
-        ack: tokio::sync::oneshot::Sender<DuplexStream>,
-        max_buf_size: usize,
-        protocol: Option<Protocol>,
-    ) -> Self {
-        Self {
-            name,
-            ack,
-            max_buf_size,
-            protocol,
-        }
+    fn new(ack: tokio::sync::oneshot::Sender<DuplexStream>, max_buf_size: usize) -> Self {
+        Self { ack, max_buf_size }
     }
 
     /// Tell waiting clients that the connection has been established
@@ -197,7 +178,7 @@ impl DuplexConnectionRequest {
             None => self.max_buf_size,
         };
 
-        let (tx, rx) = DuplexStream::new(self.name, self.protocol, max_buf_size);
+        let (tx, rx) = DuplexStream::new(max_buf_size);
         self.ack
             .send(tx)
             .map_err(|_| io::ErrorKind::ConnectionReset)?;
@@ -212,9 +193,9 @@ impl DuplexConnectionRequest {
 /// # use hyperdriver::stream::duplex::{self, DuplexClient};
 /// use futures_util::TryStreamExt;
 /// # async fn demo_duplex() {
-/// let (client, mut incoming) = duplex::pair("test".parse().unwrap());
+/// let (client, mut incoming) = duplex::pair();
 ///
-/// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024, None), incoming.try_next()).unwrap();
+/// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024), incoming.try_next()).unwrap();
 /// assert!(server_conn.is_some());
 /// # }
 /// ```
@@ -274,14 +255,13 @@ impl futures_core::Stream for DuplexIncoming {
 ///
 /// The client can be cloned and re-used cheaply, and the incoming provides
 /// a stream of incoming duplex connections.
-pub fn pair(name: Authority) -> (DuplexClient, DuplexIncoming) {
+pub fn pair() -> (DuplexClient, DuplexIncoming) {
     let (sender, receiver) = tokio::sync::mpsc::channel(32);
-    (DuplexClient { name, sender }, DuplexIncoming::new(receiver))
+    (DuplexClient { sender }, DuplexIncoming::new(receiver))
 }
 
 #[cfg(test)]
 mod test {
-    use http::Version;
 
     #[tokio::test]
     async fn test_duplex() {
@@ -289,16 +269,14 @@ mod test {
         use futures_util::StreamExt;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let name: Authority = "test".parse().unwrap();
-
-        let (client, incoming) = pair(name.clone());
+        let (client, incoming) = pair();
         let mut incoming = incoming.fuse();
 
-        let (mut client_stream, mut server_stream) = tokio::try_join!(
-            client.connect(1024, Some(Protocol::Http(Version::HTTP_11))),
-            async { incoming.next().await.unwrap() }
-        )
-        .unwrap();
+        let (mut client_stream, mut server_stream) =
+            tokio::try_join!(client.connect(1024), async {
+                incoming.next().await.unwrap()
+            })
+            .unwrap();
 
         let mut buf = [0u8; 1024];
 
@@ -315,8 +293,6 @@ mod test {
             client_stream.read_exact(&mut buf[..5])
         )
         .unwrap();
-
-        assert_eq!(client_stream.info().authority, Some(name));
 
         assert_eq!(&buf[..5], b"world");
     }

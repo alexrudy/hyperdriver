@@ -226,12 +226,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_tls_transport_wrapper() {
-        let (client, server) = crate::stream::duplex::pair("example.com".parse().unwrap());
+        let (client, server) = crate::stream::duplex::pair();
 
         let mut config = fixtures::tls_client_config();
         config.alpn_protocols.push(b"h2".to_vec());
         let transport = crate::client::conn::transport::TlsTransportWrapper::new(
-            crate::client::conn::transport::duplex::DuplexTransport::new(1024, None, client),
+            crate::client::conn::transport::duplex::DuplexTransport::new(1024, client),
             config.into(),
         );
 

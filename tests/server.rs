@@ -30,7 +30,7 @@ async fn connection<P: hyperdriver::client::conn::Protocol<Stream>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
-    let stream = client.connect(1024, None).await?;
+    let stream = client.connect(1024).await?;
     let conn = protocol
         .connect(
             hyperdriver::client::conn::transport::TransportStream::new_stream(stream.into())
@@ -109,7 +109,7 @@ async fn echo_h1() {
     use hyper::client::conn::http1::Builder;
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (client, incoming) = hyperdriver::stream::duplex::pair();
 
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
@@ -137,7 +137,7 @@ async fn echo_h2() {
 
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (client, incoming) = hyperdriver::stream::duplex::pair();
 
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
@@ -164,7 +164,7 @@ async fn echo_h1_early_disconnect() {
     use hyper::client::conn::http1::Builder;
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (client, incoming) = hyperdriver::stream::duplex::pair();
 
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
@@ -192,7 +192,7 @@ async fn echo_h1_early_disconnect() {
 async fn echo_auto_h1() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (client, incoming) = hyperdriver::stream::duplex::pair();
 
     let server = hyperdriver::Server::builder()
         .with_incoming(incoming)
@@ -220,7 +220,7 @@ async fn echo_auto_h1() {
 async fn echo_auto_h2() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (client, incoming) = hyperdriver::stream::duplex::pair();
 
     let server = hyperdriver::Server::builder()
         .with_incoming(incoming)

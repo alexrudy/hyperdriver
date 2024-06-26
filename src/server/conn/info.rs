@@ -228,9 +228,9 @@ mod tests {
             .layer(MakeServiceConnectionInfoLayer::new())
             .service(Shared::new(service));
 
-        let (client, incoming) = crate::stream::duplex::pair("test".parse().unwrap());
+        let (client, incoming) = crate::stream::duplex::pair();
 
-        let (_, conn) = tokio::try_join!(client.connect(1024, None), incoming.accept()).unwrap();
+        let (_, conn) = tokio::try_join!(client.connect(1024), incoming.accept()).unwrap();
 
         let req = http::Request::new(crate::Body::empty());
         let mut svc = tower::Service::call(&mut make_service, &conn)

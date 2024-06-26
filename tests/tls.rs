@@ -88,7 +88,7 @@ async fn tls_echo_h1() {
 
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (duplex_client, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
@@ -107,7 +107,7 @@ async fn tls_echo_h1() {
 
     let client = Client::new(
         Builder::new(),
-        DuplexTransport::new(1024, None, duplex_client).with_tls(client_tls.into()),
+        DuplexTransport::new(1024, duplex_client).with_tls(client_tls.into()),
         Default::default(),
     );
 
@@ -138,7 +138,7 @@ async fn tls_echo_h2() {
 
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (duplex_client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (duplex_client, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
@@ -156,7 +156,7 @@ async fn tls_echo_h2() {
 
     let client = Client::new(
         Builder::new(TokioExecutor::new()),
-        DuplexTransport::new(1024, None, duplex_client).with_tls(client_tls.into()),
+        DuplexTransport::new(1024, duplex_client).with_tls(client_tls.into()),
         Default::default(),
     );
 

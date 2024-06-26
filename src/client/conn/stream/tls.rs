@@ -17,9 +17,14 @@ use crate::info::{ConnectionInfo, HasConnectionInfo};
 use crate::info::TlsConnectionInfo;
 use crate::stream::tls::TlsHandshakeStream;
 
+// NOTE: Individual fields are Box'd to reduce the resulting stack size
+// of items that contain potential TLS connections.
+//
+// Without the Box here, enum variants can get as large as ~1100 bytes,
+// which seems unnecessary to carry around on the stack.
 enum State<IO> {
-    Handshake(tokio_rustls::Connect<IO>),
-    Streaming(tokio_rustls::client::TlsStream<IO>),
+    Handshake(Box<tokio_rustls::Connect<IO>>),
+    Streaming(Box<tokio_rustls::client::TlsStream<IO>>),
 }
 
 impl<IO> fmt::Debug for State<IO> {
@@ -125,7 +130,7 @@ where
 
                     // Back to processing the stream
                     let result = action(&mut stream, cx);
-                    self.state = State::Streaming(stream);
+                    self.state = State::Streaming(Box::new(stream));
                     result
                 }
                 Err(err) => Poll::Ready(Err(err)),
@@ -146,7 +151,7 @@ where
         let info = stream.info();
 
         Self {
-            state: State::Handshake(accept),
+            state: State::Handshake(Box::new(accept)),
             info,
             tls: None,
         }

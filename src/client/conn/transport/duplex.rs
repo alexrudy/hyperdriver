@@ -7,27 +7,20 @@ use futures_util::future::BoxFuture;
 use http::Uri;
 
 use super::TransportStream;
-use crate::info::Protocol;
 use crate::stream::duplex::DuplexStream as Stream;
 
 /// Transport via duplex stream
 #[derive(Debug, Clone)]
 pub struct DuplexTransport {
     max_buf_size: usize,
-    protocol: Option<Protocol>,
     client: crate::stream::duplex::DuplexClient,
 }
 
 impl DuplexTransport {
     /// Create a new `DuplexTransport`
-    pub fn new(
-        max_buf_size: usize,
-        protocol: Option<Protocol>,
-        client: crate::stream::duplex::DuplexClient,
-    ) -> Self {
+    pub fn new(max_buf_size: usize, client: crate::stream::duplex::DuplexClient) -> Self {
         Self {
             max_buf_size,
-            protocol,
             client,
         }
     }
@@ -47,9 +40,8 @@ impl tower::Service<Uri> for DuplexTransport {
     fn call(&mut self, _req: Uri) -> Self::Future {
         let client = self.client.clone();
         let max_buf_size = self.max_buf_size;
-        let protocol = self.protocol.clone();
         let fut = async move {
-            let stream = client.connect(max_buf_size, protocol).await?;
+            let stream = client.connect(max_buf_size).await?;
             Ok(TransportStream::new(
                 stream,
                 #[cfg(feature = "tls")]
@@ -72,9 +64,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_duplex_transport() {
-        let (client, srv) = crate::stream::duplex::pair("example.com".parse().unwrap());
+        let (client, srv) = crate::stream::duplex::pair();
 
-        let transport = DuplexTransport::new(1024, None, client);
+        let transport = DuplexTransport::new(1024, client);
 
         let (io, _) = tokio::join!(
             async {
@@ -87,7 +79,6 @@ mod tests {
         );
         let info = io.info();
 
-        assert_eq!(info.protocol, None);
         assert_eq!(info.local_addr, DuplexAddr::new());
         assert_eq!(info.remote_addr, DuplexAddr::new());
     }
