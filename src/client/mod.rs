@@ -564,9 +564,13 @@ fn set_host_header<B>(request: &mut http::Request<B>) {
 #[cfg(test)]
 mod tests {
 
+    #[cfg(feature = "mocks")]
     use crate::Body;
 
-    use self::pool::mock::{MockConnectionError, MockProtocol, MockTransport};
+    #[cfg(feature = "mocks")]
+    use self::conn::protocol::mock::MockProtocol;
+    #[cfg(feature = "mocks")]
+    use self::conn::transport::mock::{MockConnectionError, MockTransport};
 
     use super::*;
 
@@ -683,10 +687,11 @@ mod tests {
         assert_eq!(uri, "https://example.com:80");
     }
 
+    #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn test_client_mock_transport() {
         let transport = MockTransport::new(false);
-        let protocol = MockProtocol::default();
+        let protocol = MockProtocol;
         let pool = PoolConfig::default();
 
         let client: Client<MockProtocol, MockTransport, Body> =
@@ -703,10 +708,11 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn test_client_mock_connection_error() {
         let transport = MockTransport::connection_error();
-        let protocol = MockProtocol::default();
+        let protocol = MockProtocol;
         let pool = PoolConfig::default();
 
         let client: Client<MockProtocol, MockTransport, Body> =

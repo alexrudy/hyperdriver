@@ -19,6 +19,8 @@ use crate::bridge::io::TokioIo;
 use crate::info::HasConnectionInfo;
 
 pub mod auto;
+#[cfg(feature = "mocks")]
+pub mod mock;
 pub use hyper::client::conn::http1;
 pub use hyper::client::conn::http2;
 

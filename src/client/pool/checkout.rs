@@ -358,10 +358,10 @@ impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, 
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mocks"))]
 mod test {
-    use super::super::mock::MockTransport;
     use super::*;
+    use crate::client::conn::transport::mock::MockTransport;
 
     #[test]
     fn verify_checkout_id() {

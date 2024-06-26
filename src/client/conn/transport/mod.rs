@@ -39,10 +39,10 @@ use self::tls::TlsTransportWrapper;
 
 #[cfg(feature = "stream")]
 pub mod duplex;
-
+#[cfg(feature = "mocks")]
+pub mod mock;
 #[cfg(feature = "stream")]
 pub(crate) mod stream;
-
 pub mod tcp;
 #[cfg(feature = "tls")]
 pub mod tls;
