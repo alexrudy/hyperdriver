@@ -628,6 +628,23 @@ mod test {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct EmptyResolver;
+
+    impl Service<Box<str>> for EmptyResolver {
+        type Response = SocketAddrs;
+        type Error = io::Error;
+        type Future = Ready<Result<SocketAddrs, io::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Box<str>) -> Self::Future {
+            std::future::ready(Ok::<_, io::Error>(SocketAddrs::default()))
+        }
+    }
+
     async fn connect_transport<T>(
         uri: Uri,
         transport: T,
@@ -682,5 +699,26 @@ mod test {
             *info.remote_addr(),
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
         );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_transport_no_candidates() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let uri: Uri = "http://example.com".parse().unwrap();
+
+        let config = TcpTransportConfig::default();
+
+        let transport = TcpTransport::builder()
+            .with_config(config)
+            .with_resolver(EmptyResolver)
+            .build::<TcpStream>();
+
+        let result = transport.oneshot(uri).await;
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+
+        assert!(!err.to_string().contains("timed out"))
     }
 }
