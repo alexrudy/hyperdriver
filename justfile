@@ -13,6 +13,7 @@ all: fmt check-all deny clippy examples docs test machete udeps msrv
 
 # Check for unused dependencies
 udeps:
+    cargo +{{nightly}} udeps --all-features
     cargo +{{nightly}} hack udeps --each-feature
 
 # Use machete to check for unused dependencies

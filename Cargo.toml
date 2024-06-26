@@ -77,15 +77,13 @@ docs = []
 incoming = []
 client = ["incoming", "dep:socket2", "dep:thiserror"]
 server = ["incoming", "dep:ouroboros", "dep:thiserror"]
+serde = ["dep:serde", "camino/serde1", "dep:humantime-serde"]
 discovery = [
     "server",
     "client",
     "pidfile",
     "stream",
-    "dep:humantime-serde",
     "dep:dashmap",
-    "dep:serde",
-    "camino/serde1",
 ]
 pidfile = ["dep:libc"]
 sni = []
@@ -168,7 +166,7 @@ required-features = ["client", "server", "tls", "tls-ring"]
 ignored = ["humantime-serde"]
 
 [package.metadata.cargo-udeps.ignore]
-normal = ["rustls-native-certs", "rustls", "tokio-rustls"]
+normal = ["rustls-native-certs", "rustls", "tokio-rustls", "humantime-serde"]
 
 [package.metadata.docs.rs]
 all-features = true
