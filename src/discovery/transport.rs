@@ -236,8 +236,11 @@ impl Scheme for GrpcScheme {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use tower::{make::Shared, Service, ServiceExt};
 
+    use crate::discovery::{ConnectionError, ServiceDiscovery};
     use crate::info::HasConnectionInfo;
     use crate::{body::Body, info::BraidAddr};
 
@@ -305,5 +308,42 @@ mod tests {
         assert_eq!(info.remote_addr(), &BraidAddr::Duplex);
 
         tx.send(()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transport_not_found() {
+        let mut registry = ServiceRegistry::new();
+        registry.config_mut().connect_timeout = Some(Duration::ZERO);
+        let transport = RegistryTransport::with_default_schemes(registry);
+
+        let uri = "svc://service".parse().unwrap();
+        let err = transport.oneshot(uri).await.unwrap_err();
+
+        assert!(matches!(err, ConnectionError::ConnectionTimeout(_, _)));
+    }
+
+    #[tokio::test]
+    async fn test_transport_unix_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut registry = ServiceRegistry::new();
+        let cfg = registry.config_mut();
+        cfg.connect_timeout = Some(Duration::ZERO);
+        cfg.service_discovery = ServiceDiscovery::Unix {
+            path: Utf8Path::from_path(tmp.path()).unwrap().to_owned(),
+        };
+
+        let transport = RegistryTransport::with_default_schemes(registry);
+
+        let uri = "svc://service".parse().unwrap();
+        let err = transport.oneshot(uri).await.unwrap_err();
+
+        match err {
+            ConnectionError::Unix { error, path, name } => {
+                assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+                assert_eq!(path, tmp.path().join(format!("{}.svc", name)));
+                assert_eq!(name, "service");
+            }
+            _ => panic!("unexpected error: {:?}", err),
+        }
     }
 }

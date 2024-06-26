@@ -66,7 +66,7 @@ pub enum ConnectionError {
     },
 
     /// Error connecting to a duplex socket
-    #[error("Connecting to {name} over a duplex socket")]
+    #[error("Error {} connecting to {name} over a duplex socket", .error.kind())]
     Duplex {
         /// Internal error.
         #[source]
@@ -77,7 +77,7 @@ pub enum ConnectionError {
     },
 
     /// An IO error occured while connecting to the service.
-    #[error("Connecting to {name} at {path}")]
+    #[error("Error {} connecting to {name} at {path}", .error.kind())]
     Unix {
         /// Internal IO error.
         #[source]
@@ -616,5 +616,27 @@ mod tests {
 
         assert_eq!(path, expected);
         assert!(matches!(pidfile, PidLock::Path(_)));
+    }
+
+    #[tokio::test]
+    async fn connect_to_handle_unix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let name = "service.with.dots";
+        let handle = ServiceHandle::unix(tmp.path().try_into().unwrap(), name);
+
+        let config = RegistryConfig::default();
+        let name = Cow::Borrowed(name);
+
+        let result = connect_to_handle(&config, &handle, name).await;
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            ConnectionError::Unix { error, path, name } => {
+                assert_eq!(error.kind(), io::ErrorKind::NotFound);
+                assert_eq!(path, tmp.path().join(format!("{}.svc", name)));
+                assert_eq!(name, name);
+            }
+            _ => panic!("expected Unix error"),
+        }
     }
 }
