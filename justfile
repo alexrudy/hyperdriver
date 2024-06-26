@@ -60,7 +60,7 @@ test:
 
 # Run coverage tests
 coverage:
-    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring
+    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring,mocks
 
 # Run deny checks
 deny:

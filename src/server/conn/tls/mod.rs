@@ -132,7 +132,7 @@ where
             TlsState::Handshake(a) => a
                 .get_ref()
                 .map(|io| io.info())
-                .expect("handshake is complete"),
+                .expect("connection info available without tls handshake"),
             TlsState::Streaming(s) => s.get_ref().0.info(),
         }
     }

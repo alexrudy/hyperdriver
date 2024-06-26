@@ -358,9 +358,11 @@ impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, 
     }
 }
 
-#[cfg(all(test, feature = "mocks"))]
+#[cfg(test)]
 mod test {
     use super::*;
+
+    #[cfg(feature = "mocks")]
     use crate::client::conn::transport::mock::MockTransport;
 
     #[test]
@@ -372,6 +374,7 @@ mod test {
         assert_eq!(id.clone(), CheckoutId(0));
     }
 
+    #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn detatched_checkout() {
         let key: Key = "http://localhost:8080".parse().unwrap();
