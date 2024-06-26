@@ -15,7 +15,7 @@ use tracing::trace;
 
 mod checkout;
 mod idle;
-mod key;
+pub(super) mod key;
 mod weakopt;
 
 #[cfg(test)]

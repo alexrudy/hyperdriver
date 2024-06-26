@@ -45,7 +45,7 @@ impl fmt::Display for CheckoutId {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error<E> {
     Connecting(#[source] E),
     Handshaking(#[source] E),
@@ -382,7 +382,7 @@ mod test {
         let dbg = format!("{:?}", checkout);
         assert_eq!(
             dbg,
-            "Checkout { key: Key(\"http\", localhost:8080), pool: WeakOpt(None), waiter: NoPool, inner: Connecting }"
+            "Checkout { key: Key(\"http\", Some(localhost:8080)), pool: WeakOpt(None), waiter: NoPool, inner: Connecting }"
         );
 
         let connection = checkout.await.unwrap();

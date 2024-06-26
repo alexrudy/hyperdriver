@@ -292,7 +292,13 @@ impl<'c> TcpConnecting<'c> {
 
         attempts.finish().await.map_err(|err| match err {
             HappyEyeballsError::Error(err) => err,
-            err => TcpConnectionError::build("happy eyeballs", err),
+            HappyEyeballsError::Timeout(elapsed) => TcpConnectionError::new(format!(
+                "Connection attempts timed out after {}ms",
+                elapsed.as_millis()
+            )),
+            HappyEyeballsError::NoProgress => {
+                TcpConnectionError::new("Exhausted connection candidates")
+            }
         })
     }
 }

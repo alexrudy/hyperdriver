@@ -9,6 +9,7 @@ use http::Response;
 use hyper::body::Incoming;
 use thiserror::Error;
 
+pub use crate::client::pool::key::UriError;
 use crate::client::pool::PoolableConnection;
 
 /// A connection to a remote server which can send and recieve HTTP requests/responses.
@@ -16,11 +17,16 @@ use crate::client::pool::PoolableConnection;
 /// Underneath, it may not use HTTP as the connection protocol, and it may use any appropriate
 /// transport protocol to connect to the server.
 pub trait Connection {
+    /// The body type for responses this connection
+    type ResBody: http_body::Body + Send + 'static;
+
     /// The error type for this connection
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The future type returned by this service
-    type Future: Future<Output = Result<::http::Response<Incoming>, Self::Error>> + Send + 'static;
+    type Future: Future<Output = Result<::http::Response<Self::ResBody>, Self::Error>>
+        + Send
+        + 'static;
 
     /// Send a request to the remote server and return the response.
     fn send_request(&mut self, request: crate::body::Request) -> Self::Future;
@@ -78,6 +84,8 @@ enum InnerConnection {
 }
 
 impl Connection for HttpConnection {
+    type ResBody = hyper::body::Incoming;
+
     type Error = hyper::Error;
 
     type Future = BoxFuture<'static, Result<Response<Incoming>, hyper::Error>>;
@@ -135,7 +143,7 @@ impl PoolableConnection for HttpConnection {
 /// Error returned when a connection could not be established.
 #[derive(Debug, Error)]
 pub enum ConnectionError {
-    /// Error connecting to the remote host via TCP
+    /// Error connecting to the remote host via the transport
     #[error(transparent)]
     Connecting(Box<dyn std::error::Error + Send + Sync + 'static>),
 
@@ -154,4 +162,8 @@ pub enum ConnectionError {
     /// Connection timed out.
     #[error("connection timeout")]
     Timeout,
+
+    /// Invalid URI for the connection
+    #[error("invalid URI")]
+    InvalidUri(#[from] UriError),
 }
