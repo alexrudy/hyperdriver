@@ -564,6 +564,10 @@ fn set_host_header<B>(request: &mut http::Request<B>) {
 #[cfg(test)]
 mod tests {
 
+    use crate::Body;
+
+    use self::pool::mock::{MockConnectionError, MockProtocol, MockTransport};
+
     use super::*;
 
     #[test]
@@ -677,5 +681,58 @@ mod tests {
         let mut uri = "https://example.com:80".parse().unwrap();
         absolute_form(&mut uri);
         assert_eq!(uri, "https://example.com:80");
+    }
+
+    #[tokio::test]
+    async fn test_client_mock_transport() {
+        let transport = MockTransport::new(false);
+        let protocol = MockProtocol::default();
+        let pool = PoolConfig::default();
+
+        let client: Client<MockProtocol, MockTransport, Body> =
+            Client::new(protocol, transport, pool);
+
+        client
+            .request(
+                http::Request::builder()
+                    .uri("mock://somewhere")
+                    .body(crate::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_client_mock_connection_error() {
+        let transport = MockTransport::connection_error();
+        let protocol = MockProtocol::default();
+        let pool = PoolConfig::default();
+
+        let client: Client<MockProtocol, MockTransport, Body> =
+            Client::new(protocol, transport, pool);
+
+        let result = client
+            .request(
+                http::Request::builder()
+                    .uri("mock://somewhere")
+                    .body(crate::Body::empty())
+                    .unwrap(),
+            )
+            .await;
+
+        let err = result.unwrap_err();
+
+        let Error::Connection(err) = err else {
+            panic!("unexpected error: {:?}", err);
+        };
+
+        let err = err.downcast::<ConnectionError>().unwrap();
+
+        let ConnectionError::Connecting(err) = *err else {
+            panic!("unexpected error: {:?}", err);
+        };
+
+        err.downcast::<MockConnectionError>().unwrap();
     }
 }

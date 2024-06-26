@@ -306,6 +306,8 @@ mod tests {
     use futures_util::FutureExt as _;
     use static_assertions::assert_impl_all;
 
+    use self::mock::MockConnectionError;
+
     use super::mock::{MockConnection, MockTransport};
     use super::*;
 
@@ -628,5 +630,31 @@ mod tests {
         drop(pool);
 
         assert!(checkout.now_or_never().unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn checkout_connection_error() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+        });
+
+        let key: key::Key = (
+            http::uri::Scheme::HTTPS,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let checkout = pool.checkout(
+            key.clone(),
+            true,
+            Connector::new(MockTransport::error, MockTransport::handshake),
+        );
+
+        let outcome = checkout.now_or_never().unwrap();
+        let error = outcome.unwrap_err();
+        assert_eq!(error, Error::Connecting(MockConnectionError));
     }
 }
