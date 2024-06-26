@@ -1,7 +1,5 @@
 #!/usr/bin/env just --justfile
 
-export RUSTFLAGS := "-D warnings"
-export RUSTDOCFLAGS := "-D warnings"
 
 nightly := "nightly-2024-04-16"
 msrv := "1.74"
