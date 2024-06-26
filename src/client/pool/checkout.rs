@@ -45,7 +45,7 @@ impl fmt::Display for CheckoutId {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error<E> {
     Connecting(#[source] E),
     Handshaking(#[source] E),
@@ -279,7 +279,9 @@ where
             };
 
             if transport.can_share() {
-                trace!(key=%this.key, "connection can be shared");
+                // This can happen if we connect expecting an HTTP/1.1 connection, but during the TLS
+                // handshake we discover that the connection is actually an HTTP/2 connection.
+                trace!(key=%this.key, "connection can be shared, telling pool to wait for handshake");
                 if let Some(pool) = this.pool.upgrade() {
                     if let Ok(mut inner) = pool.lock() {
                         inner.connected_in_handshake(this.key);
@@ -382,7 +384,7 @@ mod test {
         let dbg = format!("{:?}", checkout);
         assert_eq!(
             dbg,
-            "Checkout { key: Key(\"http\", localhost:8080), pool: WeakOpt(None), waiter: NoPool, inner: Connecting }"
+            "Checkout { key: Key(\"http\", Some(localhost:8080)), pool: WeakOpt(None), waiter: NoPool, inner: Connecting }"
         );
 
         let connection = checkout.await.unwrap();

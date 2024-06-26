@@ -55,7 +55,7 @@ pub mod tls;
 /// IO stream must implement [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`].
 pub trait Transport: Clone + Send {
     /// The type of IO stream used by this transport
-    type IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + 'static;
+    type IO: HasConnectionInfo + Send + 'static;
 
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
@@ -81,7 +81,7 @@ where
     T: Clone + Send + Sync + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + 'static,
+    IO: HasConnectionInfo + Send + 'static,
     IO::Addr: Send,
 {
     type IO = IO;
@@ -478,7 +478,7 @@ impl<T> TlsTransport<T> {
 impl<T> Service<Uri> for TlsTransport<T>
 where
     T: Transport,
-    <T as Transport>::IO: HasConnectionInfo + Unpin,
+    <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
     type Response = TransportStream<Stream<T::IO>>;
@@ -535,6 +535,7 @@ mod future {
     use std::{fmt, future::Future};
 
     use pin_project::pin_project;
+    use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::info::HasConnectionInfo;
 
@@ -595,7 +596,7 @@ mod future {
     impl<T> Future for TransportBraidFuture<T>
     where
         T: Transport,
-        <T as Transport>::IO: HasConnectionInfo + Unpin,
+        <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
         <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
         #[cfg(feature = "tls")]

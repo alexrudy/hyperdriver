@@ -206,13 +206,14 @@ where
     T::IO: Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
+    #[allow(clippy::type_complexity)]
     fn connect_to(
         &self,
         uri: http::Uri,
         http_protocol: HttpProtocol,
-    ) -> Checkout<P::Connection, TransportStream<T::IO>, ConnectionError> {
-        let key: pool::Key = uri.clone().into();
-
+    ) -> Result<Checkout<P::Connection, TransportStream<T::IO>, ConnectionError>, ConnectionError>
+    {
+        let key: pool::Key = uri.clone().try_into()?;
         let mut protocol = self.protocol.clone();
         let mut transport = self.transport.clone();
 
@@ -240,9 +241,9 @@ where
         );
 
         if let Some(pool) = self.pool.as_ref() {
-            pool.checkout(key, http_protocol.multiplex(), connector)
+            Ok(pool.checkout(key, http_protocol.multiplex(), connector))
         } else {
-            Checkout::detached(key, connector)
+            Ok(Checkout::detached(key, connector))
         }
     }
 }
@@ -255,6 +256,7 @@ where
     T::IO: Unpin,
     B: From<crate::body::Body> + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
+    C::ResBody: Into<crate::Body>,
 {
     /// Send an http Request, and return a Future of the Response.
     pub fn request(
@@ -265,8 +267,10 @@ where
 
         let protocol: HttpProtocol = request.version().into();
 
-        let checkout = self.connect_to(uri, protocol);
-        ResponseFuture::new(checkout, request)
+        match self.connect_to(uri, protocol) {
+            Ok(checkout) => ResponseFuture::new(checkout, request),
+            Err(error) => ResponseFuture::error(error),
+        }
     }
 
     /// Make a GET request to the given URI.
@@ -289,6 +293,7 @@ where
     BIn: Into<crate::body::Body>,
     BOut: From<crate::body::Body> + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
+    C::ResBody: Into<crate::Body>,
 {
     type Response = http::Response<BOut>;
     type Error = Error;
@@ -332,11 +337,19 @@ where
             _body: std::marker::PhantomData,
         }
     }
+
+    fn error(error: ConnectionError) -> Self {
+        Self {
+            inner: ResponseFutureState::ConnectionError(error),
+            _body: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<C, T, BOut> Future for ResponseFuture<C, T, BOut>
 where
     C: Connection + pool::PoolableConnection,
+    C::ResBody: Into<crate::body::Body>,
     T: pool::PoolableTransport,
     BOut: From<crate::body::Body> + Unpin,
 {
@@ -372,6 +385,9 @@ where
                         return Poll::Pending;
                     }
                 },
+                ResponseFutureState::ConnectionError(error) => {
+                    return Poll::Ready(Err(Error::Connection(error.into())));
+                }
                 ResponseFutureState::Empty => {
                     panic!("future polled after completion");
                 }
@@ -386,6 +402,7 @@ enum ResponseFutureState<C: pool::PoolableConnection, T: pool::PoolableTransport
         checkout: Checkout<C, T, ConnectionError>,
         request: crate::body::Request,
     },
+    ConnectionError(ConnectionError),
     Request(BoxFuture<'static, Result<http::Response<crate::body::Body>, HyperdriverError>>),
 }
 
@@ -436,10 +453,14 @@ fn prepare_request<C: Connection + PoolableConnection>(
     Ok(())
 }
 
-async fn execute_request<C: Connection + PoolableConnection>(
+async fn execute_request<C>(
     mut request: crate::body::Request,
     mut conn: Pooled<C>,
-) -> Result<http::Response<crate::body::Body>, Error> {
+) -> Result<http::Response<crate::body::Body>, Error>
+where
+    C: Connection + PoolableConnection,
+    C::ResBody: Into<crate::Body>,
+{
     prepare_request(&mut request, &conn)?;
 
     tracing::trace!(request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
@@ -542,6 +563,10 @@ fn set_host_header<B>(request: &mut http::Request<B>) {
 
 #[cfg(test)]
 mod tests {
+
+    use crate::Body;
+
+    use self::pool::mock::{MockConnectionError, MockProtocol, MockTransport};
 
     use super::*;
 
@@ -656,5 +681,58 @@ mod tests {
         let mut uri = "https://example.com:80".parse().unwrap();
         absolute_form(&mut uri);
         assert_eq!(uri, "https://example.com:80");
+    }
+
+    #[tokio::test]
+    async fn test_client_mock_transport() {
+        let transport = MockTransport::new(false);
+        let protocol = MockProtocol::default();
+        let pool = PoolConfig::default();
+
+        let client: Client<MockProtocol, MockTransport, Body> =
+            Client::new(protocol, transport, pool);
+
+        client
+            .request(
+                http::Request::builder()
+                    .uri("mock://somewhere")
+                    .body(crate::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_client_mock_connection_error() {
+        let transport = MockTransport::connection_error();
+        let protocol = MockProtocol::default();
+        let pool = PoolConfig::default();
+
+        let client: Client<MockProtocol, MockTransport, Body> =
+            Client::new(protocol, transport, pool);
+
+        let result = client
+            .request(
+                http::Request::builder()
+                    .uri("mock://somewhere")
+                    .body(crate::Body::empty())
+                    .unwrap(),
+            )
+            .await;
+
+        let err = result.unwrap_err();
+
+        let Error::Connection(err) = err else {
+            panic!("unexpected error: {:?}", err);
+        };
+
+        let err = err.downcast::<ConnectionError>().unwrap();
+
+        let ConnectionError::Connecting(err) = *err else {
+            panic!("unexpected error: {:?}", err);
+        };
+
+        err.downcast::<MockConnectionError>().unwrap();
     }
 }

@@ -292,7 +292,13 @@ impl<'c> TcpConnecting<'c> {
 
         attempts.finish().await.map_err(|err| match err {
             HappyEyeballsError::Error(err) => err,
-            err => TcpConnectionError::build("happy eyeballs", err),
+            HappyEyeballsError::Timeout(elapsed) => TcpConnectionError::new(format!(
+                "Connection attempts timed out after {}ms",
+                elapsed.as_millis()
+            )),
+            HappyEyeballsError::NoProgress => {
+                TcpConnectionError::new("Exhausted connection candidates")
+            }
         })
     }
 }
@@ -622,6 +628,43 @@ mod test {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct EmptyResolver;
+
+    impl Service<Box<str>> for EmptyResolver {
+        type Response = SocketAddrs;
+        type Error = io::Error;
+        type Future = Ready<Result<SocketAddrs, io::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Box<str>) -> Self::Future {
+            std::future::ready(Ok::<_, io::Error>(SocketAddrs::default()))
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct ErrorResolver;
+
+    impl Service<Box<str>> for ErrorResolver {
+        type Response = SocketAddrs;
+        type Error = io::Error;
+        type Future = Ready<Result<SocketAddrs, io::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Box<str>) -> Self::Future {
+            std::future::ready(Err(io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "no address found",
+            )))
+        }
+    }
+
     async fn connect_transport<T>(
         uri: Uri,
         transport: T,
@@ -654,7 +697,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_tcp_transport() {
+    async fn test_transport() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let bind = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -676,5 +719,47 @@ mod test {
             *info.remote_addr(),
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
         );
+    }
+
+    #[tokio::test]
+    async fn test_transport_no_candidates() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let uri: Uri = "http://example.com".parse().unwrap();
+
+        let config = TcpTransportConfig::default();
+
+        let transport = TcpTransport::builder()
+            .with_config(config)
+            .with_resolver(EmptyResolver)
+            .build::<TcpStream>();
+
+        let result = transport.oneshot(uri).await;
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+
+        assert!(!err.to_string().contains("timed out"))
+    }
+
+    #[tokio::test]
+    async fn test_transport_error() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let uri: Uri = "http://example.com".parse().unwrap();
+
+        let config = TcpTransportConfig::default();
+
+        let transport = TcpTransport::builder()
+            .with_config(config)
+            .with_resolver(ErrorResolver)
+            .build::<TcpStream>();
+
+        let result = transport.oneshot(uri).await;
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+
+        assert!(err.to_string().contains("no address found"))
     }
 }

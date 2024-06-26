@@ -20,6 +20,7 @@ keywords = ["hyper", "http", "client", "server", "async"]
 unsafe_code = "deny"
 missing_docs = "deny"
 missing_debug_implementations = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 
 
 [dependencies]

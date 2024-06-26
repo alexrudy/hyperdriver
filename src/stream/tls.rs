@@ -17,7 +17,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 /// A stream that supports a TLS handshake.
-pub trait TlsHandshakeStream: AsyncRead + AsyncWrite + Send {
+pub trait TlsHandshakeStream: Send {
     /// Poll the handshake to completion.
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>>;
 
