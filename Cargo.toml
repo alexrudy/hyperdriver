@@ -27,7 +27,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 axum = { version = "0.7", optional = true }
 bytes = "1"
 camino = { version = "1", default-features = false }
-dashmap = { version = "5", optional = true }
+dashmap = { version = "6", optional = true }
 futures-core = "0.3"
 futures-util = "0.3"
 http = { version = "1" }
