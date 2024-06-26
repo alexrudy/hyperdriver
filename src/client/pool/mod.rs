@@ -77,7 +77,7 @@ impl<T: PoolableConnection> Default for Pool<T> {
 }
 
 impl<C: PoolableConnection> Pool<C> {
-    #[tracing::instrument(skip_all, fields(key = %key), level="debug")]
+    #[cfg_attr(not(tarpaulin), tracing::instrument(skip_all, fields(key = %key), level="debug"))]
     pub(crate) fn checkout<T, E>(
         &self,
         key: key::Key,
@@ -276,13 +276,17 @@ impl<C: PoolableConnection> Deref for Pooled<C> {
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
-        self.connection.as_ref().unwrap()
+        self.connection
+            .as_ref()
+            .expect("connection only taken on Drop")
     }
 }
 
 impl<C: PoolableConnection> DerefMut for Pooled<C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.connection.as_mut().unwrap()
+        self.connection
+            .as_mut()
+            .expect("connection only taken on Drop")
     }
 }
 
@@ -656,5 +660,61 @@ mod tests {
         let outcome = checkout.now_or_never().unwrap();
         let error = outcome.unwrap_err();
         assert_eq!(error, Error::Connecting(MockConnectionError));
+    }
+
+    #[tokio::test]
+    async fn checkout_simple_cloned() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+        });
+        let other = pool.clone();
+
+        let key: key::Key = (
+            http::uri::Scheme::HTTP,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let conn = pool
+            .checkout(
+                key.clone(),
+                false,
+                Connector::new(MockTransport::single, MockTransport::handshake),
+            )
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        let cid = conn.id();
+        drop(conn);
+
+        let conn = other
+            .checkout(
+                key.clone(),
+                false,
+                Connector::new(MockTransport::single, MockTransport::handshake),
+            )
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        assert_eq!(conn.id(), cid, "connection should be re-used");
+        conn.close();
+        drop(conn);
+
+        let c2 = pool
+            .checkout(
+                key,
+                false,
+                Connector::new(MockTransport::single, MockTransport::handshake),
+            )
+            .await
+            .unwrap();
+
+        assert!(c2.is_open());
+        assert_ne!(c2.id(), cid, "connection should not be re-used");
     }
 }

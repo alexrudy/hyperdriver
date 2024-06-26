@@ -279,7 +279,9 @@ where
             };
 
             if transport.can_share() {
-                trace!(key=%this.key, "connection can be shared");
+                // This can happen if we connect expecting an HTTP/1.1 connection, but during the TLS
+                // handshake we discover that the connection is actually an HTTP/2 connection.
+                trace!(key=%this.key, "connection can be shared, telling pool to wait for handshake");
                 if let Some(pool) = this.pool.upgrade() {
                     if let Ok(mut inner) = pool.lock() {
                         inner.connected_in_handshake(this.key);
