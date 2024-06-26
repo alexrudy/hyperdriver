@@ -174,9 +174,9 @@ where
             tokio::spawn(async {
                 if let Err(err) = conn.await {
                     if err.is_user() {
-                        tracing::error!(%err, "h1 connection driver error");
+                        tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
                     } else {
-                        tracing::debug!(%err, "h1 connection driver error");
+                        tracing::debug!(err = format!("{err:#}"), "h1 connection driver error");
                     }
                 }
             });
@@ -219,9 +219,9 @@ where
             tokio::spawn(async {
                 if let Err(err) = conn.await {
                     if err.is_user() {
-                        tracing::error!(%err, "h2 connection driver error");
+                        tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
                     } else {
-                        tracing::debug!(%err, "h2 connection driver error");
+                        tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
                     }
                 }
             });
