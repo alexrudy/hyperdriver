@@ -69,7 +69,7 @@ impl tower::Service<http::Request<CustomBody>> for CustomService {
 
 #[tokio::test]
 async fn custom_body_server() {
-    let (_, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (_, incoming) = hyperdriver::stream::duplex::pair();
     let service = CustomService.adapt_custom_body();
 
     let server = hyperdriver::server::Server::builder()

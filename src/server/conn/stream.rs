@@ -56,9 +56,9 @@ pub trait AcceptExt: Accept {
     /// # use hyperdriver::server::conn::AcceptExt;
     /// # use hyperdriver::stream::duplex;
     /// # async fn demo_accept() {
-    /// let (client, acceptor) = duplex::pair("test".parse().unwrap());
+    /// let (client, acceptor) = duplex::pair();
     ///
-    /// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024, None), acceptor.accept()).unwrap();
+    /// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024), acceptor.accept()).unwrap();
     /// # }
     fn accept(self) -> AcceptOne<Self>
     where

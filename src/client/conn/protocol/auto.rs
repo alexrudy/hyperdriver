@@ -135,7 +135,7 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument("http-connect", skip(self, req), fields(host = %req.transport.host().unwrap_or("-")))]
+    #[tracing::instrument("http-connect", skip_all, fields(addr=?req.transport.info().remote_addr()))]
     fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
         future::HttpConnectFuture::new(self.clone(), req.transport, req.version)
     }
@@ -233,13 +233,13 @@ mod tests {
     assert_impl_all!(future::HttpConnectFuture<Stream>: Future<Output = Result<HttpConnection, ConnectionError>>, Debug, Send);
 
     async fn transport() -> Result<(TransportStream<Stream>, Stream), BoxError> {
-        let (client, mut incoming) = crate::stream::duplex::pair("test".parse()?);
+        let (client, mut incoming) = crate::stream::duplex::pair();
 
         // Connect to the server. This is a helper function that creates a client and server
         // pair, and returns the client's transport stream and the server's stream.
         let (tx, rx) = tokio::try_join!(
             async {
-                let stream = client.connect(1024, None).await?;
+                let stream = client.connect(1024).await?;
                 Ok::<_, BoxError>(TransportStream::new_stream(stream.into()).await?)
             },
             async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }

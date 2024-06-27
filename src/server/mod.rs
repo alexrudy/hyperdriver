@@ -28,7 +28,7 @@
 //! }
 //!
 //! async fn example_server() {
-//!     let (client, incoming) = hyperdriver::stream::duplex::pair("example".parse().unwrap());
+//!     let (client, incoming) = hyperdriver::stream::duplex::pair();
 //!
 //!    let server = hyperdriver::server::Server::builder()
 //!     .with_incoming(incoming)
@@ -142,7 +142,7 @@ impl Server<(), (), (), ()> {
     /// impl std::error::Error for MyError {}
     ///
     /// # async fn example() {
-    /// let (_, incoming) = duplex::pair("server.test".parse().unwrap());
+    /// let (_, incoming) = duplex::pair();
     /// let server = Server::builder()
     ///     .with_acceptor(incoming)
     ///     .with_shared_service(service_fn(|req| async move {
@@ -199,7 +199,7 @@ impl<A, P, S, B> Server<A, P, S, B> {
     /// # impl std::error::Error for MyError {}
     /// #
     /// # async fn example() {
-    /// let (_, incoming) = duplex::pair("server.test".parse().unwrap());
+    /// let (_, incoming) = duplex::pair();
     /// let server = Server::builder()
     ///     .with_acceptor(incoming)
     ///     .with_shared_service(service_fn(|req| async move {
@@ -600,7 +600,7 @@ mod tests {
             })))
         });
 
-        let (_, incoming) = duplex::pair("server.test".parse().unwrap());
+        let (_, incoming) = duplex::pair();
 
         let server = Server::builder()
             .with_acceptor(incoming)

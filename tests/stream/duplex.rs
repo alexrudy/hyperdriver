@@ -3,7 +3,7 @@ async fn braided_duplex() {
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (client, incoming) = hyperdriver::stream::duplex::pair();
 
     let server = hyperdriver::server::conn::Acceptor::from(incoming);
     tokio::spawn(async move {
@@ -15,15 +15,7 @@ async fn braided_duplex() {
         }
     });
 
-    let mut conn = hyperdriver::client::conn::Stream::from(
-        client
-            .connect(
-                1024,
-                Some(hyperdriver::info::Protocol::Http(http::Version::HTTP_11)),
-            )
-            .await
-            .unwrap(),
-    );
+    let mut conn = hyperdriver::client::conn::Stream::from(client.connect(1024).await.unwrap());
 
     let mut buf = [0u8; 1024];
     conn.write_all(b"hello world").await.unwrap();

@@ -368,7 +368,7 @@ impl InnerRegistry {
         self.services
             .entry(service.to_owned())
             .or_insert_with(|| match &config.service_discovery {
-                ServiceDiscovery::InProcess => ServiceHandle::duplex(service),
+                ServiceDiscovery::InProcess => ServiceHandle::duplex(),
                 ServiceDiscovery::Unix { path } => ServiceHandle::unix(path, service),
             })
     }
@@ -447,8 +447,8 @@ enum ServiceHandle {
 }
 
 impl ServiceHandle {
-    fn duplex(service: &str) -> Self {
-        let (connector, acceptor) = crate::stream::duplex::pair(service.parse().unwrap());
+    fn duplex() -> Self {
+        let (connector, acceptor) = crate::stream::duplex::pair();
         Self::Duplex {
             acceptor: Some(acceptor.into()),
             connector,
@@ -479,7 +479,7 @@ impl ServiceHandle {
     ) -> Result<crate::client::conn::Stream, ConnectionError> {
         match self {
             ServiceHandle::Duplex { connector, .. } => Ok(connector
-                .connect(config.buffer_size, None)
+                .connect(config.buffer_size)
                 .await
                 .map(|stream| stream.into())
                 .map_err(|error| ConnectionError::Duplex {

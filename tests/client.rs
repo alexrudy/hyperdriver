@@ -11,7 +11,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
 async fn client() -> Result<(), BoxError> {
-    let (tx, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (tx, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -20,7 +20,7 @@ async fn client() -> Result<(), BoxError> {
 
     let client = hyperdriver::client::Client::new(
         HttpConnectionBuilder::default(),
-        DuplexTransport::new(1024, None, tx.clone()),
+        DuplexTransport::new(1024, tx.clone()),
         PoolConfig::default(),
     );
 
@@ -35,7 +35,7 @@ async fn client() -> Result<(), BoxError> {
 
 #[tokio::test]
 async fn client_h2() -> Result<(), BoxError> {
-    let (tx, incoming) = hyperdriver::stream::duplex::pair("test".parse().unwrap());
+    let (tx, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -44,7 +44,7 @@ async fn client_h2() -> Result<(), BoxError> {
 
     let client = hyperdriver::client::Client::new(
         HttpConnectionBuilder::default(),
-        DuplexTransport::new(1024, None, tx),
+        DuplexTransport::new(1024, tx),
         PoolConfig::default(),
     );
 

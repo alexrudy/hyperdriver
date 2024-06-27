@@ -197,10 +197,6 @@ where
         return self.tls.as_ref();
     }
 
-    pub(crate) fn host(&self) -> Option<&str> {
-        self.info.authority.as_ref().map(|a| a.as_str())
-    }
-
     /// Reduce the transport to its inner IO stream.
     pub fn into_inner(self) -> IO {
         self.stream

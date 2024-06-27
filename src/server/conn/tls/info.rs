@@ -207,12 +207,12 @@ mod tests {
             Ok::<_, Infallible>(Response::new(crate::Body::empty()))
         });
 
-        let (client, incoming) = crate::stream::duplex::pair("test".parse().unwrap());
+        let (client, incoming) = crate::stream::duplex::pair();
 
         let acceptor = crate::server::conn::Acceptor::from(incoming)
             .with_tls(crate::fixtures::tls_server_config().into());
 
-        let mut client = DuplexTransport::new(1024, None, client)
+        let mut client = DuplexTransport::new(1024, client)
             .with_tls(crate::fixtures::tls_client_config().into());
 
         let client = async move {

@@ -105,9 +105,9 @@ mod tests {
 
     #[tokio::test]
     async fn transport_into_stream() {
-        let (client, srv) = crate::stream::duplex::pair("example.com".parse().unwrap());
+        let (client, srv) = crate::stream::duplex::pair();
 
-        let transport = DuplexTransport::new(1024, None, client).into_stream();
+        let transport = DuplexTransport::new(1024, client).into_stream();
 
         let (io, _) = tokio::join!(
             async {
@@ -120,7 +120,6 @@ mod tests {
         );
         let info = io.info();
 
-        assert_eq!(info.protocol, None);
         assert_eq!(info.local_addr, BraidAddr::Duplex);
         assert_eq!(info.remote_addr, BraidAddr::Duplex);
     }
