@@ -1,6 +1,6 @@
 [package]
 name = "hyperdriver"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "The missing middle for Hyper - Servers and Clients with ergonomic APIs"
 license = "MIT"
@@ -75,13 +75,7 @@ webpki-roots.version = "0.26"
 axum = ["dep:axum"]
 client = ["incoming", "dep:socket2", "dep:thiserror"]
 default = ["client", "server", "discovery", "stream"]
-discovery = [
-    "server",
-    "client",
-    "pidfile",
-    "stream",
-    "dep:dashmap",
-]
+discovery = ["server", "client", "pidfile", "stream", "dep:dashmap"]
 docs = []
 incoming = []
 mocks = []
