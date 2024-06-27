@@ -18,9 +18,6 @@ mod idle;
 pub(super) mod key;
 mod weakopt;
 
-#[cfg(test)]
-pub(crate) mod mock;
-
 pub(crate) use self::checkout::Checkout;
 pub(crate) use self::checkout::Connector;
 pub(crate) use self::checkout::Error;
@@ -305,29 +302,30 @@ impl<C: PoolableConnection> Drop for Pooled<C> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mocks"))]
 mod tests {
     use futures_util::FutureExt as _;
     use static_assertions::assert_impl_all;
 
-    use self::mock::MockConnectionError;
+    use crate::client::conn::transport::mock::MockConnectionError;
 
-    use super::mock::{MockConnection, MockTransport};
     use super::*;
+    use crate::client::conn::stream::mock::MockStream;
+    use crate::client::conn::transport::mock::MockTransport;
 
     #[test]
     fn sensible_config() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let config = Config::default();
-        let pool: Pool<MockConnection> = Pool::new(config);
+        let pool: Pool<MockStream> = Pool::new(config);
 
         assert!(pool.inner.lock().unwrap().config.idle_timeout.unwrap() > Duration::from_secs(1));
         assert!(pool.inner.lock().unwrap().config.max_idle_per_host > 0);
         assert!(pool.inner.lock().unwrap().config.max_idle_per_host < 2048);
     }
 
-    assert_impl_all!(Pool<MockConnection>: Clone);
+    assert_impl_all!(Pool<MockStream>: Clone);
 
     #[tokio::test]
     async fn checkout_simple() {
@@ -499,7 +497,7 @@ mod tests {
         )
             .into();
 
-        let conn = MockConnection::single();
+        let conn = MockStream::single();
 
         let first_id = conn.id();
 
@@ -536,7 +534,7 @@ mod tests {
         )
             .into();
 
-        let conn_first = MockConnection::single();
+        let conn_first = MockStream::single();
 
         let first_id = conn_first.id();
 

@@ -63,16 +63,22 @@ mod tests {
 
     #[tokio::test]
     async fn lazy_future() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let count = AtomicUsize::new(0);
         let mut future = std::pin::pin!(lazy(|| async {
+            rx.await.unwrap();
             count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }));
 
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(poll!(future.as_mut()), Poll::Pending);
+
+        tx.send(()).unwrap();
         assert_eq!(poll!(future.as_mut()), Poll::Ready(()));
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
+    #[cfg(not(tarpaulin))]
     #[tokio::test]
     #[should_panic]
     async fn lazy_future_panic() {

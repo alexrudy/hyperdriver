@@ -55,12 +55,12 @@ msrv:
 alias t := test
 # Run cargo tests
 test:
-    cargo +{{rust}} test --features axum,sni,tls,tls-ring --no-run
-    cargo +{{rust}} test --features axum,sni,tls,tls-ring
+    cargo +{{rust}} test --features axum,sni,tls,tls-ring,mocks --no-run
+    cargo +{{rust}} test --features axum,sni,tls,tls-ring,mocks
 
 # Run coverage tests
 coverage:
-    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring
+    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring,mocks
 
 # Run deny checks
 deny:

@@ -30,6 +30,8 @@ use crate::stream::Braid;
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
 
+#[cfg(feature = "mocks")]
+pub mod mock;
 #[cfg(feature = "tls")]
 pub(crate) mod tls;
 
