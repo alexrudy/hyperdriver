@@ -15,6 +15,8 @@ use http::HeaderValue;
 use http::Uri;
 use http::Version;
 use thiserror::Error;
+use tower::util::Oneshot;
+use tower::ServiceExt;
 use tracing::warn;
 
 use crate::client::conn::connection::ConnectionError;
@@ -96,84 +98,38 @@ pub fn default_tls_config() -> rustls::ClientConfig {
     cfg
 }
 
-/// A simple async HTTP client.
-///
-/// This client is built on top of the `tokio` runtime and the `hyper` HTTP library.
-/// It combines a connection pool with a transport layer to provide a simple API for
-/// sending HTTP requests.
-///
-/// # Example
-/// ```no_run
-/// # use hyperdriver::client::Client;
-/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-/// let client = Client::new_tcp_http();
-/// let response = client.get("http://example.com".parse().unwrap()).await.unwrap();
-/// println!("Response: {:?}", response);
-/// # Ok(())
-/// # }
-/// ```
-pub struct Client<P = HttpConnectionBuilder, T = TlsTransport<TcpTransport>, B = crate::body::Body>
+/// An inner client HTTP service.
+#[derive(Debug)]
+pub struct ClientService<T, P, BOut>
 where
     T: Transport,
     P: Protocol<T::IO>,
     P::Connection: PoolableConnection,
 {
-    protocol: P,
     transport: T,
+    protocol: P,
     pool: Option<pool::Pool<P::Connection>>,
-    _body: std::marker::PhantomData<fn() -> B>,
+    _body: std::marker::PhantomData<fn() -> BOut>,
 }
 
-impl<P, T, B> fmt::Debug for Client<P, T, B>
+impl<P, T, BOut> ClientService<T, P, BOut>
 where
     T: Transport,
     P: Protocol<T::IO>,
     P::Connection: PoolableConnection,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client").finish()
-    }
-}
-
-impl<P, T, B> Client<P, T, B>
-where
-    T: Transport,
-    P: Protocol<T::IO>,
-    P::Connection: PoolableConnection,
-{
-    /// Create a new client with the given connector and pool configuration.
-    pub fn new(connector: P, transport: T, pool: pool::Config) -> Self {
+    /// Create a new client with the given transport, protocol, and pool configuration.
+    pub fn new(transport: T, protocol: P, pool: pool::Config) -> Self {
         Self {
-            protocol: connector,
             transport,
+            protocol,
             pool: Some(pool::Pool::new(pool)),
             _body: std::marker::PhantomData,
         }
     }
 }
 
-impl<P, T, B> Clone for Client<P, T, B>
-where
-    P: Protocol<T::IO> + Clone,
-    P::Connection: PoolableConnection,
-    T: Transport + Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            protocol: self.protocol.clone(),
-            transport: self.transport.clone(),
-            pool: self.pool.clone(),
-            _body: std::marker::PhantomData,
-        }
-    }
-}
-
-impl Client<HttpConnectionBuilder, TlsTransport<TcpTransport>> {
-    /// A client builder for configuring the client.
-    pub fn builder() -> builder::Builder {
-        builder::Builder::default()
-    }
-
+impl ClientService<TlsTransport<TcpTransport>, HttpConnectionBuilder, crate::Body> {
     /// Create a new client with the default configuration.
     pub fn new_tcp_http() -> Self {
         Self {
@@ -191,14 +147,23 @@ impl Client<HttpConnectionBuilder, TlsTransport<TcpTransport>> {
     }
 }
 
-#[cfg(feature = "stream")]
-impl Default for Client<HttpConnectionBuilder> {
-    fn default() -> Self {
-        Self::new_tcp_http()
+impl<P, T, B> Clone for ClientService<T, P, B>
+where
+    P: Protocol<T::IO> + Clone,
+    P::Connection: PoolableConnection,
+    T: Transport + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            protocol: self.protocol.clone(),
+            transport: self.transport.clone(),
+            pool: self.pool.clone(),
+            _body: std::marker::PhantomData,
+        }
     }
 }
 
-impl<P, C, T, B> Client<P, T, B>
+impl<P, C, T, B> ClientService<T, P, B>
 where
     C: Connection + PoolableConnection,
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
@@ -248,43 +213,7 @@ where
     }
 }
 
-impl<P, C, T, B> Client<P, T, B>
-where
-    C: Connection + PoolableConnection,
-    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
-    T: Transport + 'static,
-    T::IO: Unpin,
-    B: From<crate::body::Body> + Unpin,
-    <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
-    C::ResBody: Into<crate::Body>,
-{
-    /// Send an http Request, and return a Future of the Response.
-    pub fn request(
-        &self,
-        request: crate::body::Request,
-    ) -> ResponseFuture<P::Connection, TransportStream<T::IO>, B> {
-        let uri = request.uri().clone();
-
-        let protocol: HttpProtocol = request.version().into();
-
-        match self.connect_to(uri, protocol) {
-            Ok(checkout) => ResponseFuture::new(checkout, request),
-            Err(error) => ResponseFuture::error(error),
-        }
-    }
-
-    /// Make a GET request to the given URI.
-    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<B>, Error> {
-        let request = http::Request::get(uri.clone())
-            .body(crate::body::Body::empty())
-            .unwrap();
-
-        let response = self.request(request).await?;
-        Ok(response)
-    }
-}
-
-impl<P, C, T, BIn, BOut> tower::Service<http::Request<BIn>> for Client<P, T, BOut>
+impl<P, C, T, BIn, BOut> tower::Service<http::Request<BIn>> for ClientService<T, P, BOut>
 where
     C: Connection + PoolableConnection,
     P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
@@ -303,8 +232,120 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: http::Request<BIn>) -> Self::Future {
-        self.request(req.map(|b| b.into()))
+    fn call(&mut self, request: http::Request<BIn>) -> Self::Future {
+        let uri = request.uri().clone();
+
+        let protocol: HttpProtocol = request.version().into();
+
+        match self.connect_to(uri, protocol) {
+            Ok(checkout) => ResponseFuture::new(checkout, request.map(Into::into)),
+            Err(error) => ResponseFuture::error(error),
+        }
+    }
+}
+
+/// Client service for TCP connections with TLS and HTTP.
+pub type ClientTlsTcpService =
+    ClientService<TlsTransport<TcpTransport>, HttpConnectionBuilder, crate::Body>;
+
+/// A simple async HTTP client.
+///
+/// This client is built on top of the `tokio` runtime and the `hyper` HTTP library.
+/// It combines a connection pool with a transport layer to provide a simple API for
+/// sending HTTP requests.
+///
+/// # Example
+/// ```no_run
+/// # use hyperdriver::client::Client;
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut client = Client::new_tcp_http();
+/// let response = client.get("http://example.com".parse().unwrap()).await.unwrap();
+/// println!("Response: {:?}", response);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone)]
+pub struct Client<S = ClientTlsTcpService> {
+    service: S,
+}
+
+impl<S> fmt::Debug for Client<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Client").finish()
+    }
+}
+
+impl<T, P, B> Client<ClientService<T, P, B>>
+where
+    T: Transport,
+    P: Protocol<T::IO>,
+    P::Connection: PoolableConnection,
+{
+    /// Create a new client with the given connector and pool configuration.
+    pub fn new(protocol: P, transport: T, pool: pool::Config) -> Self {
+        Self {
+            service: ClientService::new(transport, protocol, pool),
+        }
+    }
+}
+
+impl Client<()> {
+    /// Create a new client builder
+    pub fn builder() -> self::Builder {
+        self::Builder::default()
+    }
+}
+
+#[cfg(feature = "stream")]
+impl Default for Client<ClientTlsTcpService> {
+    fn default() -> Self {
+        Self {
+            service: ClientService::new_tcp_http(),
+        }
+    }
+}
+
+#[cfg(feature = "stream")]
+impl Client<ClientTlsTcpService> {
+    /// Create a new client that uses TCP and HTTP.
+    pub fn new_tcp_http() -> Self {
+        Self::default()
+    }
+}
+
+impl<S> Client<S> {
+    /// Apply a layer to the client
+    pub fn layer<L>(self, layer: L) -> Client<L::Service>
+    where
+        L: tower::Layer<S>,
+    {
+        Client {
+            service: layer.layer(self.service),
+        }
+    }
+}
+
+impl<S> Client<S>
+where
+    S: tower::Service<http::Request<crate::Body>, Response = http::Response<crate::Body>> + Clone,
+    Error: From<S::Error>,
+{
+    /// Send an http Request, and return a Future of the Response.
+    pub fn request(
+        &mut self,
+        request: crate::body::Request,
+    ) -> Oneshot<S, http::Request<crate::Body>> {
+        self.service.clone().oneshot(request)
+    }
+
+    /// Make a GET request to the given URI.
+    pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<crate::Body>, Error> {
+        let request = http::Request::get(uri.clone())
+            .body(crate::body::Body::empty())
+            .unwrap();
+
+        let response = self.request(request).await?;
+        Ok(response)
     }
 }
 
@@ -694,7 +735,7 @@ mod tests {
         let protocol = MockProtocol;
         let pool = PoolConfig::default();
 
-        let client: Client<MockProtocol, MockTransport, Body> =
+        let mut client: Client<ClientService<MockTransport, MockProtocol, Body>> =
             Client::new(protocol, transport, pool);
 
         client
@@ -715,7 +756,7 @@ mod tests {
         let protocol = MockProtocol;
         let pool = PoolConfig::default();
 
-        let client: Client<MockProtocol, MockTransport, Body> =
+        let mut client: Client<ClientService<MockTransport, MockProtocol, Body>> =
             Client::new(protocol, transport, pool);
 
         let result = client

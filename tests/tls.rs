@@ -105,7 +105,7 @@ async fn tls_echo_h1() {
         .with_no_client_auth();
     client_tls.alpn_protocols.push(b"http/1.1".to_vec());
 
-    let client = Client::new(
+    let mut client = Client::new(
         Builder::new(),
         DuplexTransport::new(1024, duplex_client).with_tls(client_tls.into()),
         Default::default(),
@@ -154,7 +154,7 @@ async fn tls_echo_h2() {
         .with_no_client_auth();
     client_tls.alpn_protocols.push(b"h2".to_vec());
 
-    let client = Client::new(
+    let mut client = Client::new(
         Builder::new(TokioExecutor::new()),
         DuplexTransport::new(1024, duplex_client).with_tls(client_tls.into()),
         Default::default(),

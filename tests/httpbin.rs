@@ -10,7 +10,7 @@ async fn httpbin_request(
         ..Default::default()
     };
 
-    let client = Client::builder()
+    let mut client = Client::builder()
         .with_tcp(config)
         .with_default_tls()
         .build();

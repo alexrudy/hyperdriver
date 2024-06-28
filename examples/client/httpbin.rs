@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         ])
         .get_matches();
 
-    let client = Client::new_tcp_http();
+    let mut client = Client::new_tcp_http();
 
     let uri: Uri = "https://www.httpbin.org/".parse()?;
 

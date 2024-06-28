@@ -18,6 +18,8 @@ use crate::client::conn::transport::TransportExt as _;
 use crate::client::conn::Stream as ClientStream;
 #[cfg(feature = "client")]
 use crate::client::conn::TlsTransport;
+#[cfg(feature = "client")]
+use crate::client::ClientService;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
 
@@ -36,8 +38,9 @@ pub use transport::SvcScheme;
 pub use transport::TransportBuilder;
 
 /// Service Registry client which will connect to internal services.
-pub type Client<B = crate::body::Body> =
-    crate::client::Client<HttpConnectionBuilder, TlsTransport<transport::RegistryTransport>, B>;
+pub type Client<B = crate::body::Body> = crate::client::Client<
+    ClientService<TlsTransport<transport::RegistryTransport>, HttpConnectionBuilder, B>,
+>;
 
 /// An error occured while connecting to a service.
 #[derive(Debug, thiserror::Error)]

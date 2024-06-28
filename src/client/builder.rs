@@ -1,19 +1,15 @@
 #[cfg(feature = "tls")]
 use std::sync::Arc;
 
-use tokio::net::TcpStream;
-
 #[cfg(feature = "tls")]
 use rustls::ClientConfig;
 
-use crate::client::{conn::protocol::auto::HttpConnectionBuilder, Client};
-
+use super::conn::transport::TransportExt as _;
+use super::ClientService;
+use super::ClientTlsTcpService;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
-
-use super::conn::dns::GaiResolver;
-use super::conn::transport::tcp::TcpTransport;
-use super::conn::transport::{TlsTransport, TransportExt as _};
+use crate::client::{conn::protocol::auto::HttpConnectionBuilder, Client};
 
 /// A builder for a client.
 #[derive(Debug)]
@@ -110,28 +106,28 @@ impl Builder {
 
 impl Builder {
     /// Build the client.
-    pub fn build(
-        self,
-    ) -> Client<HttpConnectionBuilder, TlsTransport<TcpTransport<GaiResolver, TcpStream>>> {
+    pub fn build(self) -> Client<ClientTlsTcpService> {
         Client {
-            #[cfg(feature = "tls")]
-            transport: crate::client::conn::transport::tcp::TcpTransport::builder()
-                .with_config(self.tcp)
-                .with_gai_resolver()
-                .build()
-                .with_optional_tls(self.tls.map(Arc::new)),
+            service: ClientService {
+                #[cfg(feature = "tls")]
+                transport: crate::client::conn::transport::tcp::TcpTransport::builder()
+                    .with_config(self.tcp)
+                    .with_gai_resolver()
+                    .build()
+                    .with_optional_tls(self.tls.map(Arc::new)),
 
-            #[cfg(not(feature = "tls"))]
-            transport: crate::client::conn::transport::tcp::TcpTransport::builder()
-                .with_config(self.tcp)
-                .with_gai_resolver()
-                .build()
-                .without_tls(),
+                #[cfg(not(feature = "tls"))]
+                transport: crate::client::conn::transport::tcp::TcpTransport::builder()
+                    .with_config(self.tcp)
+                    .with_gai_resolver()
+                    .build()
+                    .without_tls(),
 
-            protocol: HttpConnectionBuilder::default(),
-            pool: self.pool.map(crate::client::pool::Pool::new),
+                protocol: HttpConnectionBuilder::default(),
+                pool: self.pool.map(crate::client::pool::Pool::new),
 
-            _body: std::marker::PhantomData,
+                _body: std::marker::PhantomData,
+            },
         }
     }
 }
@@ -143,7 +139,7 @@ mod tests {
     #[test]
     fn test_builder() {
         let client = Builder::default().build();
-        assert!(client.pool.is_some());
+        assert!(client.service.pool.is_some());
     }
 
     #[test]
@@ -152,7 +148,7 @@ mod tests {
         builder.tcp().nodelay = true;
 
         let client = builder.build();
-        assert!(client.transport.inner().config().nodelay)
+        assert!(client.service.transport.inner().config().nodelay)
     }
 
     #[cfg(feature = "tls")]
@@ -165,7 +161,12 @@ mod tests {
 
         let client = builder.build();
         assert_eq!(
-            client.transport.tls_config().unwrap().alpn_protocols,
+            client
+                .service
+                .transport
+                .tls_config()
+                .unwrap()
+                .alpn_protocols,
             vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"a1".to_vec()]
         );
     }

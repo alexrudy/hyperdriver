@@ -1,5 +1,6 @@
 //! A collection of utilities for working with `Service` types and Servers.
 
+mod adapt;
 mod http;
 #[cfg(feature = "incoming")]
 mod incoming;
@@ -14,4 +15,3 @@ pub use self::incoming::{AdaptIncomingLayer, AdaptIncomingService};
 pub use self::make::{make_service_fn, BoxMakeServiceLayer, BoxMakeServiceRef, MakeServiceRef};
 pub use serviceref::ServiceRef;
 pub use tower::{service_fn, Service, ServiceBuilder, ServiceExt};
-mod adapt;

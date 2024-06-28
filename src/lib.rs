@@ -2,6 +2,8 @@
 //!
 //! Building the missing middle for network services in Rust.
 
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 use std::fmt;
 
 use tracing::dispatcher;
