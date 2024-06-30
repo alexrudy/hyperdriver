@@ -64,6 +64,11 @@ test:
 coverage:
     cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring,mocks
 
+alias timing := timings
+# Compile with timing checks
+timings:
+    cargo +{{rust}} build --features  axum,sni,tls,tls-ring,mocks --timings
+
 # Run deny checks
 deny:
     cargo +{{rust}} deny check
