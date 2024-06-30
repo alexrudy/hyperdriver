@@ -5,7 +5,7 @@ use http_body_util::BodyExt as _;
 use hyperdriver::client::Client;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     tracing_subscriber::fmt::init();
 
     let client = Client::build_tcp_http().build();

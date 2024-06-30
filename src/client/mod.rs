@@ -11,9 +11,6 @@ use self::conn::protocol::auto;
 use self::conn::transport::tcp::TcpTransportConfig;
 pub use self::service::ClientService;
 use crate::client::conn::connection::ConnectionError;
-use crate::client::conn::protocol::auto::HttpConnectionBuilder;
-use crate::client::conn::transport::tcp::TcpTransport;
-use crate::client::conn::TlsTransport;
 use crate::service::SharedService;
 
 mod builder;
@@ -82,12 +79,12 @@ pub fn default_tls_config() -> rustls::ClientConfig {
     cfg
 }
 
-/// Client service for TCP connections with TLS and HTTP.
-pub type ClientTlsTcpService =
-    ClientService<TlsTransport<TcpTransport>, HttpConnectionBuilder, crate::Body>;
-
 /// A boxed service with http::Request and http::Response and symmetric body types
-pub type BoxedClientService<B> = SharedService<http::Request<B>, http::Response<B>, Error>;
+pub type BoxedClientService<B> = SharedService<
+    http::Request<B>,
+    http::Response<B>,
+    Box<dyn std::error::Error + Send + Sync + 'static>,
+>;
 
 struct ClientRef {
     service: BoxedClientService<crate::Body>,
@@ -108,7 +105,7 @@ impl ClientRef {
     }
 }
 
-/// A simple async HTTP client.
+/// A simple, high-level, async HTTP client.
 ///
 /// This client is built on top of the `tokio` runtime and the `hyper` HTTP library.
 /// It combines a connection pool with a transport layer to provide a simple API for
@@ -176,7 +173,11 @@ impl Client {
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(&self, uri: http::Uri) -> Result<http::Response<crate::Body>, Error> {
+    pub async fn get(
+        &self,
+        uri: http::Uri,
+    ) -> Result<http::Response<crate::Body>, Box<dyn std::error::Error + Send + Sync + 'static>>
+    {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();

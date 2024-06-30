@@ -5,6 +5,7 @@ use http::HeaderValue;
 #[cfg(feature = "tls")]
 use rustls::ClientConfig;
 use tower::ServiceBuilder;
+use tower_http::follow_redirect::policy;
 use tower_http::follow_redirect::FollowRedirectLayer;
 use tower_http::set_header::SetRequestHeaderLayer;
 
@@ -59,22 +60,24 @@ where
 
 /// A builder for a client.
 #[derive(Debug)]
-pub struct Builder<T, P> {
+pub struct Builder<T, P, RP = policy::Standard> {
     transport: T,
     protocol: P,
     user_agent: Option<String>,
+    redirect: Option<RP>,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
 }
 
-impl Builder<(), ()> {
+impl Builder<(), (), policy::Standard> {
     /// Create a new, empty builder
     pub fn new() -> Self {
         Self {
             transport: (),
             protocol: (),
             user_agent: None,
+            redirect: None,
             #[cfg(feature = "tls")]
             tls: None,
             pool: None,
@@ -82,12 +85,13 @@ impl Builder<(), ()> {
     }
 }
 
-impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder> {
+impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Standard> {
     fn default() -> Self {
         Self {
             transport: Default::default(),
             protocol: Default::default(),
             user_agent: None,
+            redirect: Some(policy::Standard::default()),
             #[cfg(feature = "tls")]
             tls: Some(default_tls_config()),
             pool: Some(Default::default()),
@@ -95,13 +99,14 @@ impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder> {
     }
 }
 
-impl<T, P> Builder<T, P> {
+impl<T, P, RP> Builder<T, P, RP> {
     /// Use the provided TCP configuration.
-    pub fn with_tcp(self, config: TcpTransportConfig) -> Builder<TcpTransportConfig, P> {
+    pub fn with_tcp(self, config: TcpTransportConfig) -> Builder<TcpTransportConfig, P, RP> {
         Builder {
             transport: config,
             protocol: self.protocol,
             user_agent: self.user_agent,
+            redirect: self.redirect,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -109,11 +114,12 @@ impl<T, P> Builder<T, P> {
     }
 
     /// Provide a custom transport
-    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P> {
+    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP> {
         Builder {
             transport,
             protocol: self.protocol,
             user_agent: self.user_agent,
+            redirect: self.redirect,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -122,7 +128,7 @@ impl<T, P> Builder<T, P> {
 }
 
 #[cfg(feature = "tls")]
-impl<T, P> Builder<T, P> {
+impl<T, P, RP> Builder<T, P, RP> {
     /// Disable TLS
     pub fn without_tls(mut self) -> Self {
         self.tls = None;
@@ -148,14 +154,14 @@ impl<T, P> Builder<T, P> {
 }
 
 #[cfg(not(feature = "tls"))]
-impl<T, P> Builder<T, P> {
+impl<T, P, RP> Builder<T, P, RP> {
     /// Disable TLS
     pub fn without_tls(self) -> Self {
         self
     }
 }
 
-impl<T, P> Builder<T, P> {
+impl<T, P, RP> Builder<T, P, RP> {
     /// Connection pool configuration.
     pub fn pool(&mut self) -> Option<&mut crate::client::pool::Config> {
         self.pool.as_mut()
@@ -180,13 +186,14 @@ impl<T, P> Builder<T, P> {
     }
 }
 
-impl<T, P> Builder<T, P> {
+impl<T, P, RP> Builder<T, P, RP> {
     /// Use the auto-HTTP Protocol
-    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder> {
+    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder, RP> {
         Builder {
             transport: self.transport,
             protocol: auto::HttpConnectionBuilder::default(),
             user_agent: self.user_agent,
+            redirect: self.redirect,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -194,11 +201,12 @@ impl<T, P> Builder<T, P> {
     }
 
     /// Use the provided HTTP connection configuration.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2> {
+    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP> {
         Builder {
             transport: self.transport,
             protocol,
             user_agent: self.user_agent,
+            redirect: self.redirect,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -211,7 +219,7 @@ impl<T, P> Builder<T, P> {
     }
 }
 
-impl<T, P> Builder<T, P>
+impl<T, P, RP> Builder<T, P, RP>
 where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
@@ -241,6 +249,7 @@ where
             super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
         >>::Connection as Connection>::ResBody,
     >,
+    RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
 {
     /// Build the client.
     pub fn build(self) -> Client {
@@ -268,7 +277,8 @@ where
                 http::header::USER_AGENT,
                 user_agent,
             ))
-            .layer(FollowRedirectLayer::new())
+            .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
+            // .layer(FollowRedirectLayer::new())
             .service(ClientService {
                 transport,
                 protocol: self.protocol.build(),
