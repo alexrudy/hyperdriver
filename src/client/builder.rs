@@ -1,5 +1,6 @@
 #[cfg(feature = "tls")]
 use std::sync::Arc;
+use std::time::Duration;
 
 use http::HeaderValue;
 #[cfg(feature = "tls")]
@@ -65,6 +66,7 @@ pub struct Builder<T, P, RP = policy::Standard> {
     protocol: P,
     user_agent: Option<String>,
     redirect: Option<RP>,
+    timeout: Option<Duration>,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
@@ -78,6 +80,7 @@ impl Builder<(), (), policy::Standard> {
             protocol: (),
             user_agent: None,
             redirect: None,
+            timeout: None,
             #[cfg(feature = "tls")]
             tls: None,
             pool: None,
@@ -92,6 +95,7 @@ impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Stan
             protocol: Default::default(),
             user_agent: None,
             redirect: Some(policy::Standard::default()),
+            timeout: Some(Duration::from_secs(30)),
             #[cfg(feature = "tls")]
             tls: Some(default_tls_config()),
             pool: Some(Default::default()),
@@ -107,6 +111,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol: self.protocol,
             user_agent: self.user_agent,
             redirect: self.redirect,
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -120,6 +125,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol: self.protocol,
             user_agent: self.user_agent,
             redirect: self.redirect,
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -194,6 +200,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol: auto::HttpConnectionBuilder::default(),
             user_agent: self.user_agent,
             redirect: self.redirect,
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -207,6 +214,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol,
             user_agent: self.user_agent,
             redirect: self.redirect,
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -240,6 +248,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol: self.protocol,
             user_agent: self.user_agent,
             redirect: Some(policy),
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -253,6 +262,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol: self.protocol,
             user_agent: self.user_agent,
             redirect: None,
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -266,6 +276,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             protocol: self.protocol,
             user_agent: self.user_agent,
             redirect: Some(policy::Standard::default()),
+            timeout: self.timeout,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -275,6 +286,31 @@ impl<T, P, RP> Builder<T, P, RP> {
     /// Configured redirect policy.
     pub fn redirect_policy(&mut self) -> Option<&mut RP> {
         self.redirect.as_mut()
+    }
+}
+
+impl<T, P, RP> Builder<T, P, RP> {
+    /// Set the timeout for requests.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Get the timeout for requests.
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+
+    /// Disable request timeouts.
+    pub fn without_timeout(mut self) -> Self {
+        self.timeout = None;
+        self
+    }
+
+    /// Set the timeout for requests with an Option.
+    pub fn with_optional_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.timeout = timeout;
+        self
     }
 }
 
@@ -338,6 +374,7 @@ where
 
         ServiceBuilder::new()
             .layer(SharedService::layer())
+            .option_layer(self.timeout.map(tower::timeout::TimeoutLayer::new))
             .layer(SetRequestHeaderLayer::if_not_present(
                 http::header::USER_AGENT,
                 user_agent,

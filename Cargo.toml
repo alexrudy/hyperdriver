@@ -79,7 +79,13 @@ webpki-roots.version = "0.26"
 
 [features]
 axum = ["dep:axum"]
-client = ["incoming", "dep:socket2", "dep:thiserror", "dep:tower-http"]
+client = [
+    "incoming",
+    "dep:socket2",
+    "dep:thiserror",
+    "dep:tower-http",
+    "tower/timeout",
+]
 default = ["client", "server", "discovery", "stream"]
 discovery = ["server", "client", "pidfile", "stream", "dep:dashmap"]
 docs = []
