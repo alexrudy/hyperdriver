@@ -2,6 +2,7 @@
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
+use tracing::Instrument as _;
 
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
@@ -38,20 +39,24 @@ impl HttpConnectionBuilder {
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake h2");
+        let span = tracing::info_span!("connection", version = ?http::Version::HTTP_2, peer = %stream.info().remote_addr());
         let (sender, conn) = self
             .http2
             .handshake(TokioIo::new(stream))
             .await
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(async {
-            if let Err(err) = conn.await {
-                if err.is_user() {
-                    tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
-                } else {
-                    tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
+        tokio::spawn(
+            async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
+                    } else {
+                        tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
+                    }
                 }
             }
-        });
+            .instrument(span),
+        );
         trace!("handshake complete");
         Ok(HttpConnection::h2(sender))
     }
@@ -61,16 +66,21 @@ impl HttpConnectionBuilder {
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake h1");
+        let span = tracing::info_span!("connection", version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr());
+
         let (sender, conn) = self
             .http1
             .handshake(TokioIo::new(stream))
             .await
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(async {
-            if let Err(err) = conn.await {
-                tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
+        tokio::spawn(
+            async {
+                if let Err(err) = conn.await {
+                    tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
+                }
             }
-        });
+            .instrument(span),
+        );
         trace!("handshake complete");
         Ok(HttpConnection::h1(sender))
     }

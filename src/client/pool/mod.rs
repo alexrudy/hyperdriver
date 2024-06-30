@@ -240,7 +240,7 @@ pub trait PoolableTransport: Unpin + Send + Sized + 'static {
     fn can_share(&self) -> bool;
 }
 
-/// A [`crate::client::Protocol`] that can be pooled.
+/// A [`crate::client::conn::Protocol`] that can be pooled.
 pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     /// Returns `true` if the connection is open.
     fn is_open(&self) -> bool;

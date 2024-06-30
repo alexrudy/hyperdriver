@@ -149,6 +149,18 @@ pub trait TransportExt: Transport {
             None => self.without_tls(),
         }
     }
+
+    #[cfg(not(feature = "tls"))]
+    /// Wrap the transport in a no-TLS layer if the given config is `Some`, otherwise wrap it in a no-TLS layer.
+    ///
+    /// Since the `tls` feature is not enabled, this method will always wrap the transport in a no-TLS layer.
+    fn with_optional_tls(self, config: Option<()>) -> TlsTransport<Self>
+    where
+        Self: Sized,
+    {
+        debug_assert!(config.is_none(), "TLS is not enabled");
+        self.without_tls()
+    }
 }
 
 impl<T> TransportExt for T where T: Transport {}
@@ -513,14 +525,17 @@ where
 
         match &mut self.braid {
             InnerBraid::Plain(inner) => {
+                tracing::trace!(scheme=?req.scheme_str(), "connecting without TLS");
                 self::future::TransportBraidFuture::from_plain(inner.connect(req))
             }
             #[cfg(feature = "tls")]
             InnerBraid::Tls(inner) if use_tls => {
+                tracing::trace!(scheme=?req.scheme_str(), "connecting with TLS");
                 self::future::TransportBraidFuture::from_tls(inner.call(req))
             }
             #[cfg(feature = "tls")]
             InnerBraid::Tls(inner) => {
+                tracing::trace!(scheme=?req.scheme_str(), "connecting without TLS");
                 self::future::TransportBraidFuture::from_plain(inner.transport_mut().connect(req))
             }
         }

@@ -42,7 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
-    let mut client = Client::builder();
+    let mut client = Client::builder()
+        .with_tcp(Default::default())
+        .with_auto_http();
 
     if let Some(tls_root) = args.get_one::<String>("tls-root") {
         println!("Using TLS root: {}", tls_root);
@@ -92,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn send(
-    mut client: Client,
+    client: Client,
     uri: Uri,
     version: http::Version,
     done: tokio::sync::mpsc::Sender<()>,

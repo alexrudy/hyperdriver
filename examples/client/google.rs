@@ -8,7 +8,7 @@ use hyperdriver::client::Client;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let mut client = Client::new_tcp_http();
+    let client = Client::build_tcp_http().build();
 
     let uri: Uri = "https://www.google.com".parse()?;
     let res = client.get(uri.clone()).await?;
