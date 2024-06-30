@@ -40,6 +40,7 @@ examples:
     cargo +{{rust}} check --examples --all-features
 
 alias d := docs
+alias doc := docs
 # Build documentation
 docs:
     cargo +{{rust}} doc --all-features --no-deps

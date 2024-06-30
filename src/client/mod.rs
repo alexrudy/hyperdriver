@@ -1,4 +1,16 @@
 //! HTTP client library for Rust, built on top of [hyper].
+//!
+//! There are three levels of available APIs in this library:
+//!
+//! 1. The high-level [`Client`] API, which is the most user-friendly and abstracts away most of the details.
+//!    It is "batteries-included", and supports features like redirects, retries and timeouts.
+//! 2. The [`Service`][ClientService] API, which is a lower-level API that allows for more control over the request and response.
+//!    It presents a `tower::Service` that can be used to send requests and receive responses, and can be wrapped
+//!    by middleware compatible with the tower ecosystem.
+//! 3. The [connection][self::conn] API, which is the lowest-level API that allows for direct control over the
+//!    transport and protocol layers. This API is useful for implementing custom transports or protocols, but
+//!    might be difficult to directly use as a client.
+//!
 
 use std::fmt;
 use std::sync::Arc;
@@ -86,6 +98,7 @@ pub type BoxedClientService<B> = SharedService<
     Box<dyn std::error::Error + Send + Sync + 'static>,
 >;
 
+/// Inner type for managing the client service.
 struct ClientRef {
     service: BoxedClientService<crate::Body>,
 }
@@ -105,11 +118,10 @@ impl ClientRef {
     }
 }
 
-/// A simple, high-level, async HTTP client.
+/// A high-level async HTTP client.
 ///
-/// This client is built on top of the `tokio` runtime and the `hyper` HTTP library.
-/// It combines a connection pool with a transport layer to provide a simple API for
-/// sending HTTP requests.
+/// This client is built on top of the [`Service`][ClientService] API and provides a more user-friendly interface,
+/// including support for retries, redirects and timeouts.
 ///
 /// # Example
 /// ```no_run
@@ -160,6 +172,12 @@ impl Client {
     pub fn build_tcp_http(
     ) -> self::builder::Builder<TcpTransportConfig, auto::HttpConnectionBuilder> {
         Builder::default()
+    }
+
+    /// Create a new client with default settings applied for TCP connections
+    /// (with TLS support) and HTTP/1.1 or HTTP/2.
+    pub fn new_tcp_http() -> Self {
+        Builder::default().build()
     }
 }
 

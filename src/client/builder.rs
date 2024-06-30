@@ -219,6 +219,65 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
+impl<T, P, RP> Builder<T, P, RP> {
+    /// Set the User-Agent header.
+    pub fn with_user_agent(mut self, user_agent: String) -> Self {
+        self.user_agent = Some(user_agent);
+        self
+    }
+
+    /// Get the user agent currently configured
+    pub fn user_agent(&self) -> Option<&str> {
+        self.user_agent.as_deref()
+    }
+}
+
+impl<T, P, RP> Builder<T, P, RP> {
+    /// Set the redirect policy. See [`policy`] for more information.
+    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2> {
+        Builder {
+            transport: self.transport,
+            protocol: self.protocol,
+            user_agent: self.user_agent,
+            redirect: Some(policy),
+            #[cfg(feature = "tls")]
+            tls: self.tls,
+            pool: self.pool,
+        }
+    }
+
+    /// Disable redirects.
+    pub fn without_redirects(self) -> Builder<T, P, policy::Standard> {
+        Builder {
+            transport: self.transport,
+            protocol: self.protocol,
+            user_agent: self.user_agent,
+            redirect: None,
+            #[cfg(feature = "tls")]
+            tls: self.tls,
+            pool: self.pool,
+        }
+    }
+
+    /// Set the standard redirect policy. See [`policy::Standard`] for more information.
+    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard> {
+        Builder {
+            transport: self.transport,
+            protocol: self.protocol,
+            user_agent: self.user_agent,
+            redirect: Some(policy::Standard::default()),
+            #[cfg(feature = "tls")]
+            tls: self.tls,
+            pool: self.pool,
+        }
+    }
+
+    /// Configured redirect policy.
+    pub fn redirect_policy(&mut self) -> Option<&mut RP> {
+        self.redirect.as_mut()
+    }
+}
+
 impl<T, P, RP> Builder<T, P, RP>
 where
     T: BuildTransport,
@@ -251,8 +310,14 @@ where
     >,
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
 {
-    /// Build the client.
-    pub fn build(self) -> Client {
+    /// Build a client service with the configured layers
+    pub fn build_service(
+        self,
+    ) -> SharedService<
+        http::Request<crate::Body>,
+        http::Response<crate::Body>,
+        Box<dyn std::error::Error + Send + Sync + 'static>,
+    > {
         let user_agent = if let Some(ua) = self.user_agent {
             HeaderValue::from_str(&ua).expect("user-agent should be a valid http header")
         } else {
@@ -271,22 +336,24 @@ where
         #[cfg(not(feature = "tls"))]
         let transport = self.transport.build().without_tls();
 
-        let service = ServiceBuilder::new()
+        ServiceBuilder::new()
             .layer(SharedService::layer())
             .layer(SetRequestHeaderLayer::if_not_present(
                 http::header::USER_AGENT,
                 user_agent,
             ))
             .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
-            // .layer(FollowRedirectLayer::new())
             .service(ClientService {
                 transport,
                 protocol: self.protocol.build(),
                 pool: self.pool.map(super::pool::Pool::new),
                 _body: std::marker::PhantomData,
-            });
+            })
+    }
 
-        Client::new_from_service(service)
+    /// Build the client.
+    pub fn build(self) -> Client {
+        Client::new_from_service(self.build_service())
     }
 }
 

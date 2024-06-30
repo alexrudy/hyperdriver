@@ -31,9 +31,15 @@ use super::pool::Pooled;
 use super::Error;
 use crate::info::HasConnectionInfo;
 
-/// A client built from the minium constituents to provide
-/// a simple HTTP `tower::Service`. This is the low-level
-/// entry-point to building a client.
+/// A client which provides a simple HTTP `tower::Service`.
+///
+/// Client Services combine a [transport][Transport] (e.g. TCP) and a [protocol][Protocol] (e.g. HTTP)
+/// to provide a `tower::Service` that can be used to make requests to a server. Optionally, a connection
+/// pool can be configured so that individual connections can be reused.
+///
+/// To use a client service, you must first poll the service to readiness with `Service::poll_ready`,
+/// and then make the request with `Service::call`. This can be simplified with the `tower::ServiceExt`
+/// which provides a `Service::oneshot` method that combines these two steps into a single future.
 #[derive(Debug)]
 pub struct ClientService<T, P, BOut = crate::Body>
 where
@@ -62,10 +68,20 @@ where
             _body: std::marker::PhantomData,
         }
     }
+
+    /// Disable connection pooling for this client.
+    pub fn without_pool(self) -> Self {
+        Self { pool: None, ..self }
+    }
 }
 
 impl ClientService<TlsTransport<TcpTransport>, HttpConnectionBuilder, crate::Body> {
-    /// Create a new client with the default configuration.
+    /// Create a new client with the default configuration for making requests over TCP
+    /// connections using the HTTP protocol.
+    ///
+    /// When the `tls` feature is enabled, this will also add support for `tls` when
+    /// using the `https` scheme, with a default TLS configuration that will rely
+    /// on the system's certificate store.
     pub fn new_tcp_http() -> Self {
         Self {
             pool: Some(pool::Pool::new(pool::Config {
