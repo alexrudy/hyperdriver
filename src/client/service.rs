@@ -329,8 +329,11 @@ fn prepare_request<C: Connection + PoolableConnection>(
         });
 
     if conn.version() == Version::HTTP_11 {
-        if request.version() == Version::HTTP_2 {
-            warn!("refusing to send HTTP/2 request to HTTP/1.1 connection");
+        if request.version() == Version::HTTP_2 || request.version() == Version::HTTP_3 {
+            warn!(
+                "refusing to send {:?} request to HTTP/1.1 connection",
+                request.version()
+            );
             return Err(Error::UnsupportedProtocol);
         }
 
@@ -354,7 +357,7 @@ fn prepare_request<C: Connection + PoolableConnection>(
     } else if request.method() == http::Method::CONNECT {
         return Err(Error::InvalidMethod(http::Method::CONNECT));
     } else if conn.version() == Version::HTTP_2 {
-        set_host_header(request);
+        *request.version_mut() = Version::HTTP_2;
     }
     Ok(())
 }

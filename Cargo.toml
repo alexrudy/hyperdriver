@@ -85,6 +85,7 @@ client = [
     "dep:thiserror",
     "dep:tower-http",
     "tower/timeout",
+    "tower/retry",
 ]
 default = ["client", "server", "discovery", "stream"]
 discovery = ["server", "client", "pidfile", "stream", "dep:dashmap"]

@@ -13,6 +13,8 @@ use tokio::io::AsyncWriteExt as _;
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     tracing_subscriber::fmt::init();
 
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let args = clap::Command::new("httpbin")
         .args([
             arg!(-X --method [METHOD] "HTTP method to use").default_value("GET"),

@@ -66,7 +66,13 @@ async fn service_ok(
 ) -> Result<hyperdriver::body::Response, BoxError> {
     Ok(http::response::Builder::new()
         .status(200)
-        .header("O-Host", req.headers().get("Host").unwrap())
+        .header(
+            "O-Host",
+            req.headers()
+                .get("Host")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("missing"),
+        )
         .body(hyperdriver::body::Body::empty())?)
 }
 

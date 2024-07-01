@@ -67,6 +67,7 @@ pub struct Builder<T, P, RP = policy::Standard> {
     user_agent: Option<String>,
     redirect: Option<RP>,
     timeout: Option<Duration>,
+    retries: Option<usize>,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
@@ -81,6 +82,7 @@ impl Builder<(), (), policy::Standard> {
             user_agent: None,
             redirect: None,
             timeout: None,
+            retries: None,
             #[cfg(feature = "tls")]
             tls: None,
             pool: None,
@@ -96,6 +98,7 @@ impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Stan
             user_agent: None,
             redirect: Some(policy::Standard::default()),
             timeout: Some(Duration::from_secs(30)),
+            retries: Some(3),
             #[cfg(feature = "tls")]
             tls: Some(default_tls_config()),
             pool: Some(Default::default()),
@@ -112,6 +115,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -126,6 +130,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -201,6 +206,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -215,6 +221,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -249,6 +256,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: Some(policy),
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -263,6 +271,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: None,
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -277,6 +286,7 @@ impl<T, P, RP> Builder<T, P, RP> {
             user_agent: self.user_agent,
             redirect: Some(policy::Standard::default()),
             timeout: self.timeout,
+            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -310,6 +320,25 @@ impl<T, P, RP> Builder<T, P, RP> {
     /// Set the timeout for requests with an Option.
     pub fn with_optional_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.timeout = timeout;
+        self
+    }
+}
+
+impl<T, P, RP> Builder<T, P, RP> {
+    /// Set the number of retries for failed requests.
+    pub fn with_retries(mut self, retries: usize) -> Self {
+        self.retries = Some(retries);
+        self
+    }
+
+    /// Get the number of retries for failed requests.
+    pub fn retries(&self) -> Option<usize> {
+        self.retries
+    }
+
+    /// Disable retries for failed requests.
+    pub fn without_retries(mut self) -> Self {
+        self.retries = None;
         self
     }
 }
@@ -374,6 +403,9 @@ where
 
         ServiceBuilder::new()
             .layer(SharedService::layer())
+            .option_layer(self.retries.map(|attempts| {
+                tower::retry::RetryLayer::new(crate::service::Attempts::new(attempts))
+            }))
             .option_layer(self.timeout.map(tower::timeout::TimeoutLayer::new))
             .layer(SetRequestHeaderLayer::if_not_present(
                 http::header::USER_AGENT,

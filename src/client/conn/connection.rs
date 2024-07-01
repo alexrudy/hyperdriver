@@ -90,10 +90,16 @@ impl Connection for HttpConnection {
 
     type Future = BoxFuture<'static, Result<Response<Incoming>, hyper::Error>>;
 
-    fn send_request(&mut self, request: crate::body::Request) -> Self::Future {
+    fn send_request(&mut self, mut request: crate::body::Request) -> Self::Future {
         match &mut self.inner {
-            InnerConnection::H2(conn) => Box::pin(conn.send_request(request)),
-            InnerConnection::H1(conn) => Box::pin(conn.send_request(request)),
+            InnerConnection::H2(conn) => {
+                *request.version_mut() = http::Version::HTTP_2;
+                Box::pin(conn.send_request(request))
+            }
+            InnerConnection::H1(conn) => {
+                *request.version_mut() = http::Version::HTTP_11;
+                Box::pin(conn.send_request(request))
+            }
         }
     }
 

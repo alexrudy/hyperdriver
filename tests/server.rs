@@ -43,7 +43,7 @@ async fn connection<P: hyperdriver::client::conn::Protocol<Stream>>(
 
 fn hello_world() -> hyperdriver::body::Request {
     http::Request::builder()
-        .uri("/")
+        .uri("https://localhost/hello")
         .body(hyperdriver::body::Body::from("hello world"))
         .unwrap()
 }

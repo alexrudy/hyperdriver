@@ -12,6 +12,8 @@ use tokio::io::AsyncWriteExt;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let args = clap::Command::new("patron")
         .version(env!("CARGO_PKG_VERSION"))
         .about("HTTP/2 client")

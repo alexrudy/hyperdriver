@@ -39,11 +39,20 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let addr = SocketAddr::V4(SocketAddrV4::new([127, 0, 0, 1].into(), 0));
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
     let svc = tower::service_fn(|req: hyperdriver::body::Request| async {
+        println!("{} {}", req.method(), req.uri());
+        for (name, value) in req.headers() {
+            if let Ok(value) = value.to_str() {
+                println!("  {}: {}", name, value);
+            }
+        }
+
         let body = req.into_body();
         let data = body.collect().await.unwrap();
         Ok::<_, Infallible>(hyperdriver::body::Response::new(

@@ -167,8 +167,8 @@ pub(in crate::client::conn::transport) mod future {
                     } => match future.poll(cx) {
                         Poll::Ready(Ok(stream)) => {
                             let stream = stream.into_inner();
+                            tracing::trace!(domain=%domain, "Transport connected. TLS handshake starting");
                             let stream = ClientStream::new(stream).tls(domain, config.clone());
-                            tracing::trace!("Transport connected. TLS handshake starting");
                             this.state.set(State::Handshake { stream });
                         }
                         Poll::Ready(Err(e)) => {
