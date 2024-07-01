@@ -2,6 +2,8 @@ use tower::retry::Policy;
 
 pub use tower::retry::{Retry, RetryLayer};
 
+use crate::body::TryCloneRequest;
+
 /// A policy for retrying requests.
 #[derive(Debug, Clone)]
 pub struct Attempts(usize);
@@ -33,19 +35,6 @@ impl<E> Policy<http::Request<crate::Body>, http::Response<crate::Body>, E> for A
         &self,
         req: &http::Request<crate::Body>,
     ) -> Option<http::Request<crate::Body>> {
-        if let Some(body) = req.body().try_clone() {
-            let mut new_req = http::Request::builder()
-                .uri(req.uri().clone())
-                .method(req.method().clone())
-                .version(req.version());
-
-            if let Some(headers) = new_req.headers_mut() {
-                *headers = req.headers().clone();
-            };
-
-            new_req.body(body).ok()
-        } else {
-            None
-        }
+        req.try_clone_request()
     }
 }
