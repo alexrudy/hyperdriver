@@ -5,8 +5,8 @@ use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::rt::TokioExecutor;
 use std::pin::pin;
 
+use hyperdriver::client::conn::protocol::auto::HttpConnectionBuilder;
 use hyperdriver::client::conn::transport::duplex::DuplexTransport;
-use hyperdriver::client::{conn::protocol::auto::HttpConnectionBuilder, PoolConfig};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
@@ -18,11 +18,11 @@ async fn client() -> Result<(), BoxError> {
 
     let server = tokio::spawn(serve_one_h1(acceptor));
 
-    let client = hyperdriver::client::Client::new(
-        HttpConnectionBuilder::default(),
-        DuplexTransport::new(1024, tx.clone()),
-        PoolConfig::default(),
-    );
+    let client = hyperdriver::client::Client::builder()
+        .with_protocol(HttpConnectionBuilder::default())
+        .with_transport(DuplexTransport::new(1024, tx.clone()))
+        .with_default_pool()
+        .build();
 
     let resp: Response = client.get("http://test/".parse().unwrap()).await?;
 
@@ -42,11 +42,11 @@ async fn client_h2() -> Result<(), BoxError> {
 
     let server = tokio::spawn(serve_one_h2(acceptor));
 
-    let client = hyperdriver::client::Client::new(
-        HttpConnectionBuilder::default(),
-        DuplexTransport::new(1024, tx),
-        PoolConfig::default(),
-    );
+    let client = hyperdriver::client::Client::builder()
+        .with_protocol(HttpConnectionBuilder::default())
+        .with_transport(DuplexTransport::new(1024, tx))
+        .with_default_pool()
+        .build();
 
     let request = http::Request::get("http://test/")
         .version(http::Version::HTTP_2)
@@ -66,7 +66,13 @@ async fn service_ok(
 ) -> Result<hyperdriver::body::Response, BoxError> {
     Ok(http::response::Builder::new()
         .status(200)
-        .header("O-Host", req.headers().get("Host").unwrap())
+        .header(
+            "O-Host",
+            req.headers()
+                .get("Host")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("missing"),
+        )
         .body(hyperdriver::body::Body::empty())?)
 }
 

@@ -1,4 +1,18 @@
 //! Connection Pooling for Clients
+//!
+//! The `pool` module provides a connection pool for clients, which allows for multiple connections to be made to a
+//! remote host and reused across multiple requests. This is supported in the `ClientService` type.
+//!
+//! This connection pool is specifically designed with HTTP connections in mind. It separates the treatment of the
+//! connection (e.g. HTTP/1.1, HTTP/2, etc) from the transport (e.g. TCP, TCP+TLS, etc). This allows the pool to be used
+//! with any type of connection, as long as it implements the `PoolableConnection` trait, and any type of transport,
+//! as long as it implements the `PoolableTransport` trait. This also allows the pool to be used with upgradeable
+//! connections, such as HTTP/1.1 connections that can be upgraded to HTTP/2, where the pool will have new HTTP/2
+//! connections wait for in-progress upgrades from HTTP/1.1 connections to complete and use those, rather than creating
+//! new connections.
+//!
+//! Pool configuration happens in the `Config` type, which allows for setting the maximum idle duration of a connection,
+//! and the maximum number of idle connections per host.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -27,14 +41,6 @@ use self::weakopt::WeakOpt;
 
 /// A pool of connections to remote hosts.
 ///
-/// This connection pool is specifically designed with HTTP connections in mind. It separates the treatment of the
-/// connection (e.g. HTTP/1.1, HTTP/2, etc) from the transport (e.g. TCP, TLS, etc). This allows the pool to be used
-/// with any type of connection, as long as it implements the `PoolableConnection` trait, and any type of transport,
-/// as long as it implements the `PoolableTransport` trait. This also allows the pool to be used with upgradeable
-/// connections, such as HTTP/1.1 connections that can be upgraded to HTTP/2, where the pool will have new HTTP/2
-/// connections wait for in-progress upgrades from HTTP/1.1 connections to complete and use those, rather than creating
-/// new connections.
-///
 /// The pool makes use of a `Checkout` to represent a connection that is being checked out of the pool. The `Checkout`
 /// type requires a `Connector` to be provided, which provides a future that will create a new connection to the remote
 /// host, and a future that will perform the handshake for the connection. The `Checkout` ensures that in-progress
@@ -43,9 +49,6 @@ use self::weakopt::WeakOpt;
 /// The pool also provides a `Pooled` type, which is a wrapper around a connection that will return the connection to
 /// the pool when dropped, if the connection is still open and has not been marked as reusable (reusable connections
 /// are always kept in the pool - there is no need to return dropped copies).
-///
-/// Pool configuration happens in the `Config` type, which allows for setting the maximum idle duration of a connection,
-/// and the maximum number of idle connections per host.
 #[derive(Debug)]
 pub(crate) struct Pool<T: PoolableConnection> {
     inner: Arc<Mutex<PoolInner<T>>>,
@@ -228,7 +231,14 @@ impl Default for Config {
     }
 }
 
-/// A [`crate::client::conn::Transport`] that can be pooled.
+/// A [`crate::client::conn::Transport`] that can produce connections
+/// which might be poolable.
+///
+/// This trait is used by the pool connection checkout process before
+/// the handshake occurs to check if the connection has negotiated or
+/// upgraded to a protocol which enables multiplexing. This is an
+/// optimistic check, and the connection will be checked again after
+/// the handshake is complete.
 pub trait PoolableTransport: Unpin + Send + Sized + 'static {
     /// Returns `true` if the transport can be re-used, usually
     /// because it has used ALPN to negotiate a protocol that can
@@ -240,7 +250,14 @@ pub trait PoolableTransport: Unpin + Send + Sized + 'static {
     fn can_share(&self) -> bool;
 }
 
-/// A [`crate::client::Protocol`] that can be pooled.
+/// A [`crate::client::conn::Connection`] that can be pooled.
+///
+/// These connections must report to the pool whether they remain open,
+/// and whether they can be shared / multiplexed.
+///
+/// The pool will call [`PoolableConnection::reuse`] to get a new connection
+/// to return to the pool, which will multiplex against this one. If multiplexing
+/// is not possible, then `None` should be returned.
 pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     /// Returns `true` if the connection is open.
     fn is_open(&self) -> bool;

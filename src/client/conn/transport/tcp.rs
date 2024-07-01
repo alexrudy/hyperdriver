@@ -7,7 +7,7 @@
 //! Normally, you will not need to use this module directly. Instead, you can use the [`Client`][crate::client::Client]
 //! type from the [`client`][crate::client] module, which uses the [`TcpTransport`] internally by default.
 //!
-//! See [`Client::new_http_tcp`][crate::client::Client::new_tcp_http] for the default constructor which uses the TCP transport.
+//! See [`Client::build_tcp_http`][crate::client::Client::build_tcp_http] for the default constructor which uses the TCP transport.
 
 use std::fmt;
 use std::future::Future;
@@ -28,6 +28,7 @@ use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use super::TransportStream;
+use crate::client::builder::BuildTransport;
 use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 
@@ -445,6 +446,17 @@ impl Default for TcpTransportConfig {
             send_buffer_size: None,
             recv_buffer_size: None,
         }
+    }
+}
+
+impl BuildTransport for TcpTransportConfig {
+    type Target = TcpTransport;
+
+    fn build(self) -> Self::Target {
+        TcpTransport::builder()
+            .with_config(self)
+            .with_gai_resolver()
+            .build()
     }
 }
 

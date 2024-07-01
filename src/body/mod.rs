@@ -62,6 +62,27 @@ impl Body {
         }
     }
 
+    /// Try to clone this body.
+    pub fn try_clone(&self) -> Option<Self> {
+        match &self.inner {
+            InnerBody::Boxed(_) => None,
+            InnerBody::Full(body) => Some(Self {
+                inner: InnerBody::Full(body.clone()),
+            }),
+            InnerBody::Empty => Some(Self {
+                inner: InnerBody::Empty,
+            }),
+            InnerBody::Http(_) => None,
+            InnerBody::HttpSync(_) => None,
+
+            #[cfg(feature = "incoming")]
+            InnerBody::Incoming(_) => None,
+
+            #[cfg(feature = "axum")]
+            InnerBody::AxumBody(_) => None,
+        }
+    }
+
     /// Convert this body into a boxed body.
     pub fn as_boxed(self) -> UnsyncBoxBody<Bytes, BoxError> {
         match self.inner {

@@ -11,7 +11,9 @@ all: fmt check-all deny clippy examples docs test machete udeps msrv
 
 # Check for unused dependencies
 udeps:
-    cargo +{{nightly}} udeps --all-features
+    #!/usr/bin/env sh
+    export CARGO_TARGET_DIR="target/hack/"
+    cargo +{{nightly}} udeps  --all-features
     cargo +{{nightly}} hack udeps --each-feature
 
 # Use machete to check for unused dependencies
@@ -26,8 +28,8 @@ check:
 # Check compilation across all features
 check-all:
     cargo +{{rust}} check --all-targets --all-features
-    cargo +{{rust}} hack check --no-private --each-feature --no-dev-deps
-    cargo +{{rust}} hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --each-feature --no-dev-deps
+    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile,tls-ring,tls-aws-lc
 
 # Run clippy
 clippy:
@@ -38,6 +40,7 @@ examples:
     cargo +{{rust}} check --examples --all-features
 
 alias d := docs
+alias doc := docs
 # Build documentation
 docs:
     cargo +{{rust}} doc --all-features --no-deps
@@ -48,8 +51,8 @@ read: docs
 
 # Check support for MSRV
 msrv:
-    cargo +{{msrv}} check --all-targets --all-features
-    cargo +{{msrv}} doc --all-features --no-deps
+    cargo +{{msrv}} check --target-dir target/msrv/ --all-targets --all-features
+    cargo +{{msrv}} doc --target-dir target/msrv/ --all-features --no-deps
 
 
 alias t := test
@@ -61,6 +64,11 @@ test:
 # Run coverage tests
 coverage:
     cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring,mocks
+
+alias timing := timings
+# Compile with timing checks
+timings:
+    cargo +{{rust}} build --features  axum,sni,tls,tls-ring,mocks --timings
 
 # Run deny checks
 deny:

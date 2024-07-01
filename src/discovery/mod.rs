@@ -12,12 +12,10 @@ use std::sync::Arc;
 
 use crate::bridge::rt::TokioExecutor;
 #[cfg(feature = "client")]
-use crate::client::conn::protocol::auto::HttpConnectionBuilder;
-use crate::client::conn::transport::TransportExt as _;
+use crate::client::conn::protocol::auto;
+
 #[cfg(feature = "client")]
 use crate::client::conn::Stream as ClientStream;
-#[cfg(feature = "client")]
-use crate::client::conn::TlsTransport;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
 
@@ -29,15 +27,12 @@ use tower::make::Shared;
 
 mod transport;
 
+use crate::client::Client;
 pub use transport::GrpcScheme;
 pub use transport::RegistryTransport;
 pub use transport::Scheme;
 pub use transport::SvcScheme;
 pub use transport::TransportBuilder;
-
-/// Service Registry client which will connect to internal services.
-pub type Client<B = crate::body::Body> =
-    crate::client::Client<HttpConnectionBuilder, TlsTransport<transport::RegistryTransport>, B>;
 
 /// An error occured while connecting to a service.
 #[derive(Debug, thiserror::Error)]
@@ -343,9 +338,15 @@ impl ServiceRegistry {
     }
 
     /// Create a client which will connect to internal services.
-    pub fn client<B>(&self) -> Client<B> {
-        let transport = self.default_transport().without_tls();
-        Client::new(Default::default(), transport, Default::default())
+    pub fn client(&self) -> Client {
+        let transport = self.default_transport();
+
+        Client::builder()
+            .with_transport(transport)
+            .with_protocol(auto::HttpConnectionBuilder::default())
+            .with_pool(Default::default())
+            .without_tls()
+            .build()
     }
 }
 

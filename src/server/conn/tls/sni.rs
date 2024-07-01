@@ -131,16 +131,17 @@ fn handle<BIn>(req: &mut Request<BIn>) -> Option<ValidateSNIError> {
     let span = tracing::Span::current();
 
     // Grab (and own) the host header value
-    let host: Option<Authority> = req
-        .headers()
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.parse().ok());
+    let host: Option<Authority> = if req.version() == http::Version::HTTP_2 {
+        req.uri().authority().cloned()
+    } else {
+        req.headers()
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.parse().ok())
+    };
 
     // Grab the TLS connection info
-    let tls = req.extensions_mut().get_mut::<TlsConnectionInfo>();
-
-    let Some(tls) = tls else {
+    let Some(tls) = req.extensions_mut().get_mut::<TlsConnectionInfo>() else {
         tracing::warn!("Request had no TLS connection info, inferring not a TLS request");
         return None;
     };
@@ -233,6 +234,20 @@ mod tests {
         let mut req = Request::new(());
         req.headers_mut()
             .insert(header::HOST, "example.com".parse().unwrap());
+        req.extensions_mut().insert(TlsConnectionInfo {
+            server_name: Some("example.com".into()),
+            ..TlsConnectionInfo::default()
+        });
+
+        assert!(handle(&mut req).is_none());
+    }
+
+    #[test]
+    fn test_handle_http2_matches_authority() {
+        let mut req = Request::builder()
+            .uri("https://example.com")
+            .body(())
+            .unwrap();
         req.extensions_mut().insert(TlsConnectionInfo {
             server_name: Some("example.com".into()),
             ..TlsConnectionInfo::default()

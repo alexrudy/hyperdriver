@@ -12,6 +12,8 @@ use tokio::io::AsyncWriteExt;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let args = clap::Command::new("patron")
         .version(env!("CARGO_PKG_VERSION"))
         .about("HTTP/2 client")
@@ -42,7 +44,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .get_matches();
 
-    let mut client = Client::builder();
+    let mut client = Client::builder()
+        .with_tcp(Default::default())
+        .with_auto_http();
 
     if let Some(tls_root) = args.get_one::<String>("tls-root") {
         println!("Using TLS root: {}", tls_root);

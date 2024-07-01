@@ -1,7 +1,7 @@
 //! Client connection types.
 //!
-//! A client connection is composed of a transport, a protocol, and a connection, which each serve a
-//! different purpose in the client connection lifecycle.
+//! A client connection is composed of a transport, which produces a stream, and a protocol, which produces
+//! a connection, which each serve a different purpose in the client connection lifecycle.
 //!
 //! ## Transport
 //!
