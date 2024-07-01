@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn send(
-    client: Client,
+    mut client: Client,
     uri: Uri,
     version: http::Version,
     done: tokio::sync::mpsc::Sender<()>,

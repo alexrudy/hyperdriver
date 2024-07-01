@@ -14,6 +14,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use thiserror::Error;
 use tower::util::Oneshot;
@@ -74,6 +75,8 @@ impl From<pool::Error<ConnectionError>> for Error {
     }
 }
 
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 #[cfg(feature = "tls")]
 /// Get a default TLS client configuration by loading the platform's native certificates.
 pub fn default_tls_config() -> rustls::ClientConfig {
@@ -92,13 +95,10 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 }
 
 /// A boxed service with http::Request and http::Response and symmetric body types
-pub type BoxedClientService<B> = SharedService<
-    http::Request<B>,
-    http::Response<B>,
-    Box<dyn std::error::Error + Send + Sync + 'static>,
->;
+pub type BoxedClientService<B> = SharedService<http::Request<B>, http::Response<B>, BoxError>;
 
 /// Inner type for managing the client service.
+#[derive(Clone)]
 struct ClientRef {
     service: BoxedClientService<crate::Body>,
 }
@@ -111,10 +111,11 @@ impl ClientRef {
     }
 
     fn request(
-        &self,
+        &mut self,
         request: crate::body::Request,
     ) -> Oneshot<BoxedClientService<crate::Body>, http::Request<crate::Body>> {
-        self.service.clone().oneshot(request)
+        let service = self.service.clone();
+        std::mem::replace(&mut self.service, service).oneshot(request)
     }
 }
 
@@ -127,7 +128,7 @@ impl ClientRef {
 /// ```no_run
 /// # use hyperdriver::client::Client;
 /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-/// let client = Client::build_tcp_http().build();
+/// let mut client = Client::build_tcp_http().build();
 /// let response = client.get("http://example.com".parse().unwrap()).await.unwrap();
 /// println!("Response: {:?}", response);
 /// # Ok(())
@@ -184,24 +185,34 @@ impl Client {
 impl Client {
     /// Send an http Request, and return a Future of the Response.
     pub fn request(
-        &self,
+        &mut self,
         request: crate::body::Request,
     ) -> Oneshot<BoxedClientService<crate::Body>, http::Request<crate::Body>> {
-        self.inner.request(request)
+        Arc::make_mut(&mut self.inner).request(request)
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(
-        &self,
-        uri: http::Uri,
-    ) -> Result<http::Response<crate::Body>, Box<dyn std::error::Error + Send + Sync + 'static>>
-    {
+    pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<crate::Body>, BoxError> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();
 
         let response = self.request(request).await?;
         Ok(response)
+    }
+}
+
+impl tower::Service<http::Request<crate::Body>> for Client {
+    type Response = http::Response<crate::Body>;
+    type Error = BoxError;
+    type Future = Oneshot<BoxedClientService<crate::Body>, http::Request<crate::Body>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Arc::make_mut(&mut self.inner).service.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: http::Request<crate::Body>) -> Self::Future {
+        Arc::make_mut(&mut self.inner).request(request)
     }
 }
 
