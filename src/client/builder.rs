@@ -17,11 +17,11 @@ use super::conn::transport::TransportExt;
 use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
-use super::error::DowncastErrorLayer;
+use super::error::DowncastError;
 use super::pool::PoolableConnection;
 
-use super::ClientService;
 use super::Error as ClientError;
+use super::{BoxError, ClientService};
 use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
@@ -412,12 +412,12 @@ where
     >,
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
     S: tower::Layer<
-        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, ClientError>,
+        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, BoxError>,
     >,
     S::Service: tower::Service<
             http::Request<crate::Body>,
             Response = http::Response<crate::Body>,
-            Error = ClientError,
+            Error = BoxError,
         > + Clone
         + Send
         + Sync
@@ -449,7 +449,6 @@ where
         let service = self
             .builder
             .layer(SharedService::layer())
-            .layer(DowncastErrorLayer::new())
             .option_layer(self.retries.map(|attempts| {
                 tower::retry::RetryLayer::new(crate::service::Attempts::new(attempts))
             }))
@@ -466,7 +465,7 @@ where
                 _body: std::marker::PhantomData,
             });
 
-        SharedService::new(service)
+        SharedService::new(DowncastError::new(service))
     }
 
     /// Build the client.
