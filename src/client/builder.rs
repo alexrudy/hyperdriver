@@ -14,12 +14,14 @@ use tower_http::set_header::SetRequestHeaderLayer;
 use super::conn::protocol::auto;
 use super::conn::transport::tcp::TcpTransportConfig;
 use super::conn::transport::TransportExt;
+use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
-use super::conn::{Connection, TlsTransport};
+use super::error::DowncastErrorLayer;
 use super::pool::PoolableConnection;
-use super::BoxError;
+
 use super::ClientService;
+use super::Error as ClientError;
 use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
@@ -378,36 +380,6 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-type BuilderLayeredSerivce<S, RP> = tower::util::Either<
-    tower::retry::Retry<
-        crate::service::Attempts,
-        tower::util::Either<
-            tower::timeout::Timeout<
-                tower_http::set_header::SetRequestHeader<
-                    tower::util::Either<tower_http::follow_redirect::FollowRedirect<S, RP>, S>,
-                    HeaderValue,
-                >,
-            >,
-            tower_http::set_header::SetRequestHeader<
-                tower::util::Either<tower_http::follow_redirect::FollowRedirect<S, RP>, S>,
-                HeaderValue,
-            >,
-        >,
-    >,
-    tower::util::Either<
-        tower::timeout::Timeout<
-            tower_http::set_header::SetRequestHeader<
-                tower::util::Either<tower_http::follow_redirect::FollowRedirect<S, RP>, S>,
-                HeaderValue,
-            >,
-        >,
-        tower_http::set_header::SetRequestHeader<
-            tower::util::Either<tower_http::follow_redirect::FollowRedirect<S, RP>, S>,
-            HeaderValue,
-        >,
-    >,
->;
-
 impl<T, P, RP, S> Builder<T, P, RP, S>
 where
     T: BuildTransport,
@@ -440,12 +412,12 @@ where
     >,
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
     S: tower::Layer<
-        BuilderLayeredSerivce<ClientService<TlsTransport<T::Target>, P::Target, crate::Body>, RP>,
+        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, ClientError>,
     >,
     S::Service: tower::Service<
             http::Request<crate::Body>,
             Response = http::Response<crate::Body>,
-            Error = BoxError,
+            Error = ClientError,
         > + Clone
         + Send
         + Sync
@@ -455,7 +427,7 @@ where
     /// Build a client service with the configured layers
     pub fn build_service(
         self,
-    ) -> SharedService<http::Request<crate::Body>, http::Response<crate::Body>, BoxError> {
+    ) -> SharedService<http::Request<crate::Body>, http::Response<crate::Body>, ClientError> {
         let user_agent = if let Some(ua) = self.user_agent {
             HeaderValue::from_str(&ua).expect("user-agent should be a valid http header")
         } else {
@@ -476,15 +448,17 @@ where
 
         let service = self
             .builder
+            .layer(SharedService::layer())
+            .layer(DowncastErrorLayer::new())
             .option_layer(self.retries.map(|attempts| {
                 tower::retry::RetryLayer::new(crate::service::Attempts::new(attempts))
             }))
             .option_layer(self.timeout.map(tower::timeout::TimeoutLayer::new))
+            .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
             .layer(SetRequestHeaderLayer::if_not_present(
                 http::header::USER_AGENT,
                 user_agent,
             ))
-            .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
             .service(ClientService {
                 transport,
                 protocol: self.protocol.build(),
