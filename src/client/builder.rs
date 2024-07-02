@@ -143,6 +143,11 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             pool: self.pool,
         }
     }
+
+    /// Get a mutable reference to the transport configuration
+    pub fn transport(&mut self) -> &mut T {
+        &mut self.transport
+    }
 }
 
 #[cfg(feature = "tls")]
