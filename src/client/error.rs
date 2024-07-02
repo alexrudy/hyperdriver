@@ -7,24 +7,24 @@ use super::{pool, BoxError};
 #[derive(Debug, Error)]
 pub enum Error {
     /// Error occured with the underlying connection.
-    #[error(transparent)]
-    Connection(BoxError),
+    #[error("connection: {0}")]
+    Connection(#[source] BoxError),
 
     /// Error occured with the underlying transport.
     #[error("transport: {0}")]
-    Transport(BoxError),
+    Transport(#[source] BoxError),
 
     /// Error occured with the underlying protocol.
     #[error("protocol: {0}")]
-    Protocol(BoxError),
+    Protocol(#[source] BoxError),
 
     /// Error occured with the underlying service
     #[error("serivce: {0}")]
-    Service(BoxError),
+    Service(#[source] BoxError),
 
     /// Error occured with the user's request, such as an invalid URI.
     #[error("user error: {0}")]
-    User(hyper::Error),
+    User(#[source] hyper::Error),
 
     /// Invalid HTTP Method for the current action.
     #[error("invalid method: {0}")]
