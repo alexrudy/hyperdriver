@@ -30,10 +30,10 @@ mod error;
 pub mod pool;
 mod service;
 
-pub use builder::Builder;
-
 pub use self::error::Error;
+pub use self::error::{DowncastError, DowncastErrorLayer};
 pub use self::pool::Config as PoolConfig;
+pub use builder::Builder;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

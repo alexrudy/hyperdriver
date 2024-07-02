@@ -86,12 +86,14 @@ impl Error {
     }
 }
 
+/// A middleware that downcasts errors to `Error`.
 #[derive(Debug, Clone)]
 pub struct DowncastError<S> {
     inner: S,
 }
 
 impl<S> DowncastError<S> {
+    /// Create a new DowncastError service.
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
@@ -122,14 +124,22 @@ where
 }
 
 mod future {
+    use core::fmt;
     use std::future::Future;
 
     use super::BoxError;
 
+    /// Future for the DowncastError middleware.
     #[pin_project::pin_project]
     pub struct DowncastErrorFuture<F> {
         #[pin]
         pub(super) inner: F,
+    }
+
+    impl<F> fmt::Debug for DowncastErrorFuture<F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("DowncastErrorFuture").finish()
+        }
     }
 
     impl<F, T> Future for DowncastErrorFuture<F>
@@ -150,12 +160,14 @@ mod future {
     }
 }
 
-#[derive(Debug, Clone)]
+/// A layer that downcasts errors to `Error`.
+#[derive(Debug, Clone, Default)]
 pub struct DowncastErrorLayer {
     _priv: (),
 }
 
 impl DowncastErrorLayer {
+    /// Create a new DowncastErrorLayer.
     pub fn new() -> Self {
         Self { _priv: () }
     }
