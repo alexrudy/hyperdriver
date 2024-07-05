@@ -140,6 +140,14 @@ impl Client {
     pub fn new_tcp_http() -> Self {
         Builder::default().build()
     }
+
+    /// Unwrap the inner service from the client.
+    pub fn into_inner(self) -> SharedClientService<crate::Body> {
+        match Arc::try_unwrap(self.inner) {
+            Ok(client) => client.service,
+            Err(client) => client.service.clone(),
+        }
+    }
 }
 
 impl Client {
