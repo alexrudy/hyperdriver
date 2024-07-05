@@ -30,6 +30,7 @@ use super::Error;
 use crate::info::HasConnectionInfo;
 
 mod future;
+mod middleware;
 
 /// A client which provides a simple HTTP `tower::Service`.
 ///
