@@ -14,65 +14,28 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use thiserror::Error;
 use tower::util::Oneshot;
 use tower::ServiceExt;
 
 use self::conn::protocol::auto;
 use self::conn::transport::tcp::TcpTransportConfig;
 pub use self::service::ClientService;
-use crate::client::conn::connection::ConnectionError;
 use crate::service::SharedService;
 
 mod builder;
 pub mod conn;
+mod error;
 pub mod pool;
 mod service;
 
+pub use self::error::Error;
+pub use self::error::{DowncastError, DowncastErrorLayer};
+pub use self::pool::Config as PoolConfig;
 pub use builder::Builder;
 
-pub use pool::Config as PoolConfig;
-
-/// Client error type.
-#[derive(Debug, Error)]
-pub enum Error {
-    /// Error occured with the underlying connection.
-    #[error(transparent)]
-    Connection(Box<dyn std::error::Error + Send + Sync + 'static>),
-
-    /// Error occured with the underlying transport.
-    #[error("transport: {0}")]
-    Transport(Box<dyn std::error::Error + Send + Sync + 'static>),
-
-    /// Error occured with the underlying protocol.
-    #[error("protocol: {0}")]
-    Protocol(Box<dyn std::error::Error + Send + Sync + 'static>),
-
-    /// Error occured with the user's request, such as an invalid URI.
-    #[error("user error: {0}")]
-    User(hyper::Error),
-
-    /// Invalid HTTP Method for the current action.
-    #[error("invalid method: {0}")]
-    InvalidMethod(http::Method),
-
-    /// Protocol is not supported by this client or transport.
-    #[error("unsupported protocol")]
-    UnsupportedProtocol,
-}
-
-impl From<pool::Error<ConnectionError>> for Error {
-    fn from(error: pool::Error<ConnectionError>) -> Self {
-        match error {
-            pool::Error::Connecting(error) => Error::Connection(error.into()),
-            pool::Error::Handshaking(error) => Error::Transport(error.into()),
-            pool::Error::Unavailable => {
-                Error::Connection("pool closed, no connection can be made".into())
-            }
-        }
-    }
-}
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(feature = "tls")]
 /// Get a default TLS client configuration by loading the platform's native certificates.
@@ -92,29 +55,27 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 }
 
 /// A boxed service with http::Request and http::Response and symmetric body types
-pub type BoxedClientService<B> = SharedService<
-    http::Request<B>,
-    http::Response<B>,
-    Box<dyn std::error::Error + Send + Sync + 'static>,
->;
+pub type SharedClientService<B> = SharedService<http::Request<B>, http::Response<B>, Error>;
 
 /// Inner type for managing the client service.
+#[derive(Clone)]
 struct ClientRef {
-    service: BoxedClientService<crate::Body>,
+    service: SharedClientService<crate::Body>,
 }
 
 impl ClientRef {
-    fn new(service: impl Into<BoxedClientService<crate::Body>>) -> Self {
+    fn new(service: impl Into<SharedClientService<crate::Body>>) -> Self {
         Self {
             service: service.into(),
         }
     }
 
     fn request(
-        &self,
+        &mut self,
         request: crate::body::Request,
-    ) -> Oneshot<BoxedClientService<crate::Body>, http::Request<crate::Body>> {
-        self.service.clone().oneshot(request)
+    ) -> Oneshot<SharedClientService<crate::Body>, http::Request<crate::Body>> {
+        let service = self.service.clone();
+        std::mem::replace(&mut self.service, service).oneshot(request)
     }
 }
 
@@ -127,7 +88,7 @@ impl ClientRef {
 /// ```no_run
 /// # use hyperdriver::client::Client;
 /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-/// let client = Client::build_tcp_http().build();
+/// let mut client = Client::build_tcp_http().build();
 /// let response = client.get("http://example.com".parse().unwrap()).await.unwrap();
 /// println!("Response: {:?}", response);
 /// # Ok(())
@@ -156,7 +117,7 @@ impl Client {
     /// It is much easier to use the builder interface to create a client.
     pub fn new_from_service<S>(service: S) -> Self
     where
-        S: Into<BoxedClientService<crate::Body>>,
+        S: Into<SharedClientService<crate::Body>>,
     {
         Client {
             inner: Arc::new(ClientRef::new(service)),
@@ -179,29 +140,47 @@ impl Client {
     pub fn new_tcp_http() -> Self {
         Builder::default().build()
     }
+
+    /// Unwrap the inner service from the client.
+    pub fn into_inner(self) -> SharedClientService<crate::Body> {
+        match Arc::try_unwrap(self.inner) {
+            Ok(client) => client.service,
+            Err(client) => client.service.clone(),
+        }
+    }
 }
 
 impl Client {
     /// Send an http Request, and return a Future of the Response.
     pub fn request(
-        &self,
+        &mut self,
         request: crate::body::Request,
-    ) -> Oneshot<BoxedClientService<crate::Body>, http::Request<crate::Body>> {
-        self.inner.request(request)
+    ) -> Oneshot<SharedClientService<crate::Body>, http::Request<crate::Body>> {
+        Arc::make_mut(&mut self.inner).request(request)
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(
-        &self,
-        uri: http::Uri,
-    ) -> Result<http::Response<crate::Body>, Box<dyn std::error::Error + Send + Sync + 'static>>
-    {
+    pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<crate::Body>, BoxError> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();
 
         let response = self.request(request).await?;
         Ok(response)
+    }
+}
+
+impl tower::Service<http::Request<crate::Body>> for Client {
+    type Response = http::Response<crate::Body>;
+    type Error = Error;
+    type Future = Oneshot<SharedClientService<crate::Body>, http::Request<crate::Body>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Arc::make_mut(&mut self.inner).service.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: http::Request<crate::Body>) -> Self::Future {
+        Arc::make_mut(&mut self.inner).request(request)
     }
 }
 

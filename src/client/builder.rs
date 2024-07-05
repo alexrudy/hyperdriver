@@ -5,6 +5,7 @@ use std::time::Duration;
 use http::HeaderValue;
 #[cfg(feature = "tls")]
 use rustls::ClientConfig;
+use tower::layer::util::{Identity, Stack};
 use tower::ServiceBuilder;
 use tower_http::follow_redirect::policy;
 use tower_http::follow_redirect::FollowRedirectLayer;
@@ -16,8 +17,11 @@ use super::conn::transport::TransportExt;
 use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
+use super::error::DowncastError;
 use super::pool::PoolableConnection;
-use super::ClientService;
+
+use super::Error as ClientError;
+use super::{BoxError, ClientService};
 use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
@@ -61,9 +65,10 @@ where
 
 /// A builder for a client.
 #[derive(Debug)]
-pub struct Builder<T, P, RP = policy::Standard> {
+pub struct Builder<T, P, RP = policy::Standard, S = Identity> {
     transport: T,
     protocol: P,
+    builder: ServiceBuilder<S>,
     user_agent: Option<String>,
     redirect: Option<RP>,
     timeout: Option<Duration>,
@@ -79,6 +84,7 @@ impl Builder<(), (), policy::Standard> {
         Self {
             transport: (),
             protocol: (),
+            builder: ServiceBuilder::new(),
             user_agent: None,
             redirect: None,
             timeout: None,
@@ -95,6 +101,7 @@ impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Stan
         Self {
             transport: Default::default(),
             protocol: Default::default(),
+            builder: ServiceBuilder::new(),
             user_agent: None,
             redirect: Some(policy::Standard::default()),
             timeout: Some(Duration::from_secs(30)),
@@ -106,12 +113,13 @@ impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Stan
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Use the provided TCP configuration.
-    pub fn with_tcp(self, config: TcpTransportConfig) -> Builder<TcpTransportConfig, P, RP> {
+    pub fn with_tcp(self, config: TcpTransportConfig) -> Builder<TcpTransportConfig, P, RP, S> {
         Builder {
             transport: config,
             protocol: self.protocol,
+            builder: self.builder,
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
@@ -123,10 +131,11 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 
     /// Provide a custom transport
-    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP> {
+    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP, S> {
         Builder {
             transport,
             protocol: self.protocol,
+            builder: self.builder,
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
@@ -136,10 +145,15 @@ impl<T, P, RP> Builder<T, P, RP> {
             pool: self.pool,
         }
     }
+
+    /// Get a mutable reference to the transport configuration
+    pub fn transport(&mut self) -> &mut T {
+        &mut self.transport
+    }
 }
 
 #[cfg(feature = "tls")]
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Disable TLS
     pub fn without_tls(mut self) -> Self {
         self.tls = None;
@@ -165,14 +179,14 @@ impl<T, P, RP> Builder<T, P, RP> {
 }
 
 #[cfg(not(feature = "tls"))]
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Disable TLS
     pub fn without_tls(self) -> Self {
         self
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Connection pool configuration.
     pub fn pool(&mut self) -> Option<&mut crate::client::pool::Config> {
         self.pool.as_mut()
@@ -197,12 +211,13 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Use the auto-HTTP Protocol
-    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder, RP> {
+    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder, RP, S> {
         Builder {
             transport: self.transport,
             protocol: auto::HttpConnectionBuilder::default(),
+            builder: self.builder,
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
@@ -214,10 +229,11 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 
     /// Use the provided HTTP connection configuration.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP> {
+    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP, S> {
         Builder {
             transport: self.transport,
             protocol,
+            builder: self.builder,
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
@@ -234,7 +250,7 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Set the User-Agent header.
     pub fn with_user_agent(mut self, user_agent: String) -> Self {
         self.user_agent = Some(user_agent);
@@ -247,12 +263,13 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Set the redirect policy. See [`policy`] for more information.
-    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2> {
+    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2, S> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
+            builder: self.builder,
             user_agent: self.user_agent,
             redirect: Some(policy),
             timeout: self.timeout,
@@ -264,11 +281,12 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 
     /// Disable redirects.
-    pub fn without_redirects(self) -> Builder<T, P, policy::Standard> {
+    pub fn without_redirects(self) -> Builder<T, P, policy::Standard, S> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
             user_agent: self.user_agent,
+            builder: self.builder,
             redirect: None,
             timeout: self.timeout,
             retries: self.retries,
@@ -279,10 +297,11 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 
     /// Set the standard redirect policy. See [`policy::Standard`] for more information.
-    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard> {
+    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard, S> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
+            builder: self.builder,
             user_agent: self.user_agent,
             redirect: Some(policy::Standard::default()),
             timeout: self.timeout,
@@ -299,7 +318,7 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Set the timeout for requests.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -324,7 +343,7 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP> {
+impl<T, P, RP, S> Builder<T, P, RP, S> {
     /// Set the number of retries for failed requests.
     pub fn with_retries(mut self, retries: usize) -> Self {
         self.retries = Some(retries);
@@ -343,7 +362,25 @@ impl<T, P, RP> Builder<T, P, RP> {
     }
 }
 
-impl<T, P, RP> Builder<T, P, RP>
+impl<T, P, RP, S> Builder<T, P, RP, S> {
+    /// Add a layer to the service under construction
+    pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>> {
+        Builder {
+            transport: self.transport,
+            protocol: self.protocol,
+            builder: self.builder.layer(layer),
+            user_agent: self.user_agent,
+            redirect: self.redirect,
+            timeout: self.timeout,
+            retries: self.retries,
+            #[cfg(feature = "tls")]
+            tls: self.tls,
+            pool: self.pool,
+        }
+    }
+}
+
+impl<T, P, RP, S> Builder<T, P, RP, S>
 where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
@@ -374,15 +411,23 @@ where
         >>::Connection as Connection>::ResBody,
     >,
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
+    S: tower::Layer<
+        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, BoxError>,
+    >,
+    S::Service: tower::Service<
+            http::Request<crate::Body>,
+            Response = http::Response<crate::Body>,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <S::Service as tower::Service<http::Request<crate::Body>>>::Future: Send + 'static,
 {
     /// Build a client service with the configured layers
     pub fn build_service(
         self,
-    ) -> SharedService<
-        http::Request<crate::Body>,
-        http::Response<crate::Body>,
-        Box<dyn std::error::Error + Send + Sync + 'static>,
-    > {
+    ) -> SharedService<http::Request<crate::Body>, http::Response<crate::Body>, ClientError> {
         let user_agent = if let Some(ua) = self.user_agent {
             HeaderValue::from_str(&ua).expect("user-agent should be a valid http header")
         } else {
@@ -401,23 +446,26 @@ where
         #[cfg(not(feature = "tls"))]
         let transport = self.transport.build().without_tls();
 
-        ServiceBuilder::new()
+        let service = self
+            .builder
             .layer(SharedService::layer())
             .option_layer(self.retries.map(|attempts| {
                 tower::retry::RetryLayer::new(crate::service::Attempts::new(attempts))
             }))
             .option_layer(self.timeout.map(tower::timeout::TimeoutLayer::new))
+            .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
             .layer(SetRequestHeaderLayer::if_not_present(
                 http::header::USER_AGENT,
                 user_agent,
             ))
-            .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
             .service(ClientService {
                 transport,
                 protocol: self.protocol.build(),
                 pool: self.pool.map(super::pool::Pool::new),
                 _body: std::marker::PhantomData,
-            })
+            });
+
+        SharedService::new(DowncastError::new(service))
     }
 
     /// Build the client.

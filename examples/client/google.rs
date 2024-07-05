@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let client = Client::build_tcp_http().build();
+    let mut client = Client::build_tcp_http().build();
 
     let uri: Uri = "https://www.google.com".parse()?;
     let res = client.get(uri.clone()).await?;
