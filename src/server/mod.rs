@@ -60,6 +60,7 @@ use self::conn::Acceptor;
 use self::conn::Connection;
 #[cfg(feature = "stream")]
 use crate::bridge::rt::TokioExecutor;
+use crate::info::HasConnectionInfo;
 use crate::service::MakeServiceRef;
 
 mod builder;
@@ -249,6 +250,7 @@ where
         Serving {
             server: self,
             state: State::Preparing,
+            span: tracing::debug_span!("accept"),
         }
     }
 }
@@ -263,6 +265,8 @@ where
     A: Accept,
 {
     server: Server<A, P, S, B>,
+
+    span: tracing::Span,
 
     #[pin]
     state: State<A::Conn, S::Future>,
@@ -285,6 +289,7 @@ where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
+    A::Conn: HasConnectionInfo,
 {
     /// Polls the server to accept a single new connection.
     ///
@@ -295,6 +300,8 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<Instrumented<P::Connection>>, ServerError>> {
         let mut me = self.as_mut().project();
+
+        let _guard = me.span.enter();
 
         match me.state.as_mut().project() {
             StateProj::Preparing => {
@@ -316,7 +323,8 @@ where
                 if let StateProjOwn::Making { stream, .. } =
                     me.state.project_replace(State::Preparing)
                 {
-                    let span = tracing::span!(tracing::Level::TRACE, "connection");
+                    let info = stream.info();
+                    let span = tracing::debug_span!(parent: None, "connection", remote.addr = % info.remote_addr());
                     let conn = me
                         .server
                         .protocol
@@ -346,11 +354,15 @@ where
         loop {
             match self.as_mut().poll_once(cx) {
                 Poll::Ready(Ok(Some(conn))) => {
-                    tokio::spawn(async move {
-                        if let Err(error) = conn.await {
-                            debug!("connection error: {:?}", error.into());
+                    let span = conn.span().clone();
+                    tokio::spawn(
+                        async move {
+                            if let Err(error) = conn.await {
+                                debug!("connection error: {:?}", error.into());
+                            }
                         }
-                    });
+                        .instrument(span),
+                    );
                 }
                 Poll::Ready(Ok(None)) => {}
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -461,6 +473,7 @@ where
     S: MakeServiceRef<A::Conn, Body>,
     P: Protocol<S::Service, A::Conn>,
     A: Accept + Unpin,
+    A::Conn: HasConnectionInfo,
     F: Future<Output = ()>,
 {
     type Output = Result<(), ServerError>;
@@ -468,11 +481,24 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
+        // This loop means that we will greedily accept available connections
+        // from `poll_once` until it returns `Poll::Pending` or Ok(None).
         loop {
+            // Check the shutdown signal before accepting a connection.
             match this.signal.as_mut().poll(cx) {
                 Poll::Ready(()) => {
                     debug!("received shutdown signal");
                     this.shutdown.send();
+                    return Poll::Ready(Ok(()));
+                }
+                Poll::Pending => {}
+            }
+
+            // If all connections have been closed, we definitely don't want to poll
+            // for a new connection, so we check this first.
+            match this.finished.as_mut().poll(cx) {
+                Poll::Ready(()) => {
+                    debug!("all connections closed");
                     return Poll::Ready(Ok(()));
                 }
                 Poll::Pending => {}
@@ -483,42 +509,40 @@ where
                     let shutdown_rx = this.channel.clone();
                     let mut finished_tx = this.connection.clone();
 
-                    tokio::spawn(async move {
-                        let mut shutdown = pin!(shutdown_rx
-                            .into_future()
-                            .fuse()
-                            .instrument(conn.span().clone()));
-                        let mut conn = pin!(conn);
-                        loop {
-                            tokio::select! {
-                                rv = &mut conn.as_mut() => {
-                                    if let Err(error) = rv {
-                                        debug!("connection error: {}", error.into());
-                                    }
-                                    debug!("connection closed");
-                                    break;
-                                },
-                                _ = &mut shutdown => {
-                                    debug!("connection received shutdown signal");
-                                    conn.as_mut().inner_pin_mut().graceful_shutdown();
-                                },
+                    let span = conn.span().clone();
+
+                    tokio::spawn(
+                        async move {
+                            let mut shutdown = pin!(shutdown_rx
+                                .into_future()
+                                .fuse()
+                                .instrument(conn.span().clone()));
+                            let mut conn = pin!(conn);
+                            loop {
+                                tokio::select! {
+                                    rv = &mut conn.as_mut() => {
+                                        if let Err(error) = rv {
+                                            debug!("connection error: {}", error.into());
+                                        } else {
+                                            debug!("connection finished");
+                                        }
+                                        break;
+                                    },
+                                    _ = &mut shutdown => {
+                                        debug!("connection received shutdown signal");
+                                        conn.as_mut().inner_pin_mut().graceful_shutdown();
+                                    },
+                                }
                             }
+                            finished_tx.send();
+                            tracing::trace!("finished serving connection");
                         }
-                        finished_tx.send();
-                        tracing::trace!("finished serving connection");
-                    });
+                        .instrument(span),
+                    );
                 }
                 Poll::Ready(Ok(None)) => {}
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => return Poll::Pending,
-            }
-
-            match this.finished.as_mut().poll(cx) {
-                Poll::Ready(()) => {
-                    debug!("all connections closed");
-                    return Poll::Ready(Ok(()));
-                }
-                Poll::Pending => {}
             }
         }
     }
