@@ -33,6 +33,10 @@ pub enum Error {
     /// Protocol is not supported by this client or transport.
     #[error("unsupported protocol")]
     UnsupportedProtocol,
+
+    /// Request timeout
+    #[error("request timeout")]
+    RequestTimeout,
 }
 
 impl From<pool::Error<ConnectionError>> for Error {
@@ -47,136 +51,12 @@ impl From<pool::Error<ConnectionError>> for Error {
     }
 }
 
-fn try_downcast<T, K>(k: K) -> Result<T, K>
-where
-    T: 'static,
-    K: 'static,
-{
-    let mut k = Some(k);
-    if let Some(k) = <dyn std::any::Any>::downcast_mut::<Option<T>>(&mut k) {
-        Ok(k.take().unwrap())
-    } else {
-        Err(k.unwrap())
-    }
-}
+#[cfg(test)]
+mod tests {
 
-impl Error {
-    pub(crate) fn downcast(error: BoxError) -> Self {
-        let error = match try_downcast::<Self, BoxError>(error) {
-            Ok(error) => return error,
-            Err(error) => error,
-        };
+    use super::*;
 
-        let error = match try_downcast::<ConnectionError, BoxError>(error) {
-            Ok(error) => return Error::Connection(error.into()),
-            Err(error) => error,
-        };
+    use static_assertions::assert_impl_all;
 
-        let error = match try_downcast::<pool::Error<ConnectionError>, BoxError>(error) {
-            Ok(error) => return error.into(),
-            Err(error) => error,
-        };
-
-        let error = match try_downcast::<hyper::Error, BoxError>(error) {
-            Ok(error) => return Error::User(error),
-            Err(error) => error,
-        };
-
-        Error::Service(error)
-    }
-}
-
-/// A middleware that downcasts errors to `Error`.
-#[derive(Debug, Clone)]
-pub struct DowncastError<S> {
-    inner: S,
-}
-
-impl<S> DowncastError<S> {
-    /// Create a new DowncastError service.
-    pub fn new(inner: S) -> Self {
-        Self { inner }
-    }
-}
-
-impl<S, R> tower::Service<R> for DowncastError<S>
-where
-    S: tower::Service<R, Error = BoxError>,
-{
-    type Response = S::Response;
-    type Error = Error;
-    type Future = future::DowncastErrorFuture<S::Future>;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner
-            .poll_ready(cx)
-            .map(|r| r.map_err(Error::downcast))
-    }
-
-    fn call(&mut self, req: R) -> Self::Future {
-        future::DowncastErrorFuture {
-            inner: self.inner.call(req),
-        }
-    }
-}
-
-mod future {
-    use core::fmt;
-    use std::future::Future;
-
-    use super::BoxError;
-
-    /// Future for the DowncastError middleware.
-    #[pin_project::pin_project]
-    pub struct DowncastErrorFuture<F> {
-        #[pin]
-        pub(super) inner: F,
-    }
-
-    impl<F> fmt::Debug for DowncastErrorFuture<F> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("DowncastErrorFuture").finish()
-        }
-    }
-
-    impl<F, T> Future for DowncastErrorFuture<F>
-    where
-        F: Future<Output = Result<T, BoxError>>,
-    {
-        type Output = Result<T, super::Error>;
-
-        fn poll(
-            self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Self::Output> {
-            self.project()
-                .inner
-                .poll(cx)
-                .map(|r| r.map_err(super::Error::downcast))
-        }
-    }
-}
-
-/// A layer that downcasts errors to `Error`.
-#[derive(Debug, Clone, Default)]
-pub struct DowncastErrorLayer {
-    _priv: (),
-}
-
-impl DowncastErrorLayer {
-    /// Create a new DowncastErrorLayer.
-    pub fn new() -> Self {
-        Self { _priv: () }
-    }
-}
-
-impl<S> tower::layer::Layer<S> for DowncastErrorLayer {
-    type Service = DowncastError<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        DowncastError::new(inner)
-    }
+    assert_impl_all!(Error: std::error::Error, Send, Sync, Into<Box<dyn std::error::Error + Send + Sync>>);
 }
