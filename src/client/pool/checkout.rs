@@ -369,7 +369,7 @@ mod test {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(Error<std::io::Error>: std::error::Error, std::fmt::Debug, std::fmt::Display);
+    assert_impl_all!(Error<std::io::Error>: std::error::Error, Send, Sync, Into<Box<dyn std::error::Error + Send + Sync>>);
 
     #[cfg(feature = "mocks")]
     use crate::client::conn::transport::mock::MockTransport;

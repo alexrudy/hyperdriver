@@ -17,17 +17,17 @@ use super::conn::transport::TransportExt;
 use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
-use super::error::DowncastError;
 use super::pool::PoolableConnection;
 
-use super::Error as ClientError;
-use super::{BoxError, ClientService};
+use super::ClientService;
 use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 use crate::client::{conn::protocol::auto::HttpConnectionBuilder, Client};
 use crate::info::HasConnectionInfo;
+use crate::service::OptionLayerExt;
 use crate::service::SharedService;
+use crate::service::TimeoutLayer;
 
 pub trait BuildProtocol<IO>
 where
@@ -412,12 +412,12 @@ where
     >,
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
     S: tower::Layer<
-        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, BoxError>,
+        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, super::Error>,
     >,
     S::Service: tower::Service<
             http::Request<crate::Body>,
             Response = http::Response<crate::Body>,
-            Error = BoxError,
+            Error = super::Error,
         > + Clone
         + Send
         + Sync
@@ -427,7 +427,7 @@ where
     /// Build a client service with the configured layers
     pub fn build_service(
         self,
-    ) -> SharedService<http::Request<crate::Body>, http::Response<crate::Body>, ClientError> {
+    ) -> SharedService<http::Request<crate::Body>, http::Response<crate::Body>, super::Error> {
         let user_agent = if let Some(ua) = self.user_agent {
             HeaderValue::from_str(&ua).expect("user-agent should be a valid http header")
         } else {
@@ -449,11 +449,14 @@ where
         let service = self
             .builder
             .layer(SharedService::layer())
-            .option_layer(self.retries.map(|attempts| {
+            .optional(self.retries.map(|attempts| {
                 tower::retry::RetryLayer::new(crate::service::Attempts::new(attempts))
             }))
-            .option_layer(self.timeout.map(tower::timeout::TimeoutLayer::new))
-            .option_layer(self.redirect.map(FollowRedirectLayer::with_policy))
+            .optional(
+                self.timeout
+                    .map(|d| TimeoutLayer::new(|| super::Error::RequestTimeout, d)),
+            )
+            .optional(self.redirect.map(FollowRedirectLayer::with_policy))
             .layer(SetRequestHeaderLayer::if_not_present(
                 http::header::USER_AGENT,
                 user_agent,
@@ -465,7 +468,7 @@ where
                 _body: std::marker::PhantomData,
             });
 
-        SharedService::new(DowncastError::new(service))
+        SharedService::new(service)
     }
 
     /// Build the client.
