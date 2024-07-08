@@ -47,8 +47,13 @@ impl fmt::Display for CheckoutId {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Error<E> {
+    #[error("creating connection")]
     Connecting(#[source] E),
+
+    #[error("handshaking connection")]
     Handshaking(#[source] E),
+
+    #[error("connection closed")]
     Unavailable,
 }
 
@@ -361,6 +366,10 @@ impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, 
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use static_assertions::assert_impl_all;
+
+    assert_impl_all!(Error<std::io::Error>: std::error::Error, std::fmt::Debug, std::fmt::Display);
 
     #[cfg(feature = "mocks")]
     use crate::client::conn::transport::mock::MockTransport;
