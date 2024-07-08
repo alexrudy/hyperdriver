@@ -250,6 +250,7 @@ where
         Serving {
             server: self,
             state: State::Preparing,
+            span: tracing::debug_span!("accept"),
         }
     }
 }
@@ -264,6 +265,8 @@ where
     A: Accept,
 {
     server: Server<A, P, S, B>,
+
+    span: tracing::Span,
 
     #[pin]
     state: State<A::Conn, S::Future>,
@@ -298,6 +301,8 @@ where
     ) -> Poll<Result<Option<Instrumented<P::Connection>>, ServerError>> {
         let mut me = self.as_mut().project();
 
+        let _guard = me.span.enter();
+
         match me.state.as_mut().project() {
             StateProj::Preparing => {
                 ready!(me.server.make_service.poll_ready_ref(cx)).map_err(ServerError::ready)?;
@@ -319,8 +324,7 @@ where
                     me.state.project_replace(State::Preparing)
                 {
                     let info = stream.info();
-                    let span =
-                        tracing::debug_span!("connection", remote.addr = % info.remote_addr());
+                    let span = tracing::debug_span!(parent: None, "connection", remote.addr = % info.remote_addr());
                     let conn = me
                         .server
                         .protocol
@@ -475,15 +479,26 @@ where
     type Output = Result<(), ServerError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let _guard = tracing::info_span!("server").entered();
-
         let mut this = self.project();
 
+        // This loop means that we will greedily accept available connections
+        // from `poll_once` until it returns `Poll::Pending` or Ok(None).
         loop {
+            // Check the shutdown signal before accepting a connection.
             match this.signal.as_mut().poll(cx) {
                 Poll::Ready(()) => {
                     debug!("received shutdown signal");
                     this.shutdown.send();
+                    return Poll::Ready(Ok(()));
+                }
+                Poll::Pending => {}
+            }
+
+            // If all connections have been closed, we definitely don't want to poll
+            // for a new connection, so we check this first.
+            match this.finished.as_mut().poll(cx) {
+                Poll::Ready(()) => {
+                    debug!("all connections closed");
                     return Poll::Ready(Ok(()));
                 }
                 Poll::Pending => {}
@@ -528,14 +543,6 @@ where
                 Poll::Ready(Ok(None)) => {}
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending => return Poll::Pending,
-            }
-
-            match this.finished.as_mut().poll(cx) {
-                Poll::Ready(()) => {
-                    debug!("all connections closed");
-                    return Poll::Ready(Ok(()));
-                }
-                Poll::Pending => {}
             }
         }
     }
