@@ -9,12 +9,12 @@ use std::{future::Future, pin::Pin};
 
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::{TcpStream, ToSocketAddrs};
+use tokio::net::ToSocketAddrs;
 
 use crate::info::tls::HasTlsConnectionInfo;
-use crate::info::{ConnectionInfo, HasConnectionInfo};
-
 use crate::info::TlsConnectionInfo;
+use crate::info::{ConnectionInfo, HasConnectionInfo};
+use crate::stream::tcp::TcpStream;
 use crate::stream::tls::TlsHandshakeStream;
 
 // NOTE: Individual fields are Box'd to reduce the resulting stack size

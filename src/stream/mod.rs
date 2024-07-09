@@ -5,12 +5,12 @@
 #[cfg(feature = "stream")]
 mod core;
 pub mod duplex;
-
+pub mod tcp;
 #[cfg(feature = "tls")]
 pub mod tls;
+pub mod unix;
 
 #[cfg(feature = "stream")]
 pub use core::Braid;
-
 #[cfg(feature = "tls")]
 pub use tls::TlsBraid;

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use http_body_util::BodyExt as _;
 use hyperdriver::client::{conn::transport::tcp::TcpTransportConfig, Client};
 
@@ -15,6 +17,7 @@ async fn httpbin_request(
         .with_tcp(config)
         .with_auto_http()
         .with_default_tls()
+        .with_timeout(Duration::from_secs(5))
         .build();
 
     let res = client.request(req).await?;

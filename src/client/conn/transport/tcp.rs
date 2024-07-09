@@ -22,7 +22,7 @@ use std::time::Duration;
 use http::Uri;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::net::TcpSocket;
 use tokio::task::JoinError;
 use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
@@ -31,8 +31,8 @@ use super::TransportStream;
 use crate::client::builder::BuildTransport;
 use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
-
 use crate::info::HasConnectionInfo;
+use crate::stream::tcp::TcpStream;
 
 /// A TCP connector for client connections.
 ///
@@ -58,7 +58,7 @@ use crate::info::HasConnectionInfo;
 /// ```no_run
 /// # use hyperdriver::client::conn::transport::tcp::TcpTransport;
 /// # use hyperdriver::client::conn::dns::GaiResolver;
-/// # use tokio::net::TcpStream;
+/// # use hyperdriver::stream::tcp::TcpStream;
 /// # use tower::ServiceExt as _;
 ///
 /// # async fn run() {
@@ -565,14 +565,14 @@ fn connect(
     Ok(async move {
         match connect_timeout {
             Some(dur) => match tokio::time::timeout(dur, connect).await {
-                Ok(Ok(s)) => Ok(s),
+                Ok(Ok(s)) => Ok(TcpStream::client(s)),
                 Ok(Err(e)) => Err(e),
                 Err(e) => {
                     tracing::trace!(timeout=?dur, "connection timed out");
                     Err(io::Error::new(io::ErrorKind::TimedOut, e))
                 }
             },
-            None => connect.await,
+            None => connect.await.map(TcpStream::client),
         }
         .map_err(TcpConnectionError::msg("tcp connect error"))
     })
@@ -687,7 +687,8 @@ mod test {
         <T as Service<Uri>>::Error: std::fmt::Debug,
     {
         tokio::join!(async { transport.oneshot(uri).await.unwrap() }, async {
-            listener.accept().await.unwrap().0
+            let (stream, addr) = listener.accept().await.unwrap();
+            TcpStream::server(stream, addr)
         })
     }
 

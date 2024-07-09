@@ -4,12 +4,12 @@ use std::pin::pin;
 
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{TcpStream, UnixStream};
-
-use crate::info::{ConnectionInfo, HasConnectionInfo};
-use crate::stream::duplex::DuplexStream;
 
 use crate::info::BraidAddr;
+use crate::info::{ConnectionInfo, HasConnectionInfo};
+use crate::stream::duplex::DuplexStream;
+use crate::stream::tcp::TcpStream;
+use crate::stream::unix::UnixStream;
 
 /// Dispatching wrapper for potential stream connection types
 ///
