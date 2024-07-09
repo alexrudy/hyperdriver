@@ -15,15 +15,87 @@ use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(all(feature = "server", feature = "stream"))]
 use tokio::net::UnixListener;
 
 use crate::info::HasConnectionInfo;
-use crate::info::UnixAddr;
 #[cfg(all(feature = "server", feature = "stream"))]
 use crate::server::Accept;
+
+/// Connection address for a unix domain socket.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct UnixAddr {
+    path: Option<Utf8PathBuf>,
+}
+
+impl UnixAddr {
+    /// Does this socket have a name
+    pub fn is_named(&self) -> bool {
+        self.path.is_some()
+    }
+
+    /// Get the path of this socket.
+    pub fn path(&self) -> Option<&Utf8Path> {
+        self.path.as_deref()
+    }
+
+    /// Create a new address from a path.
+    pub fn from_pathbuf(path: Utf8PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    /// Create a new address without a path.
+    pub fn unnamed() -> Self {
+        Self { path: None }
+    }
+}
+
+impl fmt::Display for UnixAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(path) = self.path() {
+            write!(f, "unix://{}", path)
+        } else {
+            write!(f, "unix://")
+        }
+    }
+}
+
+impl TryFrom<std::os::unix::net::SocketAddr> for UnixAddr {
+    type Error = io::Error;
+    fn try_from(addr: std::os::unix::net::SocketAddr) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: addr
+                .as_pathname()
+                .map(|p| {
+                    Utf8Path::from_path(p).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "not a utf-8 path")
+                    })
+                })
+                .transpose()?
+                .map(|path| path.to_owned()),
+        })
+    }
+}
+
+impl TryFrom<tokio::net::unix::SocketAddr> for UnixAddr {
+    type Error = io::Error;
+    fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: addr
+                .as_pathname()
+                .map(|p| {
+                    Utf8Path::from_path(p).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "not a utf-8 path")
+                    })
+                })
+                .transpose()?
+                .map(|path| path.to_owned()),
+        })
+    }
+}
 
 /// A Unix Stream, wrapping `tokio::net::UnixStream` with better
 /// address semantics for servers.

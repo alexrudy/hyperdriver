@@ -24,6 +24,21 @@ use crate::info::HasConnectionInfo;
 #[cfg(all(feature = "server", feature = "stream"))]
 use crate::server::Accept;
 
+/// Canonicalize a socket address, converting IPv4 addresses which are
+/// mapped into IPv6 addresses into standard IPv4 addresses.
+pub(crate) fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
+    match addr.ip() {
+        std::net::IpAddr::V4(_) => addr,
+        std::net::IpAddr::V6(ip) => {
+            if let Some(ip) = ip.to_ipv4_mapped() {
+                std::net::SocketAddr::new(std::net::IpAddr::V4(ip), addr.port())
+            } else {
+                addr
+            }
+        }
+    }
+}
+
 /// A TCP Stream, wrapping `tokio::net::TcpStream` with better
 /// address semantics for servers.
 #[pin_project::pin_project]
@@ -61,7 +76,7 @@ impl TcpStream {
     pub fn server(inner: tokio::net::TcpStream, remote: SocketAddr) -> Self {
         Self {
             stream: inner,
-            remote: Some(remote),
+            remote: Some(make_canonical(remote)),
         }
     }
 
@@ -72,8 +87,13 @@ impl TcpStream {
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         match self.remote {
             Some(addr) => Ok(addr),
-            None => self.stream.peer_addr(),
+            None => self.stream.peer_addr().map(make_canonical),
         }
+    }
+
+    /// Local address of the connection. See `tokio::net::TcpStream::local_addr`.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.local_addr().map(make_canonical)
     }
 
     /// Unwraps the `TcpStream`, returning the inner `tokio::net::TcpStream`.
