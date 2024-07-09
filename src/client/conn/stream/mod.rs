@@ -10,13 +10,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use pin_project::pin_project;
-use tokio::io::{AsyncRead, AsyncWrite};
-#[cfg(feature = "stream")]
-use tokio::net::{TcpStream, UnixStream};
-
 #[cfg(feature = "tls")]
 pub use self::tls::TlsStream;
+#[cfg(feature = "stream")]
+use crate::stream::{TcpStream, UnixStream};
+use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
@@ -199,8 +198,6 @@ where
 #[cfg(feature = "stream")]
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
-        let stream = crate::stream::tcp::TcpStream::client(stream);
-
         Stream {
             inner: Braid::from(stream).into(),
         }
@@ -220,7 +217,7 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            inner: Braid::from(crate::stream::unix::UnixStream::client(stream)).into(),
+            inner: Braid::from(stream).into(),
         }
     }
 }

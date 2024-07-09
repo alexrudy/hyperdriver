@@ -12,8 +12,16 @@ all: fmt check-all deny clippy examples docs test machete udeps msrv
 # Check for unused dependencies
 udeps:
     #!/usr/bin/env sh
+    set -euo pipefail
+
+    bold() {
+        echo "\033[1m$1\033[0m"
+    }
+
     export CARGO_TARGET_DIR="target/hack/"
+    bold "cargo +{{nightly}} udeps"
     cargo +{{nightly}} udeps  --all-features
+    bold "cargo +{{nightly}} hack udeps"
     cargo +{{nightly}} hack udeps --each-feature
 
 # Use machete to check for unused dependencies
