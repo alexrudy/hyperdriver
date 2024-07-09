@@ -21,8 +21,6 @@ use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
 use crate::server::conn::tls::TlsAcceptor as RawTlsAcceptor;
 #[cfg(feature = "stream")]
-use crate::stream::tcp::TcpStream;
-#[cfg(feature = "stream")]
 use crate::stream::{duplex::DuplexIncoming, Braid};
 
 /// Accept incoming connections for streams which might
@@ -159,15 +157,15 @@ impl Accept for AcceptorCore {
         cx: &mut Context,
     ) -> Poll<Result<Self::Conn, Self::Error>> {
         match self.project() {
-            AcceptorProj::Tcp(acceptor) => acceptor.poll_accept(cx).map(|stream| {
-                stream.map(|(stream, addr)| Braid::Tcp(TcpStream::server(stream, addr)))
-            }),
+            AcceptorProj::Tcp(acceptor) => acceptor
+                .poll_accept(cx)
+                .map(|stream| stream.map(Braid::Tcp)),
             AcceptorProj::Duplex(acceptor) => {
                 acceptor.poll_accept(cx).map_ok(|stream| stream.into())
             }
             AcceptorProj::Unix(acceptor) => acceptor
                 .poll_accept(cx)
-                .map(|stream| stream.map(|(stream, _address)| stream.into())),
+                .map(|stream| stream.map(Braid::Unix)),
         }
     }
 }

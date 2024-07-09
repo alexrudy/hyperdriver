@@ -7,7 +7,6 @@ use std::str::FromStr;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use tokio::net::UnixStream;
 
 #[cfg(feature = "tls")]
 pub mod tls;
@@ -382,33 +381,6 @@ impl<Addr> ConnectionInfo<Addr> {
     }
 }
 
-impl<Addr> TryFrom<&UnixStream> for ConnectionInfo<Addr>
-where
-    Addr: From<UnixAddr>,
-{
-    type Error = io::Error;
-
-    fn try_from(stream: &UnixStream) -> Result<Self, Self::Error> {
-        let local_addr = match stream.local_addr() {
-            Ok(addr) => addr.try_into().expect("unix socket address"),
-            Err(e) if matches!(e.kind(), io::ErrorKind::InvalidInput) => UnixAddr::unnamed(),
-            Err(e) => return Err(e),
-        };
-
-        let remote_addr = match stream.peer_addr() {
-            Ok(addr) => addr.try_into().expect("unix socket address"),
-            Err(e) if matches!(e.kind(), io::ErrorKind::InvalidInput) => UnixAddr::unnamed(),
-            Err(e) => return Err(e),
-        };
-
-        Ok(Self {
-            local_addr: local_addr.into(),
-            remote_addr: remote_addr.into(),
-            buffer_size: None,
-        })
-    }
-}
-
 /// Trait for types which can provide connection information.
 pub trait HasConnectionInfo {
     /// The address type for this connection.
@@ -418,26 +390,6 @@ pub trait HasConnectionInfo {
     fn info(&self) -> ConnectionInfo<Self::Addr>;
 }
 
-impl HasConnectionInfo for UnixStream {
-    type Addr = UnixAddr;
-
-    fn info(&self) -> ConnectionInfo<Self::Addr> {
-        ConnectionInfo {
-            local_addr: self
-                .local_addr()
-                .expect("unable to get local address")
-                .try_into()
-                .expect("utf-8 unix socket address"),
-            remote_addr: self
-                .peer_addr()
-                .expect("unable to get peer address")
-                .try_into()
-                .expect("utf-8 unix socket address"),
-            ..Default::default()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -445,7 +397,7 @@ mod tests {
     use http::Version;
     use tokio::net::{TcpListener, UnixListener};
 
-    use crate::stream::tcp::TcpStream;
+    use crate::stream::{tcp::TcpStream, unix::UnixStream};
 
     use super::*;
 
@@ -535,7 +487,7 @@ mod tests {
     async fn unix_connection_info_unnamed() {
         let (a, _) = UnixStream::pair().expect("pair");
 
-        let info: ConnectionInfo<UnixAddr> = ConnectionInfo::try_from(&a).unwrap();
+        let info: ConnectionInfo<UnixAddr> = a.info();
         assert_eq!(info.local_addr(), &UnixAddr::unnamed());
     }
 
@@ -549,7 +501,7 @@ mod tests {
 
         let conn = UnixStream::connect(&path).await.unwrap();
 
-        let info: ConnectionInfo<UnixAddr> = ConnectionInfo::try_from(&conn).unwrap();
+        let info: ConnectionInfo<UnixAddr> = conn.info();
 
         assert_eq!(
             info.remote_addr(),

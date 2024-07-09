@@ -8,16 +8,14 @@ use std::io;
 use std::task::{Context, Poll};
 use std::{future::Future, pin::Pin};
 
-use pin_project::pin_project;
-use tokio::io::{AsyncRead, AsyncWrite};
-#[cfg(feature = "stream")]
-use tokio::net::UnixStream;
-
-use crate::info::{ConnectionInfo, HasConnectionInfo};
+use crate::info::ConnectionInfo;
+use crate::info::HasConnectionInfo;
 #[cfg(feature = "stream")]
 use crate::stream::duplex::DuplexStream;
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
+use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "tls")]
 use crate::info::tls::TlsConnectionInfoReciever;
@@ -216,18 +214,6 @@ where
 #[cfg(feature = "stream")]
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
-        Stream {
-            info: stream.info().map(Into::into),
-            #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReciever::empty(),
-            inner: Braid::from(stream).into(),
-        }
-    }
-}
-
-#[cfg(feature = "stream")]
-impl From<UnixStream> for Stream {
-    fn from(stream: UnixStream) -> Self {
         Stream {
             info: stream.info().map(Into::into),
             #[cfg(feature = "tls")]

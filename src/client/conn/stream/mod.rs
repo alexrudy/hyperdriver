@@ -220,7 +220,7 @@ impl From<DuplexStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {
-            inner: Braid::from(stream).into(),
+            inner: Braid::from(crate::stream::unix::UnixStream::client(stream)).into(),
         }
     }
 }

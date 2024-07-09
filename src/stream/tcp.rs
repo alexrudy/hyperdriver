@@ -16,9 +16,13 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
+#[cfg(all(feature = "server", feature = "stream"))]
+use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 
 use crate::info::HasConnectionInfo;
+#[cfg(all(feature = "server", feature = "stream"))]
+use crate::server::Accept;
 
 /// A TCP Stream, wrapping `tokio::net::TcpStream` with better
 /// address semantics for servers.
@@ -150,6 +154,17 @@ impl AsyncWrite for TcpStream {
 
     fn is_write_vectored(&self) -> bool {
         self.stream.is_write_vectored()
+    }
+}
+
+#[cfg(all(feature = "server", feature = "stream"))]
+impl Accept for TcpListener {
+    type Conn = TcpStream;
+    type Error = io::Error;
+
+    fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Self::Conn>> {
+        TcpListener::poll_accept(self.get_mut(), cx)
+            .map(|res| res.map(|(stream, remote)| TcpStream::server(stream, remote)))
     }
 }
 
