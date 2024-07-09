@@ -5,28 +5,25 @@ use std::io;
 #[cfg(feature = "stream")]
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::task::{Context, Poll};
-
 #[cfg(feature = "tls")]
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use pin_project::pin_project;
-
 #[cfg(feature = "tls")]
 use rustls::ServerConfig;
-
 #[cfg(feature = "stream")]
 use tokio::net::{TcpListener, UnixListener};
 
 use super::Accept;
 use super::Stream;
 use crate::info::HasConnectionInfo;
-
-#[cfg(feature = "stream")]
-use crate::stream::{duplex::DuplexIncoming, Braid};
-
 #[cfg(feature = "tls")]
 use crate::server::conn::tls::TlsAcceptor as RawTlsAcceptor;
+#[cfg(feature = "stream")]
+use crate::stream::tcp::TcpStream;
+#[cfg(feature = "stream")]
+use crate::stream::{duplex::DuplexIncoming, Braid};
 
 /// Accept incoming connections for streams which might
 /// be wrapped in TLS. Use [`Acceptor::with_tls`] to enable TLS.
@@ -162,9 +159,9 @@ impl Accept for AcceptorCore {
         cx: &mut Context,
     ) -> Poll<Result<Self::Conn, Self::Error>> {
         match self.project() {
-            AcceptorProj::Tcp(acceptor) => acceptor
-                .poll_accept(cx)
-                .map(|stream| stream.map(|(stream, _)| stream.into())),
+            AcceptorProj::Tcp(acceptor) => acceptor.poll_accept(cx).map(|stream| {
+                stream.map(|(stream, addr)| Braid::Tcp(TcpStream::server(stream, addr)))
+            }),
             AcceptorProj::Duplex(acceptor) => {
                 acceptor.poll_accept(cx).map_ok(|stream| stream.into())
             }

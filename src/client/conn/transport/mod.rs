@@ -646,8 +646,8 @@ mod future {
 mod tests {
     use super::*;
 
+    use crate::stream::tcp::TcpStream;
     use static_assertions::assert_impl_all;
-    use tokio::net::TcpStream;
 
     assert_impl_all!(TransportStream<Stream>: HasTlsConnectionInfo, HasConnectionInfo);
     assert_impl_all!(TransportStream<Stream>: Send, Sync, Unpin);

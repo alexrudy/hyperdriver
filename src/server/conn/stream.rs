@@ -11,7 +11,7 @@ use std::{future::Future, pin::Pin};
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "stream")]
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::UnixStream;
 
 use crate::info::{ConnectionInfo, HasConnectionInfo};
 #[cfg(feature = "stream")]
@@ -209,18 +209,6 @@ where
             info: stream.info(),
             tls: stream.rx.clone(),
             inner: TlsBraid::Tls(stream),
-        }
-    }
-}
-
-#[cfg(feature = "stream")]
-impl From<TcpStream> for Stream {
-    fn from(stream: TcpStream) -> Self {
-        Stream {
-            info: stream.info().map(Into::into),
-            #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReciever::empty(),
-            inner: Braid::from(stream).into(),
         }
     }
 }

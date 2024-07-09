@@ -199,6 +199,8 @@ where
 #[cfg(feature = "stream")]
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
+        let stream = crate::stream::tcp::TcpStream::client(stream);
+
         Stream {
             inner: Braid::from(stream).into(),
         }

@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::UnixStream;
 
 #[cfg(feature = "tls")]
 pub mod tls;
@@ -382,24 +382,6 @@ impl<Addr> ConnectionInfo<Addr> {
     }
 }
 
-impl<Addr> TryFrom<&TcpStream> for ConnectionInfo<Addr>
-where
-    Addr: From<std::net::SocketAddr>,
-{
-    type Error = io::Error;
-
-    fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
-        let local_addr = stream.local_addr()?;
-        let remote_addr = stream.peer_addr()?;
-
-        Ok(Self {
-            local_addr: local_addr.into(),
-            remote_addr: remote_addr.into(),
-            buffer_size: None,
-        })
-    }
-}
-
 impl<Addr> TryFrom<&UnixStream> for ConnectionInfo<Addr>
 where
     Addr: From<UnixAddr>,
@@ -436,15 +418,6 @@ pub trait HasConnectionInfo {
     fn info(&self) -> ConnectionInfo<Self::Addr>;
 }
 
-impl HasConnectionInfo for TcpStream {
-    type Addr = std::net::SocketAddr;
-
-    fn info(&self) -> ConnectionInfo<Self::Addr> {
-        self.try_into()
-            .expect("connection info should be available")
-    }
-}
-
 impl HasConnectionInfo for UnixStream {
     type Addr = UnixAddr;
 
@@ -471,6 +444,8 @@ mod tests {
 
     use http::Version;
     use tokio::net::{TcpListener, UnixListener};
+
+    use crate::stream::tcp::TcpStream;
 
     use super::*;
 
@@ -593,7 +568,7 @@ mod tests {
 
         let conn = TcpStream::connect(addr).await.unwrap();
 
-        let info: ConnectionInfo<std::net::SocketAddr> = ConnectionInfo::try_from(&conn).unwrap();
+        let info: ConnectionInfo<std::net::SocketAddr> = conn.info();
         assert_eq!(info.remote_addr().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(info.remote_addr().port(), addr.port());
     }
