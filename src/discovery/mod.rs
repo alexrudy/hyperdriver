@@ -16,6 +16,7 @@ use crate::client::conn::protocol::auto;
 
 #[cfg(feature = "client")]
 use crate::client::conn::Stream as ClientStream;
+use crate::info::UnixAddr;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
 use crate::stream::UnixStream;
@@ -490,7 +491,9 @@ impl ServiceHandle {
                 }))?,
             ServiceHandle::Unix { path, .. } => tokio::net::UnixStream::connect(path)
                 .await
-                .map(|stream| UnixStream::client(stream).into())
+                .map(|stream| {
+                    UnixStream::new(stream, Some(UnixAddr::from_pathbuf(path.clone()))).into()
+                })
                 .map_err(|error| ConnectionError::Unix {
                     error,
                     path: path.into(),
@@ -601,6 +604,8 @@ async fn connect_to_handle(
 
 #[cfg(test)]
 mod tests {
+    use crate::info::{BraidAddr, HasConnectionInfo as _};
+
     use super::*;
 
     #[test]
@@ -626,13 +631,40 @@ mod tests {
     async fn connect_to_handle_unix() {
         let tmp = tempfile::tempdir().unwrap();
         let name = "service.with.dots";
+        let mut handle = ServiceHandle::unix(tmp.path().try_into().unwrap(), name);
+
+        let _accept = handle.acceptor().unwrap();
+
+        let config = RegistryConfig::default();
+        let name = Cow::Borrowed(name);
+
+        let stream = connect_to_handle(&config, &handle, name.clone())
+            .await
+            .unwrap();
+
+        let info = stream.info();
+        let remote = info.remote_addr();
+        match remote {
+            BraidAddr::Unix(addr) => {
+                assert_eq!(
+                    addr.path().unwrap(),
+                    tmp.path().join(format!("{}.svc", name))
+                );
+            }
+            _ => panic!("expected Unix address"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_to_handle_unix_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let name = "service.with.dots";
         let handle = ServiceHandle::unix(tmp.path().try_into().unwrap(), name);
 
         let config = RegistryConfig::default();
         let name = Cow::Borrowed(name);
 
         let result = connect_to_handle(&config, &handle, name).await;
-        assert!(result.is_err());
 
         match result.unwrap_err() {
             ConnectionError::Unix { error, path, name } => {

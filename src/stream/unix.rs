@@ -15,6 +15,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use camino::Utf8PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(all(feature = "server", feature = "stream"))]
 use tokio::net::UnixListener;
@@ -42,35 +43,38 @@ impl fmt::Debug for UnixStream {
 impl UnixStream {
     /// Connect to a remote address. See `tokio::net::UnixStream::connect`.
     pub async fn connect<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let path = path.as_ref();
         let stream = tokio::net::UnixStream::connect(path).await?;
-        Ok(Self::client(stream))
+        Ok(Self::new(
+            stream,
+            Some(UnixAddr::from_pathbuf(
+                Utf8PathBuf::from_path_buf(path.to_path_buf()).map_err(|path| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("unix path is not utf-8: {}", path.display()),
+                    )
+                })?,
+            )),
+        ))
     }
 
     /// Create a pair of connected `UnixStream`s. See `tokio::net::UnixStream::pair`.
     pub fn pair() -> io::Result<(Self, Self)> {
         let (a, b) = tokio::net::UnixStream::pair()?;
         Ok((
-            Self::server(a, UnixAddr::unnamed()),
-            Self::server(b, UnixAddr::unnamed()),
+            Self::new(a, Some(UnixAddr::unnamed())),
+            Self::new(b, Some(UnixAddr::unnamed())),
         ))
     }
 
-    /// Create a new `UnixStream` from an existing `tokio::net::UnixStream` for a client
-    /// connection. Client connections should have valid `peer_addr` and `local_addr`.
-    pub fn client(inner: tokio::net::UnixStream) -> Self {
+    /// Create a new `UnixStream` from an existing `tokio::net::UnixStream` for a
+    /// connection. Most of the time, the remote addr should also be passed here,
+    /// but there may be cases when you are handed the stream without the remote
+    /// addr.
+    pub fn new(inner: tokio::net::UnixStream, remote: Option<UnixAddr>) -> Self {
         Self {
             stream: inner,
-            remote: None,
-        }
-    }
-
-    /// Create a new `UnixStream` from an existing `tokio::net::UnixStream` for a server
-    /// connection. Server connections should have a valid `local_addr` but may not have a
-    /// `peer_addr`, hence the remote address must be provided.
-    pub fn server(inner: tokio::net::UnixStream, remote: UnixAddr) -> Self {
-        Self {
-            stream: inner,
-            remote: Some(remote),
+            remote,
         }
     }
 
@@ -174,7 +178,7 @@ impl Accept for UnixListener {
 
     fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<Self::Conn>> {
         UnixListener::poll_accept(self.get_mut(), cx).map(|res| {
-            res.and_then(|(stream, remote)| Ok(UnixStream::server(stream, remote.try_into()?)))
+            res.and_then(|(stream, remote)| Ok(UnixStream::new(stream, Some(remote.try_into()?))))
         })
     }
 }
