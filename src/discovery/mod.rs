@@ -18,6 +18,7 @@ use crate::client::conn::protocol::auto;
 use crate::client::conn::Stream as ClientStream;
 use crate::pidfile::PidFile;
 use crate::server::AutoBuilder;
+use crate::stream::UnixStream;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::mapref::one::{Ref, RefMut};
@@ -489,7 +490,7 @@ impl ServiceHandle {
                 }))?,
             ServiceHandle::Unix { path, .. } => tokio::net::UnixStream::connect(path)
                 .await
-                .map(|stream| stream.into())
+                .map(|stream| UnixStream::client(stream).into())
                 .map_err(|error| ConnectionError::Unix {
                     error,
                     path: path.into(),

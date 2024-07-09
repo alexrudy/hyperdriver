@@ -12,5 +12,7 @@ pub mod unix;
 
 #[cfg(feature = "stream")]
 pub use core::Braid;
+pub use tcp::TcpStream;
 #[cfg(feature = "tls")]
 pub use tls::TlsBraid;
+pub use unix::UnixStream;
