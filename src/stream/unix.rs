@@ -198,7 +198,6 @@ impl HasConnectionInfo for UnixStream {
         crate::info::ConnectionInfo {
             local_addr,
             remote_addr,
-            buffer_size: None,
         }
     }
 }

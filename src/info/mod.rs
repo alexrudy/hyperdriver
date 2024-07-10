@@ -212,30 +212,24 @@ impl From<DuplexAddr> for BraidAddr {
 
 /// Information about a connection to a stream.
 #[cfg(feature = "stream")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionInfo<Addr = BraidAddr> {
     /// The local address for this connection.
     pub local_addr: Addr,
 
     /// The remote address for this connection.
     pub remote_addr: Addr,
-
-    /// Buffer size
-    pub buffer_size: Option<usize>,
 }
 
 /// Information about a connection to a stream.
 #[cfg(not(feature = "stream"))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionInfo<Addr> {
     /// The local address for this connection.
     pub local_addr: Addr,
 
     /// The remote address for this connection.
     pub remote_addr: Addr,
-
-    /// Buffer size
-    pub buffer_size: Option<usize>,
 }
 
 impl<Addr> Default for ConnectionInfo<Addr>
@@ -246,29 +240,26 @@ where
         Self {
             local_addr: Addr::default(),
             remote_addr: Addr::default(),
-            buffer_size: None,
         }
     }
 }
 
 #[cfg(feature = "stream")]
 impl ConnectionInfo<BraidAddr> {
-    pub(crate) fn duplex(buffer_size: usize) -> Self {
+    pub(crate) fn duplex() -> Self {
         ConnectionInfo {
             local_addr: BraidAddr::Duplex,
             remote_addr: BraidAddr::Duplex,
-            buffer_size: Some(buffer_size),
         }
     }
 }
 
 #[cfg(not(feature = "stream"))]
 impl ConnectionInfo<DuplexAddr> {
-    pub(crate) fn duplex(buffer_size: usize) -> Self {
+    pub(crate) fn duplex() -> Self {
         ConnectionInfo {
             local_addr: DuplexAddr::new(),
             remote_addr: DuplexAddr::new(),
-            buffer_size: Some(buffer_size),
         }
     }
 }
@@ -292,7 +283,6 @@ impl<Addr> ConnectionInfo<Addr> {
         ConnectionInfo {
             local_addr: f(self.local_addr),
             remote_addr: f(self.remote_addr),
-            buffer_size: self.buffer_size,
         }
     }
 }
@@ -374,7 +364,6 @@ mod tests {
 
         assert_eq!(info.local_addr, DuplexAddr::new());
         assert_eq!(info.remote_addr, DuplexAddr::new());
-        assert_eq!(info.buffer_size, None);
     }
 
     #[test]
@@ -391,7 +380,6 @@ mod tests {
         let info = ConnectionInfo {
             local_addr: "local",
             remote_addr: "remote",
-            buffer_size: Some(1024),
         };
 
         let mapped = info.map(|addr| addr.to_string());

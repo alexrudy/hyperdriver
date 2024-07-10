@@ -91,7 +91,7 @@ impl DuplexStream {
     /// using [`DuplexClient`] and [`DuplexIncoming`] together to create a client/server pair of duplex streams.
     pub fn new(max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info = info::ConnectionInfo::duplex(max_buf_size).map(|_| DuplexAddr::new());
+        let info = info::ConnectionInfo::duplex().map(|_| DuplexAddr::new());
         (
             DuplexStream {
                 inner: a,
