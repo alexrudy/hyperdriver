@@ -132,7 +132,6 @@ impl HasConnectionInfo for TcpStream {
                 .local_addr()
                 .expect("local_addr is available for stream"),
             remote_addr,
-            buffer_size: None,
         }
     }
 }
