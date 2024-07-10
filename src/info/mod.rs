@@ -14,7 +14,11 @@ pub mod tls;
 pub use self::tls::HasTlsConnectionInfo;
 #[cfg(feature = "tls")]
 pub use self::tls::TlsConnectionInfo;
+#[doc(hidden)]
 pub use crate::stream::duplex::DuplexAddr;
+use crate::stream::tcp::make_canonical;
+#[doc(hidden)]
+pub use crate::stream::unix::UnixAddr;
 
 /// The transport protocol used for a connection.
 ///
@@ -85,94 +89,6 @@ impl FromStr for Protocol {
             "WebSocket" => Ok(Self::WebSocket),
             _ => Ok(Self::Other(s.to_string())),
         }
-    }
-}
-
-/// Canonicalize a socket address, converting IPv4 addresses which are
-/// mapped into IPv6 addresses into standard IPv4 addresses.
-#[cfg(feature = "stream")]
-fn make_canonical(addr: std::net::SocketAddr) -> std::net::SocketAddr {
-    match addr.ip() {
-        std::net::IpAddr::V4(_) => addr,
-        std::net::IpAddr::V6(ip) => {
-            if let Some(ip) = ip.to_ipv4_mapped() {
-                std::net::SocketAddr::new(std::net::IpAddr::V4(ip), addr.port())
-            } else {
-                addr
-            }
-        }
-    }
-}
-
-/// Connection address for a unix domain socket.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct UnixAddr {
-    path: Option<Utf8PathBuf>,
-}
-
-impl UnixAddr {
-    /// Does this socket have a name
-    pub fn is_named(&self) -> bool {
-        self.path.is_some()
-    }
-
-    /// Get the path of this socket.
-    pub fn path(&self) -> Option<&Utf8Path> {
-        self.path.as_deref()
-    }
-
-    /// Create a new address from a path.
-    pub fn from_pathbuf(path: Utf8PathBuf) -> Self {
-        Self { path: Some(path) }
-    }
-
-    /// Create a new address without a path.
-    pub fn unnamed() -> Self {
-        Self { path: None }
-    }
-}
-
-impl fmt::Display for UnixAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(path) = self.path() {
-            write!(f, "unix://{}", path)
-        } else {
-            write!(f, "unix://")
-        }
-    }
-}
-
-impl TryFrom<std::os::unix::net::SocketAddr> for UnixAddr {
-    type Error = io::Error;
-    fn try_from(addr: std::os::unix::net::SocketAddr) -> Result<Self, Self::Error> {
-        Ok(Self {
-            path: addr
-                .as_pathname()
-                .map(|p| {
-                    Utf8Path::from_path(p).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidData, "not a utf-8 path")
-                    })
-                })
-                .transpose()?
-                .map(|path| path.to_owned()),
-        })
-    }
-}
-
-impl TryFrom<tokio::net::unix::SocketAddr> for UnixAddr {
-    type Error = io::Error;
-    fn try_from(addr: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
-        Ok(Self {
-            path: addr
-                .as_pathname()
-                .map(|p| {
-                    Utf8Path::from_path(p).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidData, "not a utf-8 path")
-                    })
-                })
-                .transpose()?
-                .map(|path| path.to_owned()),
-        })
     }
 }
 
