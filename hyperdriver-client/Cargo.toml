@@ -1,0 +1,50 @@
+[package]
+name = "hyperdriver-client"
+version.workspace = true
+edition.workspace = true
+description = "Client facilities for higher-level hyper users"
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+futures-core.workspace = true
+futures-util.workspace = true
+http.workspace = true
+http-body.workspace = true
+hyper.workspace = true
+hyperdriver-body = { path = "../hyperdriver-body", features = ["incoming"] }
+hyperdriver-core = { path = "../hyperdriver-core", features = ["client"] }
+pin-project.workspace = true
+rustls = { workspace = true, optional = true }
+rustls-native-certs = { workspace = true, optional = true }
+socket2.workspace = true
+thiserror.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+tokio-rustls = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros"] }
+static-assertions.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+mocks = []
+tls = [
+    "dep:rustls",
+    "dep:rustls-native-certs",
+    "dep:tokio-rustls",
+    "hyperdriver-core/tls",
+]
+stream = []

@@ -1,0 +1,34 @@
+[package]
+name = "hyperdriver-body"
+version.workspace = true
+edition.workspace = true
+description = "Unifying body type for use with Hyper and Axum"
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+
+[dependencies]
+axum = { workspace = true, optional = true }
+bytes.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, optional = true }
+hyperdriver-core = { path = "../hyperdriver-core" }
+pin-project.workspace = true
+tower.workspace = true
+
+[dev-dependencies]
+static-assertions.workspace = true
+tokio = { workspace = true, features = ["macros"] }
+
+[features]
+axum = ["dep:axum"]
+docs = []
+incoming = ["dep:hyper"]

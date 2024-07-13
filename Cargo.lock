@@ -687,29 +687,69 @@ dependencies = [
 name = "hyperdriver"
 version = "0.5.5"
 dependencies = [
- "axum",
  "bytes",
  "camino",
  "clap",
  "color-eyre",
  "dashmap",
- "futures-core",
  "futures-util",
  "http",
  "http-body",
  "http-body-util",
  "humantime-serde",
  "hyper",
+ "hyperdriver-body",
+ "hyperdriver-client",
+ "hyperdriver-core",
+ "hyperdriver-server",
  "libc",
- "ouroboros",
  "pem-rfc7468",
  "pin-project",
  "rustls",
- "rustls-native-certs",
  "serde",
- "socket2",
  "static_assertions",
  "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "webpki-roots",
+]
+
+[[package]]
+name = "hyperdriver-body"
+version = "0.5.5"
+dependencies = [
+ "axum",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyperdriver-core",
+ "pin-project",
+ "static_assertions",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "hyperdriver-client"
+version = "0.5.5"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "hyper",
+ "hyperdriver-body",
+ "hyperdriver-core",
+ "pin-project",
+ "rustls",
+ "rustls-native-certs",
+ "socket2",
+ "static_assertions",
  "thiserror",
  "tokio",
  "tokio-rustls",
@@ -717,7 +757,57 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "hyperdriver-core"
+version = "0.5.5"
+dependencies = [
+ "bytes",
+ "camino",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "pin-project",
+ "rustls",
+ "static_assertions",
+ "tempfile",
+ "tokio",
+ "tower",
  "webpki-roots",
+]
+
+[[package]]
+name = "hyperdriver-discovery"
+version = "0.5.5"
+
+[[package]]
+name = "hyperdriver-server"
+version = "0.5.5"
+dependencies = [
+ "bytes",
+ "color-eyre",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "hyper",
+ "hyperdriver-body",
+ "hyperdriver-client",
+ "hyperdriver-core",
+ "ouroboros",
+ "pem-rfc7468",
+ "pin-project",
+ "rustls",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

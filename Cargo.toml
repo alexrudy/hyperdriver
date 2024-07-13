@@ -1,5 +1,8 @@
-[package]
-name = "hyperdriver"
+[workspace]
+members = ["hyperdriver-*", "hyperdriver"]
+resolver = "2"
+
+[workspace.package]
 version = "0.5.5"
 edition = "2021"
 description = "The missing middle for Hyper - Servers and Clients with ergonomic APIs"
@@ -16,166 +19,59 @@ categories = [
 ]
 keywords = ["hyper", "http", "client", "server", "async"]
 
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 
-
-[dependencies]
-axum = { version = "0.7", optional = true }
+[workspace.dependencies]
+axum = "0.7"
 bytes = "1"
 camino = { version = "1", default-features = false }
-dashmap = { version = "6", optional = true }
+clap = { version = "4.5.8" }
+color-eyre = "0.6"
+dashmap.version = "6"
 futures-core = "0.3"
 futures-util = "0.3"
 http = { version = "1" }
 http-body = { version = "1" }
 http-body-util = { version = "0.1" }
-humantime-serde = { version = "1.1.1", optional = true }
+humantime-serde = { version = "1.1.1" }
 hyper = { version = "1", features = ["full"] }
-libc = { version = "0.2", optional = true }
-ouroboros = { version = "0.18", optional = true }
+libc = { version = "0.2" }
+ouroboros = { version = "0.18" }
+pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pin-project = { version = "1" }
-rustls-native-certs = { version = "0.7.1", optional = true }
-serde = { version = "1", optional = true }
-socket2 = { version = "0.5", optional = true }
-thiserror = { version = "1", optional = true }
+rustls-native-certs = { version = "0.7.1" }
+serde = { version = "1" }
+socket2 = { version = "0.5" }
+static-assertions = { version = "1", package = "static_assertions" }
+tempfile = "3"
+thiserror = { version = "1" }
 tokio = { version = "1", features = ["full"] }
+tower-service.version = "0.3"                                        # This is compatible with tower 0.4
+tower-layer.version = "0.3"                                          # This is compatible with tower 0.4
 tracing = { version = "^0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+webpki-roots.version = "0.26"
 
-[dependencies.rustls]
+[workspace.dependencies.rustls]
 version = "0.23"
 features = ["tls12"]
 default-features = false
-optional = true
 
-[dependencies.tokio-rustls]
+[workspace.dependencies.tokio-rustls]
 version = "0.26"
 features = ["tls12"]
 default-features = false
-optional = true
 
-[dependencies.tower]
+[workspace.dependencies.tower]
 version = "0.4"
 features = ["make", "util"]
 default-features = false
 
-[dependencies.tower-http]
+[workspace.dependencies.tower-http]
 version = "0.5.2"
 features = ["follow-redirect", "set-header", "trace"]
 default-features = false
-optional = true
-
-[dev-dependencies]
-clap = { version = "4.5.8" }
-color-eyre = "0.6"
-pem-rfc7468 = { version = "0.7", features = ["alloc"] }
-static-assertions = { version = "1", package = "static_assertions" }
-tempfile = "3"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-webpki-roots.version = "0.26"
-
-[features]
-axum = ["dep:axum"]
-client = [
-    "incoming",
-    "dep:socket2",
-    "dep:thiserror",
-    "dep:tower-http",
-    "tower/timeout",
-    "tower/retry",
-]
-default = ["client", "server", "discovery", "stream"]
-discovery = ["server", "client", "pidfile", "stream", "dep:dashmap"]
-docs = []
-incoming = []
-mocks = []
-pidfile = ["dep:libc"]
-serde = ["dep:serde", "camino/serde1", "dep:humantime-serde"]
-server = ["incoming", "dep:ouroboros", "dep:thiserror"]
-sni = []
-stream = []
-tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
-tls-aws-lc = ["rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs"]
-tls-ring = ["rustls/ring", "tokio-rustls/ring"]
-
-[[example]]
-name = "google"
-path = "examples/client/google.rs"
-required-features = ["client", "tls", "tls-ring"]
-
-[[example]]
-name = "hello"
-path = "examples/client/hello.rs"
-required-features = ["client", "tls", "tls-ring"]
-
-[[example]]
-name = "httpbin"
-path = "examples/client/httpbin.rs"
-required-features = ["client", "tls", "tls-ring"]
-
-[[example]]
-name = "h2-server"
-path = "examples/server/h2.rs"
-required-features = ["server", "tls", "tls-ring"]
-
-[[test]]
-name = "stream-duplex"
-path = "tests/stream/duplex.rs"
-required-features = ["stream"]
-
-[[test]]
-name = "stream-tcp"
-path = "tests/stream/tcp.rs"
-required-features = ["stream"]
-
-[[test]]
-name = "stream-tls"
-path = "tests/stream/tls.rs"
-required-features = ["stream", "tls", "tls-ring"]
-
-[[test]]
-name = "stream-unix"
-path = "tests/stream/unix.rs"
-required-features = ["stream"]
-
-[[test]]
-name = "server"
-path = "tests/server.rs"
-required-features = ["server", "client", "stream"]
-
-[[test]]
-name = "client"
-path = "tests/client.rs"
-required-features = ["server", "client", "stream"]
-
-[[test]]
-name = "custom-body"
-path = "tests/server/custombody.rs"
-required-features = ["server"]
-
-[[test]]
-name = "graceful-shutdown"
-path = "tests/server/graceful.rs"
-required-features = ["server"]
-
-[[test]]
-name = "httpbin"
-path = "tests/httpbin.rs"
-required-features = ["client", "tls", "tls-ring"]
-
-[[test]]
-name = "tls"
-path = "tests/tls.rs"
-required-features = ["client", "server", "tls", "tls-ring"]
-
-[package.metadata.cargo-machete]
-ignored = ["humantime-serde"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["rustls-native-certs", "rustls", "tokio-rustls", "humantime-serde"]
-
-[package.metadata.docs.rs]
-all-features = true

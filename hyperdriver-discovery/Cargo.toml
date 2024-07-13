@@ -1,0 +1,15 @@
+[package]
+name = "hyperdriver-discovery"
+version.workspace = true
+edition.workspace = true
+description = "Service discovery for Hyperdriver"
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]

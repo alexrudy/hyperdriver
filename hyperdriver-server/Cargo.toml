@@ -1,0 +1,42 @@
+[package]
+name = "hyperdriver-server"
+version.workspace = true
+edition.workspace = true
+description = "Server facilities for higher-level hyper users"
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+bytes.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+http-body.workspace = true
+http.workspace = true
+hyper.workspace = true
+hyperdriver-body = { path = "../hyperdriver-body", features = ["incoming"] }
+hyperdriver-core = { path = "../hyperdriver-core" }
+ouroboros.workspace = true
+pin-project.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tower.workspace = true
+tracing.workspace = true
+rustls = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+
+[dev-dependencies]
+hyperdriver-client = { path = "../hyperdriver-client" }
+tracing-subscriber.workspace = true
+color-eyre.workspace = true
+pem-rfc7468.workspace = true
+
+[features]
+tls = ["dep:tokio-rustls", "dep:rustls", "hyperdriver-core/tls"]
+stream = []
+sni = []
