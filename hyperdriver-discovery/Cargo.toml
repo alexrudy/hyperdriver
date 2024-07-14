@@ -13,3 +13,40 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
+futures-util.workspace = true
+hyperdriver-core = { path = "../hyperdriver-core" }
+hyperdriver-server = { path = "../hyperdriver-server", features = ["stream"] }
+hyperdriver-body = { path = "../hyperdriver-body" }
+camino.workspace = true
+dashmap.workspace = true
+hyper.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+serde = { workspace = true, features = ["derive"], optional = true }
+tracing.workspace = true
+libc.workspace = true
+http-body.workspace = true
+humantime-serde = { workspace = true, optional = true }
+
+[dependencies.hyperdriver-client]
+path = "../hyperdriver-client"
+optional = true
+features = ["stream"]
+
+[dependencies.tower]
+workspace = true
+features = ["util"]
+
+[dev-dependencies]
+http.workspace = true
+tempfile.workspace = true
+
+[features]
+serde = ["dep:serde", "dep:humantime-serde", "camino/serde1"]
+client = ["dep:hyperdriver-client"]
+
+[package.metadata.cargo-machete]
+ignored = ["humantime-serde"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["rustls-native-certs", "rustls", "tokio-rustls", "humantime-serde"]

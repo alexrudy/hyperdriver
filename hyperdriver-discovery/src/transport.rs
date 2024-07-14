@@ -10,8 +10,8 @@ use hyper::Uri;
 
 use super::ConnectionError;
 use super::ServiceRegistry;
-use crate::client::conn::Stream as ClientStream;
-use crate::client::conn::TransportStream;
+use hyperdriver_client::conn::Stream as ClientStream;
+use hyperdriver_client::conn::TransportStream;
 
 pub use builder::TransportBuilder;
 
@@ -126,7 +126,7 @@ mod builder {
     use super::RegistryTransport;
     use super::Scheme;
     use super::SchemesDebug;
-    use crate::discovery::ServiceRegistry;
+    use crate::ServiceRegistry;
 
     /// A builder for creating a `RegistryTransport`, by adding custom schemes.
     ///
@@ -240,9 +240,10 @@ mod tests {
 
     use tower::{make::Shared, Service, ServiceExt};
 
-    use crate::discovery::{ConnectionError, ServiceDiscovery};
-    use crate::info::HasConnectionInfo;
-    use crate::{body::Body, info::BraidAddr};
+    use crate::{ConnectionError, ServiceDiscovery};
+    use hyperdriver_body::Body;
+    use hyperdriver_core::info::BraidAddr;
+    use hyperdriver_core::info::HasConnectionInfo;
 
     use super::*;
 

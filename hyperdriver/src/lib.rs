@@ -16,12 +16,12 @@ pub use hyperdriver_body as body;
 pub use hyperdriver_client as client;
 pub use hyperdriver_core::bridge;
 #[cfg(feature = "discovery")]
-pub mod discovery;
+pub use hyperdriver_discovery as discovery;
 
-#[cfg(feature = "pidfile")]
-pub mod pidfile;
 pub use hyperdriver_core::info;
 pub use hyperdriver_core::stream;
+#[cfg(feature = "pidfile")]
+pub use hyperdriver_discovery::pidfile;
 #[cfg(feature = "server")]
 pub use hyperdriver_server as server;
 #[cfg(feature = "server")]

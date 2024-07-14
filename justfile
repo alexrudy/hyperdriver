@@ -37,7 +37,7 @@ check:
 check-all:
     cargo +{{rust}} check --all-targets --all-features
     cargo +{{rust}} hack check --target-dir target/hack/ --no-private --each-feature --no-dev-deps
-    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile,tls-aws-lc
 
 # Run clippy
 clippy:
@@ -66,18 +66,18 @@ msrv:
 alias t := test
 # Run cargo tests
 test:
-    cargo +{{rust}} nextest run --features axum,sni,tls,tls-ring,mocks --no-run
-    cargo +{{rust}} nextest run --features axum,sni,tls,tls-ring,mocks
-    cargo +{{rust}} test --features axum,sni,tls,tls-ring,mocks --doc
+    cargo +{{rust}} nextest run --features axum,sni,tls,mocks --no-run
+    cargo +{{rust}} nextest run --features axum,sni,tls,mocks
+    cargo +{{rust}} test --features axum,sni,tls,mocks --doc
 
 # Run coverage tests
 coverage:
-    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring,mocks
+    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,mocks
 
 alias timing := timings
 # Compile with timing checks
 timings:
-    cargo +{{rust}} build --features  axum,sni,tls,tls-ring,mocks --timings
+    cargo +{{rust}} build --features  axum,sni,tls,mocks --timings
 
 # Run deny checks
 deny:

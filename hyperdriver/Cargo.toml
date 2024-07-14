@@ -17,36 +17,13 @@ workspace = true
 
 
 [dependencies]
-bytes.workspace = true
-camino = { workspace = true, default-features = false }
-dashmap = { workspace = true, optional = true }
-futures-util.workspace = true
-http.workspace = true
-http-body.workspace = true
-http-body-util.workspace = true
-humantime-serde = { workspace = true, optional = true }
-hyper = { workspace = true, features = ["full"] }
 hyperdriver-body = { path = "../hyperdriver-body" }
 hyperdriver-core = { path = "../hyperdriver-core" }
+hyperdriver-discovery = { path = "../hyperdriver-discovery", optional = true }
 hyperdriver-client = { path = "../hyperdriver-client", optional = true }
 hyperdriver-server = { path = "../hyperdriver-server", optional = true }
-libc = { workspace = true, optional = true }
-pin-project.workspace = true
-serde = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 
-[dependencies.rustls]
-workspace = true
-features = ["tls12"]
-default-features = false
-optional = true
-
-[dependencies.tower]
-workspace = true
-features = ["make", "util"]
-default-features = false
 
 [dev-dependencies]
 clap.workspace = true
@@ -56,30 +33,32 @@ static-assertions = { workspace = true }
 tempfile.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 webpki-roots.workspace = true
+tokio = { workspace = true, features = ["full"] }
+pin-project.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+tower.workspace = true
+rustls = { workspace = true, features = ["ring"] }
+hyper.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
 
 [features]
 axum = ["hyperdriver-body/axum"]
-client = [
-    "incoming",
-    "dep:thiserror",
-    "tower/timeout",
-    "tower/retry",
-    "hyperdriver-client",
-]
+client = ["incoming", "hyperdriver-client"]
 default = ["client", "server", "discovery", "stream"]
 discovery = [
     "server",
-    "client",
     "pidfile",
-    "stream",
-    "dep:dashmap",
     "hyperdriver-server?/stream",
+    "dep:hyperdriver-discovery",
 ]
 docs = []
 incoming = []
 mocks = []
-pidfile = ["dep:libc"]
-serde = ["dep:serde", "camino/serde1", "dep:humantime-serde"]
+pidfile = ["dep:hyperdriver-discovery"]
+serde = ["hyperdriver-discovery/serde"]
 server = ["dep:hyperdriver-server"]
 sni = []
 stream = [
@@ -87,29 +66,27 @@ stream = [
     "hyperdriver-core/stream",
     "hyperdriver-server?/stream",
 ]
-tls = ["hyperdriver-client?/tls", "dep:rustls", "hyperdriver-server?/tls"]
-tls-aws-lc = ["rustls/aws_lc_rs"]
-tls-ring = ["rustls/ring"]
+tls = ["hyperdriver-client?/tls", "hyperdriver-server?/tls"]
 
 [[example]]
 name = "google"
 path = "../examples/client/google.rs"
-required-features = ["client", "tls", "tls-ring"]
+required-features = ["client", "tls"]
 
 [[example]]
 name = "hello"
 path = "../examples/client/hello.rs"
-required-features = ["client", "tls", "tls-ring"]
+required-features = ["client", "tls"]
 
 [[example]]
 name = "httpbin"
 path = "../examples/client/httpbin.rs"
-required-features = ["client", "tls", "tls-ring"]
+required-features = ["client", "tls"]
 
 [[example]]
 name = "h2-server"
 path = "../examples/server/h2.rs"
-required-features = ["server", "tls", "tls-ring"]
+required-features = ["server", "tls"]
 
 [[test]]
 name = "stream-duplex"
@@ -124,7 +101,7 @@ required-features = ["stream"]
 [[test]]
 name = "stream-tls"
 path = "../tests/stream/tls.rs"
-required-features = ["stream", "tls", "tls-ring"]
+required-features = ["stream", "tls"]
 
 [[test]]
 name = "stream-unix"
@@ -154,12 +131,12 @@ required-features = ["server"]
 [[test]]
 name = "httpbin"
 path = "../tests/httpbin.rs"
-required-features = ["client", "tls", "tls-ring"]
+required-features = ["client", "tls"]
 
 [[test]]
 name = "tls"
 path = "../tests/tls.rs"
-required-features = ["client", "server", "tls", "tls-ring"]
+required-features = ["client", "server", "tls"]
 
 [package.metadata.cargo-machete]
 ignored = ["humantime-serde"]
