@@ -63,6 +63,16 @@ impl Body {
         }
     }
 
+    /// Create a new body from something which can be converted into [`Bytes`].
+    pub fn full<D>(data: D) -> Self
+    where
+        D: Into<Bytes>,
+    {
+        Self {
+            inner: InnerBody::Full(Full::new(data.into())),
+        }
+    }
+
     /// Try to clone this body.
     pub fn try_clone(&self) -> Option<Self> {
         match &self.inner {
@@ -128,6 +138,14 @@ impl From<String> for Body {
 
 impl From<&'static str> for Body {
     fn from(body: &'static str) -> Self {
+        Self {
+            inner: InnerBody::Full(body.into()),
+        }
+    }
+}
+
+impl From<Vec<u8>> for Body {
+    fn from(body: Vec<u8>) -> Self {
         Self {
             inner: InnerBody::Full(body.into()),
         }
@@ -404,6 +422,14 @@ mod tests {
         assert_eq!(body.size_hint().lower(), 0);
         assert_eq!(body.size_hint().upper(), Some(0));
         assert!(body.is_end_stream());
+    }
+
+    #[test]
+    fn check_body_from_vec() {
+        let body = Body::from("Hello, World!".to_string().into_bytes());
+        assert_eq!(body.size_hint().lower(), 13);
+        assert_eq!(body.size_hint().upper(), Some(13));
+        assert!(!body.is_end_stream());
     }
 
     #[test]
