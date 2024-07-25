@@ -2,10 +2,13 @@
 
 use std::convert::Infallible;
 use std::fmt;
+#[cfg(feature = "stream")]
 use std::io;
 use std::str::FromStr;
 
+#[cfg(feature = "stream")]
 use camino::Utf8Path;
+#[cfg(feature = "stream")]
 use camino::Utf8PathBuf;
 
 #[cfg(feature = "tls")]
@@ -16,6 +19,7 @@ pub use self::tls::HasTlsConnectionInfo;
 pub use self::tls::TlsConnectionInfo;
 #[doc(hidden)]
 pub use crate::stream::duplex::DuplexAddr;
+#[cfg(feature = "stream")]
 use crate::stream::tcp::make_canonical;
 #[doc(hidden)]
 pub use crate::stream::unix::UnixAddr;
@@ -347,6 +351,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "stream")]
     fn test_make_canonical() {
         assert_eq!(
             make_canonical("[::1]:8080".parse().unwrap()),
