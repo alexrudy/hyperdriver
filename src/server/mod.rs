@@ -520,7 +520,7 @@ where
                             let mut conn = pin!(conn);
                             loop {
                                 tokio::select! {
-                                    rv = &mut conn.as_mut() => {
+                                    rv = conn.as_mut() => {
                                         if let Err(error) = rv {
                                             debug!("connection error: {}", error.into());
                                         } else {
