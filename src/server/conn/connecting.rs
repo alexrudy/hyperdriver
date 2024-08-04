@@ -3,6 +3,11 @@ use std::pin::Pin;
 use std::task::ready;
 use std::task::Poll;
 
+use http;
+use ouroboros::self_referencing;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
+
 use super::auto::Builder;
 use super::auto::UpgradableConnection;
 use super::ConnectionError;
@@ -10,44 +15,39 @@ use crate::body::AdaptIncomingService;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
-use ouroboros::self_referencing;
-use tokio::io::AsyncRead;
-use tokio::io::AsyncWrite;
 
-type Connection<'a, S, IO> = UpgradableConnection<
+type Connection<'a, S, IO, BIn, BOut> = UpgradableConnection<
     'a,
     TokioIo<IO>,
-    TowerHyperService<AdaptIncomingService<S>>,
+    TowerHyperService<AdaptIncomingService<S, BIn, BOut>>,
     TokioExecutor,
 >;
 
 /// Connection that handles the self-referential relationship between
 /// the protocol and the connection.
 #[self_referencing]
-pub struct Connecting<S, IO>
+pub struct Connecting<S, IO, BIn, BOut>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming>,
+    BOut: http_body::Body,
 {
     protocol: Builder<TokioExecutor>,
 
     #[borrows(protocol)]
     #[not_covariant]
-    conn: Pin<Box<Connection<'this, S, IO>>>,
+    conn: Pin<Box<Connection<'this, S, IO, BIn, BOut>>>,
 }
 
-impl<S, IO> Connecting<S, IO>
+impl<S, IO, BIn, BOut> Connecting<S, IO, BIn, BOut>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + 'static,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     pub(crate) fn build(protocol: Builder<TokioExecutor>, service: S, stream: IO) -> Self {
@@ -60,14 +60,15 @@ where
     }
 }
 
-impl<S, IO> crate::server::Connection for Connecting<S, IO>
+impl<S, IO, BIn, BOut> crate::server::Connection for Connecting<S, IO, BIn, BOut>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Data: Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(mut self: Pin<&mut Self>) {
@@ -75,14 +76,15 @@ where
     }
 }
 
-impl<S, IO> Future for Connecting<S, IO>
+impl<S, IO, BIn, BOut> Future for Connecting<S, IO, BIn, BOut>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Data: Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Output = Result<(), ConnectionError>;

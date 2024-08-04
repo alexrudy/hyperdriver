@@ -1,6 +1,5 @@
 //! A collection of utilities for working with `Service` types and Servers.
 
-mod adapt;
 mod http;
 #[cfg(feature = "incoming")]
 mod incoming;
@@ -12,8 +11,6 @@ mod serviceref;
 mod shared;
 mod timeout;
 
-pub use self::adapt::{AdaptCustomBodyExt, AdaptCustomBodyLayer, AdaptCustomBodyService};
-pub use self::adapt::{AdaptOuterBodyLayer, AdaptOuterBodyService};
 pub use self::http::HttpService;
 #[cfg(feature = "incoming")]
 pub use self::incoming::{AdaptIncomingLayer, AdaptIncomingService};

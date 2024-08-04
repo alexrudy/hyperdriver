@@ -2,7 +2,7 @@ use bytes::Bytes;
 use futures_util::FutureExt;
 use http_body::Body;
 use http_body_util::combinators::UnsyncBoxBody;
-use hyperdriver::{body::AdaptCustomBodyExt, info::DuplexAddr};
+use hyperdriver::info::DuplexAddr;
 use pin_project::pin_project;
 
 #[pin_project]
@@ -26,6 +26,13 @@ impl Body for CustomBody {
 
 impl From<hyperdriver::Body> for CustomBody {
     fn from(_body: hyperdriver::Body) -> Self {
+        let data = Vec::new();
+        CustomBody(Some(data))
+    }
+}
+
+impl From<hyper::body::Incoming> for CustomBody {
+    fn from(_body: hyper::body::Incoming) -> Self {
         let data = Vec::new();
         CustomBody(Some(data))
     }
@@ -70,7 +77,7 @@ impl tower::Service<http::Request<CustomBody>> for CustomService {
 #[tokio::test]
 async fn custom_body_server() {
     let (_, incoming) = hyperdriver::stream::duplex::pair();
-    let service = CustomService.adapt_custom_body();
+    let service = CustomService;
 
     let server = hyperdriver::server::Server::builder()
         .with_acceptor(incoming)
