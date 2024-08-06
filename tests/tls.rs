@@ -121,7 +121,8 @@ async fn tls_echo_h1() {
                 .unwrap(),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .map(Into::into);
     tracing::trace!("sent request");
     let (_, body) = response.into_parts();
 
@@ -169,7 +170,8 @@ async fn tls_echo_h2() {
                 .unwrap(),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .map(Into::into);
     let (_, body) = response.into_parts();
 
     let data = body.collect().await.unwrap().to_bytes();

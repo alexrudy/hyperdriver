@@ -5,8 +5,10 @@
 //! protocol and ALPN negotiation.
 
 use std::future::Future;
+use std::marker::PhantomData;
 
 use futures_core::future::BoxFuture;
+use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tower::Service;
@@ -28,12 +30,15 @@ pub use hyper::client::conn::http2;
 /// A request to establish a connection using a specific HTTP protocol
 /// over a given transport.
 #[derive(Debug)]
-pub struct ProtocolRequest<IO: HasConnectionInfo> {
+#[non_exhaustive]
+pub struct ProtocolRequest<IO: HasConnectionInfo, B> {
     /// The transport to use for the connection
     pub transport: TransportStream<IO>,
 
     /// The HTTP protocol to use for the connection
     pub version: HttpProtocol,
+
+    _body: PhantomData<fn(B) -> ()>,
 }
 
 /// Protocols (like HTTP) define how data is sent and received over a connection.
@@ -45,19 +50,19 @@ pub struct ProtocolRequest<IO: HasConnectionInfo> {
 /// The connection is responsible for sending and receiving HTTP requests and responses.
 ///
 ///
-pub trait Protocol<IO>
+pub trait Protocol<IO, B>
 where
     IO: HasConnectionInfo,
-    Self: Service<ProtocolRequest<IO>, Response = Self::Connection>,
+    Self: Service<ProtocolRequest<IO, B>, Response = Self::Connection>,
 {
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The type of connection returned by this service
-    type Connection: Connection;
+    type Connection: Connection<B>;
 
     /// The type of the handshake future
-    type Future: Future<Output = Result<Self::Connection, <Self as Protocol<IO>>::Error>>
+    type Future: Future<Output = Result<Self::Connection, <Self as Protocol<IO, B>>::Error>>
         + Send
         + 'static;
 
@@ -68,22 +73,22 @@ where
         &mut self,
         transport: TransportStream<IO>,
         version: HttpProtocol,
-    ) -> <Self as Protocol<IO>>::Future;
+    ) -> <Self as Protocol<IO, B>>::Future;
 
     /// Poll the protocol to see if it is ready to accept a new connection.
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Protocol<IO>>::Error>>;
+    ) -> std::task::Poll<Result<(), <Self as Protocol<IO, B>>::Error>>;
 }
 
-impl<T, C, IO> Protocol<IO> for T
+impl<T, C, IO, B> Protocol<IO, B> for T
 where
     IO: HasConnectionInfo,
-    T: Service<ProtocolRequest<IO>, Response = C> + Send + 'static,
+    T: Service<ProtocolRequest<IO, B>, Response = C> + Send + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
-    C: Connection,
+    C: Connection<B>,
 {
     type Error = T::Error;
     type Connection = C;
@@ -93,14 +98,18 @@ where
         &mut self,
         transport: TransportStream<IO>,
         version: HttpProtocol,
-    ) -> <Self as Protocol<IO>>::Future {
-        self.call(ProtocolRequest { transport, version })
+    ) -> <Self as Protocol<IO, B>>::Future {
+        self.call(ProtocolRequest {
+            transport,
+            version,
+            _body: PhantomData,
+        })
     }
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Protocol<IO>>::Error>> {
+    ) -> std::task::Poll<Result<(), <Self as Protocol<IO, B>>::Error>> {
         Service::poll_ready(self, cx)
     }
 }
@@ -149,14 +158,17 @@ impl From<::http::Version> for HttpProtocol {
     }
 }
 
-impl<IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http1::Builder
+impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for hyper::client::conn::http1::Builder
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    B: Body + Unpin + Send + 'static,
+    <B as Body>::Data: Send,
+    <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    type Response = HttpConnection;
+    type Response = HttpConnection<B>;
 
     type Error = ConnectionError;
-    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
+    type Future = BoxFuture<'static, Result<HttpConnection<B>, ConnectionError>>;
 
     fn poll_ready(
         &mut self,
@@ -165,7 +177,7 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
+    fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
         let builder = self.clone();
         let stream = req.transport.into_inner();
 
@@ -195,20 +207,23 @@ where
     }
 }
 
-impl<E, IO> tower::Service<ProtocolRequest<IO>> for hyper::client::conn::http2::Builder<E>
+impl<E, IO, BIn> tower::Service<ProtocolRequest<IO, BIn>> for hyper::client::conn::http2::Builder<E>
 where
-    E: hyper::rt::bounds::Http2ClientConnExec<crate::body::Body, TokioIo<IO>>
+    E: hyper::rt::bounds::Http2ClientConnExec<BIn, TokioIo<IO>>
         + Unpin
         + Send
         + Sync
         + Clone
         + 'static,
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    BIn: Body + Unpin + Send + 'static,
+    <BIn as Body>::Data: Send,
+    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    type Response = HttpConnection;
+    type Response = HttpConnection<BIn>;
 
     type Error = ConnectionError;
-    type Future = BoxFuture<'static, Result<HttpConnection, ConnectionError>>;
+    type Future = BoxFuture<'static, Result<HttpConnection<BIn>, ConnectionError>>;
 
     fn poll_ready(
         &mut self,
@@ -217,7 +232,7 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
+    fn call(&mut self, req: ProtocolRequest<IO, BIn>) -> Self::Future {
         let builder = self.clone();
         let stream = req.transport.into_inner();
         let info = stream.info();

@@ -1,5 +1,9 @@
 //! Auto-switching HTTP/1 and HTTP/2 connections.
 
+use std::marker::PhantomData;
+use std::pin::pin;
+
+use http_body::Body;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 use tracing::Instrument as _;
@@ -15,13 +19,24 @@ use super::HttpProtocol;
 use super::ProtocolRequest;
 
 /// A builder for configuring and starting HTTP connections.
-#[derive(Debug, Clone)]
-pub struct HttpConnectionBuilder {
+#[derive(Debug)]
+pub struct HttpConnectionBuilder<B> {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
+    _body: PhantomData<fn(B) -> ()>,
 }
 
-impl HttpConnectionBuilder {
+impl<B> Clone for HttpConnectionBuilder<B> {
+    fn clone(&self) -> Self {
+        Self {
+            http1: self.http1.clone(),
+            http2: self.http2.clone(),
+            _body: PhantomData,
+        }
+    }
+}
+
+impl<B> HttpConnectionBuilder<B> {
     /// Get the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
         &mut self.http1
@@ -33,8 +48,13 @@ impl HttpConnectionBuilder {
     }
 }
 
-impl HttpConnectionBuilder {
-    async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection, ConnectionError>
+impl<B> HttpConnectionBuilder<B>
+where
+    B: Body + Unpin + Send + 'static,
+    <B as Body>::Data: Send,
+    <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
@@ -47,6 +67,7 @@ impl HttpConnectionBuilder {
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
         tokio::spawn(
             async {
+                let conn = pin!(conn);
                 if let Err(err) = conn.await {
                     if err.is_user() {
                         tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
@@ -61,7 +82,7 @@ impl HttpConnectionBuilder {
         Ok(HttpConnection::h2(sender))
     }
 
-    async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection, ConnectionError>
+    async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
@@ -90,7 +111,7 @@ impl HttpConnectionBuilder {
         &self,
         transport: TransportStream<IO>,
         protocol: HttpProtocol,
-    ) -> Result<HttpConnection, ConnectionError>
+    ) -> Result<HttpConnection<B>, ConnectionError>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
         <IO as HasConnectionInfo>::Addr: Clone,
@@ -118,25 +139,29 @@ impl HttpConnectionBuilder {
     }
 }
 
-impl Default for HttpConnectionBuilder {
+impl<B> Default for HttpConnectionBuilder<B> {
     fn default() -> Self {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
             http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
+            _body: PhantomData,
         }
     }
 }
 
-impl<IO> tower::Service<ProtocolRequest<IO>> for HttpConnectionBuilder
+impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for HttpConnectionBuilder<B>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Send + Sync,
+    B: Body + Unpin + Send + 'static,
+    <B as Body>::Data: Send,
+    <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    type Response = HttpConnection;
+    type Response = HttpConnection<B>;
 
     type Error = ConnectionError;
 
-    type Future = future::HttpConnectFuture<IO>;
+    type Future = future::HttpConnectFuture<IO, B>;
 
     fn poll_ready(
         &mut self,
@@ -146,7 +171,7 @@ where
     }
 
     #[tracing::instrument("http-connect", skip_all, fields(addr=?req.transport.info().remote_addr()))]
-    fn call(&mut self, req: ProtocolRequest<IO>) -> Self::Future {
+    fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
         future::HttpConnectFuture::new(self.clone(), req.transport, req.version)
     }
 }
@@ -159,6 +184,7 @@ mod future {
     use std::task::{Context, Poll};
 
     use futures_util::FutureExt;
+    use http_body::Body;
     use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::client::conn::connection::ConnectionError;
@@ -172,12 +198,12 @@ mod future {
 
     type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
-    pub struct HttpConnectFuture<IO> {
-        future: BoxFuture<'static, HttpConnection, ConnectionError>,
+    pub struct HttpConnectFuture<IO, B> {
+        future: BoxFuture<'static, HttpConnection<B>, ConnectionError>,
         _io: PhantomData<IO>,
     }
 
-    impl<IO> fmt::Debug for HttpConnectFuture<IO> {
+    impl<IO, B> fmt::Debug for HttpConnectFuture<IO, B> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("HttpConnectFuture")
                 .field("state", &DebugLiteral("Handshaking"))
@@ -185,16 +211,19 @@ mod future {
         }
     }
 
-    impl<IO> HttpConnectFuture<IO>
+    impl<IO, B> HttpConnectFuture<IO, B>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
         IO::Addr: Clone + Send + Sync,
+        B: Body + Unpin + Send + 'static,
+        <B as Body>::Data: Send,
+        <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         pub(super) fn new(
-            builder: HttpConnectionBuilder,
+            builder: HttpConnectionBuilder<B>,
             stream: TransportStream<IO>,
             protocol: HttpProtocol,
-        ) -> HttpConnectFuture<IO> {
+        ) -> HttpConnectFuture<IO, B> {
             let future = Box::pin(async move { builder.handshake(stream, protocol).await });
 
             Self {
@@ -204,11 +233,11 @@ mod future {
         }
     }
 
-    impl<IO> Future for HttpConnectFuture<IO>
+    impl<IO, B> Future for HttpConnectFuture<IO, B>
     where
         IO: Unpin,
     {
-        type Output = Result<HttpConnection, ConnectionError>;
+        type Output = Result<HttpConnection<B>, ConnectionError>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             self.future.poll_unpin(cx)
@@ -239,8 +268,8 @@ mod tests {
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-    assert_impl_all!(HttpConnectionBuilder: Service<ProtocolRequest<Stream>, Response = HttpConnection, Error = ConnectionError, Future = future::HttpConnectFuture<Stream>>, Debug, Clone);
-    assert_impl_all!(future::HttpConnectFuture<Stream>: Future<Output = Result<HttpConnection, ConnectionError>>, Debug, Send);
+    assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);
 
     async fn transport() -> Result<(TransportStream<Stream>, Stream), BoxError> {
         let (client, mut incoming) = crate::stream::duplex::pair();
@@ -355,7 +384,7 @@ mod tests {
 
         let (stream, client) = transport().await.unwrap();
 
-        async fn serve(stream: Stream) -> Result<HttpConnection, ConnectionError> {
+        async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, ConnectionError> {
             let mut builder = HttpConnectionBuilder::default();
 
             let tls = crate::info::TlsConnectionInfo::new_client(Some(

@@ -26,7 +26,7 @@ async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Resp
     )))
 }
 
-async fn connection<P: hyperdriver::client::conn::Protocol<Stream>>(
+async fn connection<P: hyperdriver::client::conn::Protocol<Stream, hyperdriver::Body>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {

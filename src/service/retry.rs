@@ -1,3 +1,4 @@
+use http_body::Body;
 use tower::retry::Policy;
 
 pub use tower::retry::{Retry, RetryLayer};
@@ -15,13 +16,16 @@ impl Attempts {
     }
 }
 
-impl<E> Policy<http::Request<crate::Body>, http::Response<crate::Body>, E> for Attempts {
+impl<E, BIn, BOut> Policy<http::Request<BIn>, http::Response<BOut>, E> for Attempts
+where
+    BIn: Body + Default,
+{
     type Future = std::future::Ready<Self>;
 
     fn retry(
         &self,
-        _req: &http::Request<crate::Body>,
-        result: Result<&http::Response<crate::Body>, &E>,
+        _req: &http::Request<BIn>,
+        result: Result<&http::Response<BOut>, &E>,
     ) -> Option<Self::Future> {
         match result {
             Ok(res) if res.status().is_server_error() => Some(std::future::ready(Self(self.0 - 1))),
@@ -31,10 +35,7 @@ impl<E> Policy<http::Request<crate::Body>, http::Response<crate::Body>, E> for A
         }
     }
 
-    fn clone_request(
-        &self,
-        req: &http::Request<crate::Body>,
-    ) -> Option<http::Request<crate::Body>> {
+    fn clone_request(&self, req: &http::Request<BIn>) -> Option<http::Request<BIn>> {
         req.try_clone_request()
     }
 }

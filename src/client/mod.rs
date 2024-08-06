@@ -54,16 +54,17 @@ pub fn default_tls_config() -> rustls::ClientConfig {
 }
 
 /// A boxed service with http::Request and http::Response and symmetric body types
-pub type SharedClientService<B> = SharedService<http::Request<B>, http::Response<B>, Error>;
+pub type SharedClientService<BIn, BOut> =
+    SharedService<http::Request<BIn>, http::Response<BOut>, Error>;
 
 /// Inner type for managing the client service.
 #[derive(Clone)]
 struct ClientRef {
-    service: SharedClientService<crate::Body>,
+    service: SharedClientService<crate::Body, hyper::body::Incoming>,
 }
 
 impl ClientRef {
-    fn new(service: impl Into<SharedClientService<crate::Body>>) -> Self {
+    fn new(service: impl Into<SharedClientService<crate::Body, hyper::body::Incoming>>) -> Self {
         Self {
             service: service.into(),
         }
@@ -72,7 +73,8 @@ impl ClientRef {
     fn request(
         &mut self,
         request: crate::body::Request,
-    ) -> Oneshot<SharedClientService<crate::Body>, http::Request<crate::Body>> {
+    ) -> Oneshot<SharedClientService<crate::Body, hyper::body::Incoming>, http::Request<crate::Body>>
+    {
         let service = self.service.clone();
         std::mem::replace(&mut self.service, service).oneshot(request)
     }
@@ -116,7 +118,7 @@ impl Client {
     /// It is much easier to use the builder interface to create a client.
     pub fn new_from_service<S>(service: S) -> Self
     where
-        S: Into<SharedClientService<crate::Body>>,
+        S: Into<SharedClientService<crate::Body, hyper::body::Incoming>>,
     {
         Client {
             inner: Arc::new(ClientRef::new(service)),
@@ -130,7 +132,7 @@ impl Client {
 
     /// Create a new client builder with default settings applied.
     pub fn build_tcp_http(
-    ) -> self::builder::Builder<TcpTransportConfig, auto::HttpConnectionBuilder> {
+    ) -> self::builder::Builder<TcpTransportConfig, auto::HttpConnectionBuilder<crate::Body>> {
         Builder::default()
     }
 
@@ -141,7 +143,7 @@ impl Client {
     }
 
     /// Unwrap the inner service from the client.
-    pub fn into_inner(self) -> SharedClientService<crate::Body> {
+    pub fn into_inner(self) -> SharedClientService<crate::Body, hyper::body::Incoming> {
         match Arc::try_unwrap(self.inner) {
             Ok(client) => client.service,
             Err(client) => client.service.clone(),
@@ -154,12 +156,16 @@ impl Client {
     pub fn request(
         &mut self,
         request: crate::body::Request,
-    ) -> Oneshot<SharedClientService<crate::Body>, http::Request<crate::Body>> {
+    ) -> Oneshot<SharedClientService<crate::Body, hyper::body::Incoming>, http::Request<crate::Body>>
+    {
         Arc::make_mut(&mut self.inner).request(request)
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<crate::Body>, BoxError> {
+    pub async fn get(
+        &mut self,
+        uri: http::Uri,
+    ) -> Result<http::Response<hyper::body::Incoming>, BoxError> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();
@@ -170,9 +176,12 @@ impl Client {
 }
 
 impl tower::Service<http::Request<crate::Body>> for Client {
-    type Response = http::Response<crate::Body>;
+    type Response = http::Response<hyper::body::Incoming>;
     type Error = Error;
-    type Future = Oneshot<SharedClientService<crate::Body>, http::Request<crate::Body>>;
+    type Future = Oneshot<
+        SharedClientService<crate::Body, hyper::body::Incoming>,
+        http::Request<crate::Body>,
+    >;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Arc::make_mut(&mut self.inner).service.poll_ready(cx)

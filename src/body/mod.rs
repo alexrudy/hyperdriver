@@ -12,7 +12,7 @@ use std::pin::pin;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use http_body::Body as _;
+use http_body::Body as HttpBody;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
@@ -270,20 +270,9 @@ pub trait TryCloneRequest {
         Self: Sized;
 }
 
-impl TryCloneRequest for http::Request<Body> {
+impl<B: HttpBody + Default> TryCloneRequest for http::Request<B> {
     fn try_clone_request(&self) -> Option<Self> {
-        if let Some(body) = self.body().try_clone() {
-            let mut req = http::Request::builder()
-                .uri(self.uri().clone())
-                .method(self.method().clone())
-                .version(self.version());
-
-            if let Some(headers) = req.headers_mut() {
-                *headers = self.headers().clone();
-            };
-
-            Some(req.body(body).expect("request builder should succeed"))
-        } else if self.body().size_hint().exact() == Some(0) {
+        if self.body().size_hint().exact() == Some(0) {
             let mut req = http::Request::builder()
                 .uri(self.uri().clone())
                 .method(self.method().clone())
@@ -294,7 +283,7 @@ impl TryCloneRequest for http::Request<Body> {
             };
 
             Some(
-                req.body(Body::empty())
+                req.body(B::default())
                     .expect("request builder should succeed"),
             )
         } else {
