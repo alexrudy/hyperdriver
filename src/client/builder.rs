@@ -66,14 +66,7 @@ where
 
 /// A builder for a client.
 #[derive(Debug)]
-pub struct Builder<
-    T,
-    P,
-    RP = policy::Standard,
-    S = Identity,
-    BIn = crate::Body,
-    BOut = hyper::body::Incoming,
-> {
+pub struct Builder<T, P, RP = policy::Standard, S = Identity, BIn = crate::Body> {
     transport: T,
     protocol: P,
     builder: ServiceBuilder<S>,
@@ -84,7 +77,7 @@ pub struct Builder<
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
-    body: std::marker::PhantomData<fn(BIn) -> BOut>,
+    body: std::marker::PhantomData<fn(BIn) -> ()>,
 }
 
 impl Builder<(), (), policy::Standard> {
@@ -113,7 +106,6 @@ impl Default
         policy::Standard,
         Identity,
         crate::Body,
-        hyper::body::Incoming,
     >
 {
     fn default() -> Self {
@@ -133,12 +125,12 @@ impl Default
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Use the provided TCP configuration.
     pub fn with_tcp(
         self,
         config: TcpTransportConfig,
-    ) -> Builder<TcpTransportConfig, P, RP, S, BIn, BOut> {
+    ) -> Builder<TcpTransportConfig, P, RP, S, BIn> {
         Builder {
             transport: config,
             protocol: self.protocol,
@@ -155,7 +147,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 
     /// Provide a custom transport
-    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP, S, BIn, BOut> {
+    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP, S, BIn> {
         Builder {
             transport,
             protocol: self.protocol,
@@ -178,7 +170,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
 }
 
 #[cfg(feature = "tls")]
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Disable TLS
     pub fn without_tls(mut self) -> Self {
         self.tls = None;
@@ -204,14 +196,14 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
 }
 
 #[cfg(not(feature = "tls"))]
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Disable TLS
     pub fn without_tls(self) -> Self {
         self
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Connection pool configuration.
     pub fn pool(&mut self) -> Option<&mut crate::client::pool::Config> {
         self.pool.as_mut()
@@ -236,9 +228,9 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Use the auto-HTTP Protocol
-    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder<BIn>, RP, S, BIn, BOut> {
+    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder<BIn>, RP, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: auto::HttpConnectionBuilder::default(),
@@ -255,7 +247,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 
     /// Use the provided HTTP connection configuration.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP, S, BIn, BOut> {
+    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP, S, BIn> {
         Builder {
             transport: self.transport,
             protocol,
@@ -277,7 +269,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the User-Agent header.
     pub fn with_user_agent(mut self, user_agent: String) -> Self {
         self.user_agent = Some(user_agent);
@@ -290,9 +282,9 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the redirect policy. See [`policy`] for more information.
-    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2, S, BIn, BOut> {
+    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -309,7 +301,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 
     /// Disable redirects.
-    pub fn without_redirects(self) -> Builder<T, P, policy::Standard, S, BIn, BOut> {
+    pub fn without_redirects(self) -> Builder<T, P, policy::Standard, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -326,7 +318,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 
     /// Set the standard redirect policy. See [`policy::Standard`] for more information.
-    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard, S, BIn, BOut> {
+    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -348,7 +340,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the timeout for requests.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -373,7 +365,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the number of retries for failed requests.
     pub fn with_retries(mut self, retries: usize) -> Self {
         self.retries = Some(retries);
@@ -392,9 +384,9 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Add a layer to the service under construction
-    pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>, BIn, BOut> {
+    pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -411,7 +403,7 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     }
 }
 
-impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut>
+impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn>
 where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
@@ -503,7 +495,7 @@ where
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S, crate::Body, hyper::body::Incoming>
+impl<T, P, RP, S> Builder<T, P, RP, S, crate::Body>
 where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
