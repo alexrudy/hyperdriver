@@ -76,7 +76,7 @@ impl<E> Builder<E> {
         S::Future: 'static,
         S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         B: Body + 'static,
-        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        // B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         I: Read + Write + Unpin + Send + 'static,
     {
         UpgradableConnection {
@@ -89,17 +89,19 @@ impl<E> Builder<E> {
     }
 }
 
-impl<S, IO> Protocol<S, IO> for Builder<TokioExecutor>
+impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for Builder<TokioExecutor>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Data: Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Connection = Connecting<S, IO>;
+    type ResponseBody = BOut;
+    type Connection = Connecting<S, IO, BIn, BOut>;
     type Error = ConnectionError;
 
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {

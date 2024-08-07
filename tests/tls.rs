@@ -55,15 +55,15 @@ async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Resp
     )))
 }
 
-fn serve_gracefully<A, P, S, B>(
-    server: Server<A, P, S, B>,
+fn serve_gracefully<A, P, S, BIn>(
+    server: Server<A, P, S, BIn>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeServiceRef<A::Conn, B> + Send + 'static,
+    S: MakeServiceRef<A::Conn, BIn> + Send + 'static,
     S::Future: Send + 'static,
-    P: Protocol<S::Service, A::Conn> + Send + 'static,
+    P: Protocol<S::Service, A::Conn, BIn> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
-    B: HttpBody + Send + 'static,
+    BIn: HttpBody + Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(server.with_graceful_shutdown(async {
@@ -121,7 +121,8 @@ async fn tls_echo_h1() {
                 .unwrap(),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .map(Into::into);
     tracing::trace!("sent request");
     let (_, body) = response.into_parts();
 
@@ -169,7 +170,8 @@ async fn tls_echo_h2() {
                 .unwrap(),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .map(Into::into);
     let (_, body) = response.into_parts();
 
     let data = body.collect().await.unwrap().to_bytes();

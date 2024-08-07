@@ -27,13 +27,13 @@ pub trait HttpService<ReqBody> {
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future;
 }
 
-impl<T, B1, B2> HttpService<B1> for T
+impl<T, BIn, BOut> HttpService<BIn> for T
 where
-    T: tower::Service<Request<B1>, Response = Response<B2>>,
-    B2: HttpBody,
+    T: tower::Service<Request<BIn>, Response = Response<BOut>>,
+    BOut: HttpBody,
     T::Error: Into<Box<dyn StdError + Send + Sync>>,
 {
-    type ResBody = B2;
+    type ResBody = BOut;
 
     type Error = T::Error;
     type Future = T::Future;
@@ -42,7 +42,7 @@ where
         tower::Service::poll_ready(self, cx)
     }
 
-    fn call(&mut self, req: Request<B1>) -> Self::Future {
+    fn call(&mut self, req: Request<BIn>) -> Self::Future {
         tower::Service::call(self, req)
     }
 }

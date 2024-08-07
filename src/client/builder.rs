@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::HeaderValue;
+use http_body::Body;
 #[cfg(feature = "tls")]
 use rustls::ClientConfig;
 use tower::layer::util::{Identity, Stack};
@@ -29,17 +30,17 @@ use crate::service::OptionLayerExt;
 use crate::service::SharedService;
 use crate::service::TimeoutLayer;
 
-pub trait BuildProtocol<IO>
+pub trait BuildProtocol<IO, B>
 where
     IO: HasConnectionInfo,
 {
-    type Target: Protocol<IO>;
+    type Target: Protocol<IO, B>;
     fn build(self) -> Self::Target;
 }
 
-impl<P, IO> BuildProtocol<IO> for P
+impl<P, IO, B> BuildProtocol<IO, B> for P
 where
-    P: Protocol<IO>,
+    P: Protocol<IO, B>,
     IO: HasConnectionInfo,
 {
     type Target = P;
@@ -65,7 +66,7 @@ where
 
 /// A builder for a client.
 #[derive(Debug)]
-pub struct Builder<T, P, RP = policy::Standard, S = Identity> {
+pub struct Builder<T, P, RP = policy::Standard, S = Identity, BIn = crate::Body> {
     transport: T,
     protocol: P,
     builder: ServiceBuilder<S>,
@@ -76,6 +77,7 @@ pub struct Builder<T, P, RP = policy::Standard, S = Identity> {
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
+    body: std::marker::PhantomData<fn(BIn) -> ()>,
 }
 
 impl Builder<(), (), policy::Standard> {
@@ -92,11 +94,20 @@ impl Builder<(), (), policy::Standard> {
             #[cfg(feature = "tls")]
             tls: None,
             pool: None,
+            body: std::marker::PhantomData,
         }
     }
 }
 
-impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Standard> {
+impl Default
+    for Builder<
+        TcpTransportConfig,
+        HttpConnectionBuilder<crate::Body>,
+        policy::Standard,
+        Identity,
+        crate::Body,
+    >
+{
     fn default() -> Self {
         Self {
             transport: Default::default(),
@@ -109,13 +120,17 @@ impl Default for Builder<TcpTransportConfig, HttpConnectionBuilder, policy::Stan
             #[cfg(feature = "tls")]
             tls: Some(default_tls_config()),
             pool: Some(Default::default()),
+            body: std::marker::PhantomData,
         }
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Use the provided TCP configuration.
-    pub fn with_tcp(self, config: TcpTransportConfig) -> Builder<TcpTransportConfig, P, RP, S> {
+    pub fn with_tcp(
+        self,
+        config: TcpTransportConfig,
+    ) -> Builder<TcpTransportConfig, P, RP, S, BIn> {
         Builder {
             transport: config,
             protocol: self.protocol,
@@ -127,11 +142,12 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
     /// Provide a custom transport
-    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP, S> {
+    pub fn with_transport<T2>(self, transport: T2) -> Builder<T2, P, RP, S, BIn> {
         Builder {
             transport,
             protocol: self.protocol,
@@ -143,6 +159,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
@@ -153,7 +170,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
 }
 
 #[cfg(feature = "tls")]
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Disable TLS
     pub fn without_tls(mut self) -> Self {
         self.tls = None;
@@ -179,14 +196,14 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
 }
 
 #[cfg(not(feature = "tls"))]
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Disable TLS
     pub fn without_tls(self) -> Self {
         self
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Connection pool configuration.
     pub fn pool(&mut self) -> Option<&mut crate::client::pool::Config> {
         self.pool.as_mut()
@@ -211,9 +228,9 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Use the auto-HTTP Protocol
-    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder, RP, S> {
+    pub fn with_auto_http(self) -> Builder<T, auto::HttpConnectionBuilder<BIn>, RP, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: auto::HttpConnectionBuilder::default(),
@@ -225,11 +242,12 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
     /// Use the provided HTTP connection configuration.
-    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP, S> {
+    pub fn with_protocol<P2>(self, protocol: P2) -> Builder<T, P2, RP, S, BIn> {
         Builder {
             transport: self.transport,
             protocol,
@@ -241,6 +259,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
@@ -250,7 +269,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the User-Agent header.
     pub fn with_user_agent(mut self, user_agent: String) -> Self {
         self.user_agent = Some(user_agent);
@@ -263,9 +282,9 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the redirect policy. See [`policy`] for more information.
-    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2, S> {
+    pub fn with_redirect_policy<RP2>(self, policy: RP2) -> Builder<T, P, RP2, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -277,11 +296,12 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
     /// Disable redirects.
-    pub fn without_redirects(self) -> Builder<T, P, policy::Standard, S> {
+    pub fn without_redirects(self) -> Builder<T, P, policy::Standard, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -293,11 +313,12 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
     /// Set the standard redirect policy. See [`policy::Standard`] for more information.
-    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard, S> {
+    pub fn with_standard_redirect_policy(self) -> Builder<T, P, policy::Standard, S, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -309,6 +330,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 
@@ -318,7 +340,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the timeout for requests.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -343,7 +365,7 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Set the number of retries for failed requests.
     pub fn with_retries(mut self, retries: usize) -> Self {
         self.retries = Some(retries);
@@ -362,9 +384,9 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S> {
+impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Add a layer to the service under construction
-    pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>> {
+    pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>, BIn> {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
@@ -376,11 +398,12 @@ impl<T, P, RP, S> Builder<T, P, RP, S> {
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
+            body: self.body,
         }
     }
 }
 
-impl<T, P, RP, S> Builder<T, P, RP, S>
+impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn>
 where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
@@ -388,11 +411,16 @@ where
         tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     <<<T as BuildTransport>::Target as Transport>::IO as HasConnectionInfo>::Addr:
         Unpin + Clone + Send,
-    P: BuildProtocol<super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>>,
+    P: BuildProtocol<
+        super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        BIn,
+    >,
     <P as BuildProtocol<
         super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        BIn,
     >>::Target: Protocol<
             super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+            BIn,
             Error = ConnectionError,
         > + Clone
         + Send
@@ -400,34 +428,29 @@ where
         + 'static,
     <<P as BuildProtocol<
         super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        BIn,
     >>::Target as Protocol<
         super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
-    >>::Connection: PoolableConnection,
-    crate::Body: From<
-        <<<P as BuildProtocol<
-            super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
-        >>::Target as Protocol<
-            super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
-        >>::Connection as Connection>::ResBody,
-    >,
-    RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
-    S: tower::Layer<
-        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, super::Error>,
-    >,
-    S::Service: tower::Service<
-            http::Request<crate::Body>,
-            Response = http::Response<crate::Body>,
-            Error = super::Error,
-        > + Clone
+        BIn,
+    >>::Connection: Connection<BIn, ResBody = BOut> + PoolableConnection,
+
+    RP: policy::Policy<BIn, super::Error> + Clone + Send + Sync + 'static,
+    S: tower::Layer<SharedService<http::Request<BIn>, http::Response<BOut>, super::Error>>,
+    S::Service: tower::Service<http::Request<BIn>, Response = http::Response<BOut>, Error = super::Error>
+        + Clone
         + Send
         + Sync
         + 'static,
-    <S::Service as tower::Service<http::Request<crate::Body>>>::Future: Send + 'static,
+    <S::Service as tower::Service<http::Request<BIn>>>::Future: Send + 'static,
+    BIn: Default + Body + Unpin + Send + 'static,
+    <BIn as Body>::Data: Send,
+    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut: Body + Unpin + Send + 'static,
 {
     /// Build a client service with the configured layers
     pub fn build_service(
         self,
-    ) -> SharedService<http::Request<crate::Body>, http::Response<crate::Body>, super::Error> {
+    ) -> SharedService<http::Request<BIn>, http::Response<BOut>, super::Error> {
         let user_agent = if let Some(ua) = self.user_agent {
             HeaderValue::from_str(&ua).expect("user-agent should be a valid http header")
         } else {
@@ -470,7 +493,57 @@ where
 
         SharedService::new(service)
     }
+}
 
+impl<T, P, RP, S> Builder<T, P, RP, S, crate::Body>
+where
+    T: BuildTransport,
+    <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
+    <<T as BuildTransport>::Target as Transport>::IO:
+        tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    <<<T as BuildTransport>::Target as Transport>::IO as HasConnectionInfo>::Addr:
+        Unpin + Clone + Send,
+    P: BuildProtocol<
+        super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        crate::Body,
+    >,
+    <P as BuildProtocol<
+        super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        crate::Body,
+    >>::Target: Protocol<
+            super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+            crate::Body,
+            Error = ConnectionError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <<P as BuildProtocol<
+        super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        crate::Body,
+    >>::Target as Protocol<
+        super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
+        crate::Body,
+    >>::Connection: Connection<crate::Body, ResBody = hyper::body::Incoming> + PoolableConnection,
+
+    RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
+    S: tower::Layer<
+        SharedService<
+            http::Request<crate::Body>,
+            http::Response<hyper::body::Incoming>,
+            super::Error,
+        >,
+    >,
+    S::Service: tower::Service<
+            http::Request<crate::Body>,
+            Response = http::Response<hyper::body::Incoming>,
+            Error = super::Error,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <S::Service as tower::Service<http::Request<crate::Body>>>::Future: Send + 'static,
+{
     /// Build the client.
     pub fn build(self) -> Client {
         Client::new_from_service(self.build_service())

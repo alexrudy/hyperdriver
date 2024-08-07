@@ -73,7 +73,10 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// This is not meant to be the "accept" part of a server, but instead the connection
 /// management and serving part.
-pub trait Protocol<S, IO> {
+pub trait Protocol<S, IO, B> {
+    /// The body type for the protocol.
+    type ResponseBody: Body + Send + 'static;
+
     /// The error when a connection has a problem.
     type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
@@ -146,7 +149,7 @@ impl Server<(), (), (), ()> {
     /// let (_, incoming) = duplex::pair();
     /// let server = Server::builder()
     ///     .with_acceptor(incoming)
-    ///     .with_shared_service(service_fn(|req| async move {
+    ///     .with_shared_service(service_fn(|req: http::Request<Body>| async move {
     ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
     ///    }))
     ///    .with_auto_http();
@@ -203,7 +206,7 @@ impl<A, P, S, B> Server<A, P, S, B> {
     /// let (_, incoming) = duplex::pair();
     /// let server = Server::builder()
     ///     .with_acceptor(incoming)
-    ///     .with_shared_service(service_fn(|req| async move {
+    ///     .with_shared_service(service_fn(|req: http::Request<Body>| async move {
     ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
     ///    }))
     ///    .with_auto_http()
@@ -213,7 +216,7 @@ impl<A, P, S, B> Server<A, P, S, B> {
     pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<A, P, S, B, F>
     where
         S: MakeServiceRef<A::Conn, B>,
-        P: Protocol<S::Service, A::Conn>,
+        P: Protocol<S::Service, A::Conn, B>,
         A: Accept + Unpin,
         B: Body,
         F: Future<Output = ()> + Send + 'static,
@@ -239,7 +242,7 @@ impl<S, B> Server<Acceptor, AutoBuilder<TokioExecutor>, S, B> {
 impl<A, P, S, B> IntoFuture for Server<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
-    P: Protocol<S::Service, A::Conn>,
+    P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     B: Body,
 {
@@ -287,7 +290,7 @@ enum State<S, F> {
 impl<A, P, S, B> Serving<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
-    P: Protocol<S::Service, A::Conn>,
+    P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     A::Conn: HasConnectionInfo,
 {
@@ -344,7 +347,7 @@ where
 impl<A, P, S, B> Future for Serving<A, P, S, B>
 where
     S: MakeServiceRef<A::Conn, B>,
-    P: Protocol<S::Service, A::Conn>,
+    P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     B: Body,
 {
@@ -439,7 +442,7 @@ where
 impl<A, P, S, B, F> GracefulShutdown<A, P, S, B, F>
 where
     S: MakeServiceRef<A::Conn, B>,
-    P: Protocol<S::Service, A::Conn>,
+    P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     B: Body,
     F: Future<Output = ()>,
@@ -471,7 +474,7 @@ where
 impl<A, P, S, Body, F> Future for GracefulShutdown<A, P, S, Body, F>
 where
     S: MakeServiceRef<A::Conn, Body>,
-    P: Protocol<S::Service, A::Conn>,
+    P: Protocol<S::Service, A::Conn, Body>,
     A: Accept + Unpin,
     A::Conn: HasConnectionInfo,
     F: Future<Output = ()>,

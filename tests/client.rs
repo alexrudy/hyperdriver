@@ -24,7 +24,10 @@ async fn client() -> Result<(), BoxError> {
         .with_default_pool()
         .build();
 
-    let resp: Response = client.get("http://test/".parse().unwrap()).await?;
+    let resp: Response = client
+        .get("http://test/".parse().unwrap())
+        .await?
+        .map(Into::into);
 
     assert_eq!(resp.status(), StatusCode::OK);
     server.abort();
@@ -51,7 +54,7 @@ async fn client_h2() -> Result<(), BoxError> {
     let request = http::Request::get("http://test/")
         .version(http::Version::HTTP_2)
         .body(hyperdriver::body::Body::empty())?;
-    let resp: Response = client.request(request).await?;
+    let resp: Response = client.request(request).await?.map(Into::into);
 
     assert_eq!(resp.status(), StatusCode::OK);
 

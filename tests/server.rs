@@ -26,7 +26,7 @@ async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Resp
     )))
 }
 
-async fn connection<P: hyperdriver::client::conn::Protocol<Stream>>(
+async fn connection<P: hyperdriver::client::conn::Protocol<Stream, hyperdriver::Body>>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
@@ -48,13 +48,13 @@ fn hello_world() -> hyperdriver::body::Request {
         .unwrap()
 }
 
-fn serve<A, P, S, B>(server: Server<A, P, S, B>) -> impl Future<Output = Result<(), BoxError>>
+fn serve<A, P, S, BIn>(server: Server<A, P, S, BIn>) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeServiceRef<A::Conn, B> + Send + 'static,
+    S: MakeServiceRef<A::Conn, BIn> + Send + 'static,
     S::Future: Send + 'static,
-    P: Protocol<S::Service, A::Conn> + Send + 'static,
+    P: Protocol<S::Service, A::Conn, BIn> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
-    B: HttpBody + Send + 'static,
+    BIn: HttpBody + Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -85,7 +85,7 @@ fn serve_gracefully<A, P, S, B>(
 where
     S: MakeServiceRef<A::Conn, B> + Send + 'static,
     S::Future: Send + 'static,
-    P: Protocol<S::Service, A::Conn> + Send + 'static,
+    P: Protocol<S::Service, A::Conn, B> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
     B: HttpBody + Send + 'static,
 {

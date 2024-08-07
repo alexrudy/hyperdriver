@@ -47,7 +47,7 @@ pub enum ConnectionError {
     Protocol(#[source] io::Error),
 }
 
-type Adapted<S> = TowerHyperService<AdaptIncomingService<S>>;
+type Adapted<S, BIn, BOut> = TowerHyperService<AdaptIncomingService<S, BIn, BOut>>;
 
 /// A connection that can be gracefully shutdown.
 pub trait Connection {
@@ -55,32 +55,35 @@ pub trait Connection {
     fn graceful_shutdown(self: Pin<&mut Self>);
 }
 
-impl<S, IO> Connection for http1::UpgradeableConnection<TokioIo<IO>, Adapted<S>>
+impl<S, IO, BIn, BOut> Connection
+    for http1::UpgradeableConnection<TokioIo<IO>, Adapted<S, BIn, BOut>>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming>,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
-        self.graceful_shutdown()
+        http1::UpgradeableConnection::graceful_shutdown(self)
     }
 }
 
-impl<S, IO> Protocol<S, IO> for http1::Builder
+impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for http1::Builder
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + Send + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Data: Send,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Connection = http1::UpgradeableConnection<TokioIo<IO>, Adapted<S>>;
+    type ResponseBody = BOut;
+    type Connection = http1::UpgradeableConnection<TokioIo<IO>, Adapted<S, BIn, BOut>>;
     type Error = hyper::Error;
 
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection
@@ -95,32 +98,36 @@ where
     }
 }
 
-impl<S, IO> Connection for http2::Connection<TokioIo<IO>, Adapted<S>, TokioExecutor>
+impl<S, IO, BIn, BOut> Connection
+    for http2::Connection<TokioIo<IO>, Adapted<S, BIn, BOut>, TokioExecutor>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Data: Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
-        self.graceful_shutdown()
+        http2::Connection::graceful_shutdown(self)
     }
 }
 
-impl<S, IO> Protocol<S, IO> for http2::Builder<TokioExecutor>
+impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for http2::Builder<TokioExecutor>
 where
-    S: tower::Service<crate::body::Request, Response = crate::body::Response>
-        + Clone
-        + Send
-        + 'static,
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BIn: From<hyper::body::Incoming> + Send + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Data: Send + 'static,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Connection = http2::Connection<TokioIo<IO>, Adapted<S>, TokioExecutor>;
+    type ResponseBody = BOut;
+    type Connection = http2::Connection<TokioIo<IO>, Adapted<S, BIn, BOut>, TokioExecutor>;
     type Error = hyper::Error;
 
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {

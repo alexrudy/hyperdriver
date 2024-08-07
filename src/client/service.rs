@@ -10,6 +10,7 @@ use http::uri::Scheme;
 use http::HeaderValue;
 use http::Uri;
 use http::Version;
+use http_body::Body;
 use tower::util::Oneshot;
 use tower::ServiceExt;
 use tracing::warn;
@@ -41,22 +42,22 @@ use crate::info::HasConnectionInfo;
 /// and then make the request with `Service::call`. This can be simplified with the `tower::ServiceExt`
 /// which provides a `Service::oneshot` method that combines these two steps into a single future.
 #[derive(Debug)]
-pub struct ClientService<T, P, BOut = crate::Body>
+pub struct ClientService<T, P, BIn = crate::Body, BOut = crate::Body>
 where
     T: Transport,
-    P: Protocol<T::IO>,
+    P: Protocol<T::IO, BIn>,
     P::Connection: PoolableConnection,
 {
     pub(super) transport: T,
     pub(super) protocol: P,
     pub(super) pool: Option<pool::Pool<P::Connection>>,
-    pub(super) _body: std::marker::PhantomData<fn() -> BOut>,
+    pub(super) _body: std::marker::PhantomData<fn(BIn) -> BOut>,
 }
 
-impl<P, T, BOut> ClientService<T, P, BOut>
+impl<P, T, BIn, BOut> ClientService<T, P, BIn, BOut>
 where
     T: Transport,
-    P: Protocol<T::IO>,
+    P: Protocol<T::IO, BIn>,
     P::Connection: PoolableConnection,
 {
     /// Create a new client with the given transport, protocol, and pool configuration.
@@ -75,7 +76,14 @@ where
     }
 }
 
-impl ClientService<TlsTransport<TcpTransport>, HttpConnectionBuilder, crate::Body> {
+impl
+    ClientService<
+        TlsTransport<TcpTransport>,
+        HttpConnectionBuilder<crate::Body>,
+        crate::Body,
+        crate::Body,
+    >
+{
     /// Create a new client with the default configuration for making requests over TCP
     /// connections using the HTTP protocol.
     ///
@@ -98,9 +106,9 @@ impl ClientService<TlsTransport<TcpTransport>, HttpConnectionBuilder, crate::Bod
     }
 }
 
-impl<P, T, B> Clone for ClientService<T, P, B>
+impl<P, T, BIn, BOut> Clone for ClientService<T, P, BIn, BOut>
 where
-    P: Protocol<T::IO> + Clone,
+    P: Protocol<T::IO, BIn> + Clone,
     P::Connection: PoolableConnection,
     T: Transport + Clone,
 {
@@ -114,10 +122,14 @@ where
     }
 }
 
-impl<P, C, T, B> ClientService<T, P, B>
+impl<P, C, T, BIn, BOut> ClientService<T, P, BIn, BOut>
 where
-    C: Connection + PoolableConnection,
-    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    C: Connection<BIn> + PoolableConnection,
+    P: Protocol<T::IO, BIn, Connection = C, Error = ConnectionError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
@@ -164,20 +176,25 @@ where
     }
 }
 
-impl<P, C, T, BIn, BOut> tower::Service<http::Request<BIn>> for ClientService<T, P, BOut>
+impl<P, C, T, BIn, BOut> tower::Service<http::Request<BIn>> for ClientService<T, P, BIn, BOut>
 where
-    C: Connection + PoolableConnection,
-    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    C: Connection<BIn, ResBody = BOut> + PoolableConnection,
+    P: Protocol<T::IO, BIn, Connection = C, Error = ConnectionError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
-    BIn: Into<crate::body::Body>,
-    BOut: From<crate::body::Body> + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
-    C::ResBody: Into<crate::Body>,
+    BOut: Body + Unpin + 'static,
+    BIn: Body + Unpin + Send + 'static,
+    <BIn as Body>::Data: Send,
+    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     type Response = http::Response<BOut>;
     type Error = Error;
-    type Future = ResponseFuture<P::Connection, TransportStream<T::IO>, BOut>;
+    type Future = ResponseFuture<P::Connection, TransportStream<T::IO>, BIn, BOut>;
 
     fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -189,55 +206,58 @@ where
         let protocol: HttpProtocol = request.version().into();
 
         match self.connect_to(uri, protocol) {
-            Ok(checkout) => ResponseFuture::new(checkout, request.map(Into::into)),
+            Ok(checkout) => ResponseFuture::new(checkout, request),
             Err(error) => ResponseFuture::error(error),
         }
     }
 }
 
-impl<P, C, T, BOut> ClientService<T, P, BOut>
+impl<P, C, T, BIn, BOut> ClientService<T, P, BIn, BOut>
 where
-    C: Connection + PoolableConnection,
-    P: Protocol<T::IO, Connection = C, Error = ConnectionError> + Clone + Send + Sync + 'static,
+    C: Connection<BIn, ResBody = BOut> + PoolableConnection,
+    P: Protocol<T::IO, BIn, Connection = C, Error = ConnectionError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     T: Transport + 'static,
     T::IO: Unpin,
-    BOut: From<crate::body::Body> + Unpin,
+    BIn: Body + Unpin + Send + 'static,
+    <BIn as Body>::Data: Send,
+    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut: Body + Unpin + 'static,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
-    C::ResBody: Into<crate::Body>,
 {
     /// Send an http Request, and return a Future of the Response.
-    pub fn request(
-        &self,
-        request: crate::body::Request,
-    ) -> Oneshot<Self, http::Request<crate::Body>> {
+    pub fn request(&self, request: http::Request<BIn>) -> Oneshot<Self, http::Request<BIn>> {
         self.clone().oneshot(request)
     }
 }
 
 /// A future that resolves to an HTTP response.
-pub struct ResponseFuture<C, T, BOut = crate::Body>
+pub struct ResponseFuture<C, T, BIn, BOut>
 where
     C: pool::PoolableConnection,
     T: pool::PoolableTransport,
 {
-    inner: ResponseFutureState<C, T>,
-    _body: std::marker::PhantomData<fn() -> BOut>,
+    inner: ResponseFutureState<C, T, BIn, BOut>,
+    _body: std::marker::PhantomData<fn(BIn) -> BOut>,
 }
 
-impl<C: pool::PoolableConnection, T: pool::PoolableTransport, B> fmt::Debug
-    for ResponseFuture<C, T, B>
+impl<C: pool::PoolableConnection, T: pool::PoolableTransport, BIn, BOut> fmt::Debug
+    for ResponseFuture<C, T, BIn, BOut>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResponseFuture").finish()
     }
 }
 
-impl<C, T, BOut> ResponseFuture<C, T, BOut>
+impl<C, T, BIn, BOut> ResponseFuture<C, T, BIn, BOut>
 where
     C: pool::PoolableConnection,
     T: pool::PoolableTransport,
 {
-    fn new(checkout: Checkout<C, T, ConnectionError>, request: crate::body::Request) -> Self {
+    fn new(checkout: Checkout<C, T, ConnectionError>, request: http::Request<BIn>) -> Self {
         Self {
             inner: ResponseFutureState::Checkout { checkout, request },
             _body: std::marker::PhantomData,
@@ -252,12 +272,14 @@ where
     }
 }
 
-impl<C, T, BOut> Future for ResponseFuture<C, T, BOut>
+impl<C, T, BIn, BOut> Future for ResponseFuture<C, T, BIn, BOut>
 where
-    C: Connection + pool::PoolableConnection,
-    C::ResBody: Into<crate::body::Body>,
+    C: Connection<BIn, ResBody = BOut> + pool::PoolableConnection,
     T: pool::PoolableTransport,
-    BOut: From<crate::body::Body> + Unpin,
+    BOut: Body + Unpin + 'static,
+    BIn: Body + Unpin + Send + 'static,
+    <BIn as Body>::Data: Send,
+    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     type Output = Result<http::Response<BOut>, Error>;
 
@@ -302,19 +324,19 @@ where
     }
 }
 
-enum ResponseFutureState<C: pool::PoolableConnection, T: pool::PoolableTransport> {
+enum ResponseFutureState<C: pool::PoolableConnection, T: pool::PoolableTransport, BIn, BOut> {
     Empty,
     Checkout {
         checkout: Checkout<C, T, ConnectionError>,
-        request: crate::body::Request,
+        request: http::Request<BIn>,
     },
     ConnectionError(ConnectionError),
-    Request(BoxFuture<'static, Result<http::Response<crate::body::Body>, Error>>),
+    Request(BoxFuture<'static, Result<http::Response<BOut>, Error>>),
 }
 
 /// Prepare a request for sending over the connection.
-fn prepare_request<C: Connection + PoolableConnection>(
-    request: &mut http::Request<crate::body::Body>,
+fn prepare_request<BIn, BOut, C: Connection<BIn> + PoolableConnection>(
+    request: &mut http::Request<BOut>,
     conn: &Pooled<C>,
 ) -> Result<(), Error> {
     request
@@ -362,13 +384,12 @@ fn prepare_request<C: Connection + PoolableConnection>(
     Ok(())
 }
 
-async fn execute_request<C>(
-    mut request: crate::body::Request,
+async fn execute_request<C, BIn, BOut>(
+    mut request: http::Request<BIn>,
     mut conn: Pooled<C>,
-) -> Result<http::Response<crate::body::Body>, Error>
+) -> Result<http::Response<BOut>, Error>
 where
-    C: Connection + PoolableConnection,
-    C::ResBody: Into<crate::Body>,
+    C: Connection<BIn, ResBody = BOut> + PoolableConnection,
 {
     prepare_request(&mut request, &conn)?;
 
@@ -388,7 +409,7 @@ where
         });
     }
 
-    Ok(response.map(|body| body.into()))
+    Ok(response.map(Into::into))
 }
 
 /// Convert the URI to authority-form, if it is not already.
@@ -602,7 +623,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_mock_transport() {
         let transport = MockTransport::new(false);
-        let protocol = MockProtocol;
+        let protocol = MockProtocol::default();
         let pool = PoolConfig::default();
 
         let client: ClientService<MockTransport, MockProtocol, Body> =
@@ -623,7 +644,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_mock_connection_error() {
         let transport = MockTransport::connection_error();
-        let protocol = MockProtocol;
+        let protocol = MockProtocol::default();
         let pool = PoolConfig::default();
 
         let client: ClientService<MockTransport, MockProtocol, Body> =

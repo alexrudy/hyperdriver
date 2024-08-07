@@ -12,10 +12,12 @@ use crate::client::pool::PoolableConnection;
 use super::ProtocolRequest;
 
 /// A minimal protocol sender for testing purposes.
-#[derive(Debug, Clone)]
-pub struct MockSender;
+#[derive(Debug, Default, Clone)]
+pub struct MockSender {
+    _private: (),
+}
 
-impl Connection for MockSender {
+impl Connection<crate::Body> for MockSender {
     type ResBody = crate::Body;
 
     type Error = MockProtocolError;
@@ -53,15 +55,19 @@ impl PoolableConnection for MockSender {
 }
 
 /// Error type for the mock protocol.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Default, Error, PartialEq, Eq)]
 #[error("mock protocol error")]
-pub struct MockProtocolError;
+pub struct MockProtocolError {
+    _private: (),
+}
 
 /// A simple protocol for returning empty responses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MockProtocol;
+pub struct MockProtocol {
+    _private: (),
+}
 
-impl tower::Service<ProtocolRequest<MockStream>> for MockProtocol {
+impl tower::Service<ProtocolRequest<MockStream, crate::Body>> for MockProtocol {
     type Response = MockSender;
 
     type Error = ConnectionError;
@@ -74,8 +80,8 @@ impl tower::Service<ProtocolRequest<MockStream>> for MockProtocol {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, _: ProtocolRequest<MockStream>) -> Self::Future {
-        ready(Ok(MockSender))
+    fn call(&mut self, _: ProtocolRequest<MockStream, crate::Body>) -> Self::Future {
+        ready(Ok(MockSender::default()))
     }
 }
 
@@ -87,6 +93,6 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(MockSender: Connection, PoolableConnection);
-    assert_impl_all!(MockProtocol: Protocol<MockStream>);
+    assert_impl_all!(MockSender: Connection<crate::Body>, PoolableConnection);
+    assert_impl_all!(MockProtocol: Protocol<MockStream, crate::Body>);
 }
