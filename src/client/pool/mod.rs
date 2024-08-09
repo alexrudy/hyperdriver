@@ -103,7 +103,14 @@ impl<C: PoolableConnection> Pool<C> {
         if let Some(connection) = inner.pop(&key) {
             trace!("connection found in pool");
             connector = None;
-            return Checkout::new(key, self, rx, connector, Some(connection));
+            return Checkout::new(
+                key,
+                self,
+                rx,
+                connector,
+                Some(connection),
+                inner.config.continue_after_premeption,
+            );
         }
 
         trace!("checkout interested in pooled connections");
@@ -112,7 +119,7 @@ impl<C: PoolableConnection> Pool<C> {
         if inner.connecting.contains(&key) {
             trace!("connection in progress elsewhere, will wait");
             connector = None;
-            Checkout::new(key, self, rx, connector, None)
+            Checkout::new(key, self, rx, connector, None, false)
         } else {
             if multiplex {
                 // Only block new connection attempts if we can multiplex on this one.
@@ -120,7 +127,14 @@ impl<C: PoolableConnection> Pool<C> {
                 inner.connecting.insert(key.clone());
             }
             trace!("connecting to host");
-            Checkout::new(key, self, rx, connector, None)
+            Checkout::new(
+                key,
+                self,
+                rx,
+                connector,
+                None,
+                inner.config.continue_after_premeption,
+            )
         }
     }
 }
@@ -302,6 +316,9 @@ pub struct Config {
 
     /// The maximum number of idle connections per host.
     pub max_idle_per_host: usize,
+
+    /// Should in-progress connections continue after they get pre-empted by a new connection?
+    pub continue_after_premeption: bool,
 }
 
 impl Default for Config {
@@ -309,6 +326,7 @@ impl Default for Config {
         Self {
             idle_timeout: Some(Duration::from_secs(90)),
             max_idle_per_host: 32,
+            continue_after_premeption: true,
         }
     }
 }
@@ -435,6 +453,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -490,6 +509,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -544,6 +564,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -590,6 +611,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -626,6 +648,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -679,6 +702,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -712,6 +736,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -738,6 +763,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -764,6 +790,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
         let other = pool.clone();
 

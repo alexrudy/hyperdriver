@@ -212,6 +212,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
         waiter: Receiver<Pooled<C>>,
         connect: Option<Connector<C, T, E>>,
         connection: Option<C>,
+        continue_after_premeption: bool,
     ) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
@@ -237,7 +238,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
                 inner: InnerCheckoutConnecting::Connecting(connector),
                 connection,
                 connection_error: PhantomData,
-                delayed_drop: true,
+                delayed_drop: continue_after_premeption,
                 #[cfg(debug_assertions)]
                 id,
             }
@@ -249,7 +250,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
                 inner: InnerCheckoutConnecting::Waiting,
                 connection,
                 connection_error: PhantomData,
-                delayed_drop: true,
+                delayed_drop: false,
                 #[cfg(debug_assertions)]
                 id,
             }
