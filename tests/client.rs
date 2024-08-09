@@ -11,6 +11,8 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
 async fn client() -> Result<(), BoxError> {
+    let _ = tracing_subscriber::fmt::try_init();
+
     let (tx, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
@@ -38,6 +40,8 @@ async fn client() -> Result<(), BoxError> {
 
 #[tokio::test]
 async fn client_h2() -> Result<(), BoxError> {
+    let _ = tracing_subscriber::fmt::try_init();
+
     let (tx, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =

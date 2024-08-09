@@ -19,8 +19,10 @@ use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
 use super::pool::PoolableConnection;
+use super::ConnectionPoolLayer;
+use crate::service::RequestExecutor;
+use crate::service::{Http1ChecksLayer, Http2ChecksLayer, SetHostHeaderLayer};
 
-use super::ClientService;
 use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
@@ -484,12 +486,14 @@ where
                 http::header::USER_AGENT,
                 user_agent,
             ))
-            .service(ClientService {
-                transport,
-                protocol: self.protocol.build(),
-                pool: self.pool.map(super::pool::Pool::new),
-                _body: std::marker::PhantomData,
-            });
+            .layer(
+                ConnectionPoolLayer::new(transport, self.protocol.build())
+                    .with_optional_pool(self.pool.clone()),
+            )
+            .layer(SetHostHeaderLayer::new())
+            .layer(Http2ChecksLayer::new())
+            .layer(Http1ChecksLayer::new())
+            .service(RequestExecutor::new());
 
         SharedService::new(service)
     }

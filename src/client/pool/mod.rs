@@ -30,6 +30,7 @@ use tracing::trace;
 mod checkout;
 mod idle;
 pub(super) mod key;
+pub(super) mod service;
 mod weakopt;
 
 pub(crate) use self::checkout::Checkout;
@@ -273,6 +274,10 @@ pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     fn reuse(&mut self) -> Option<Self>;
 }
 
+/// Wrapper type for a connection which is managed by a pool.
+///
+/// This type is used outside of the Pool to ensure that dropped
+/// connections are returned to the pool.
 pub(crate) struct Pooled<C: PoolableConnection> {
     connection: Option<C>,
     is_reused: bool,

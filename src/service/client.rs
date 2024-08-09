@@ -1,14 +1,22 @@
+//! Core service for implementing a Client.
+//!
+//! This service accepts an `ExecuteRequest` and returns a `http::Response`.
+//!
+//! The `ExecuteRequest` contains the connection to use for the request and the
+//! request to execute.
+
 use std::fmt;
 use std::task::Poll;
 
 use futures_util::future::BoxFuture;
 use http_body::Body;
 
-use super::conn::Connection;
-use super::pool::PoolableConnection;
-use super::pool::Pooled;
-use super::Error;
+use crate::client::conn::Connection;
+use crate::client::pool::PoolableConnection;
+use crate::client::pool::Pooled;
+use crate::client::Error;
 
+/// A wrapper that binds a connection and request together.
 #[derive(Debug)]
 pub struct ExecuteRequest<C: Connection<B> + PoolableConnection, B> {
     /// The connection to use for the request.
@@ -18,14 +26,31 @@ pub struct ExecuteRequest<C: Connection<B> + PoolableConnection, B> {
 }
 
 impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
+    /// A reference to the connection.
     pub fn connection(&self) -> &C {
         &self.conn
     }
+
+    /// A reference to the request.
+    pub fn request(&self) -> &http::Request<B> {
+        &self.request
+    }
+
+    /// A mutable reference to the request.
+    pub fn request_mut(&mut self) -> &mut http::Request<B> {
+        &mut self.request
+    }
 }
 
-#[derive(Default)]
+/// A service that executes requests on associated connections.
 pub struct RequestExecutor<C: Connection<B> + PoolableConnection, B> {
     _private: std::marker::PhantomData<fn(C, B) -> ()>,
+}
+
+impl<C: Connection<B> + PoolableConnection, B> Default for RequestExecutor<C, B> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<C: Connection<B> + PoolableConnection, B> fmt::Debug for RequestExecutor<C, B> {
@@ -41,6 +66,7 @@ impl<C: Connection<B> + PoolableConnection, B> Clone for RequestExecutor<C, B> {
 }
 
 impl<C: Connection<B> + PoolableConnection, B> RequestExecutor<C, B> {
+    /// Create a new `RequestExecutor`.
     pub fn new() -> Self {
         Self {
             _private: std::marker::PhantomData,
