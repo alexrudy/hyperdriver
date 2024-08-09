@@ -1,10 +1,8 @@
 use std::fmt;
-use std::future::poll_fn;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::Mutex;
+
 use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
@@ -18,11 +16,11 @@ use tracing::debug;
 use tracing::trace;
 
 use super::Key;
-use super::PoolInner;
+use super::Pool;
+use super::PoolRef;
 use super::PoolableConnection;
 use super::PoolableTransport;
 use super::Pooled;
-use super::WeakOpt;
 
 #[cfg(debug_assertions)]
 static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
@@ -59,8 +57,16 @@ pub enum Error<E> {
 
 #[pin_project(project = WaitingProjected)]
 pub(crate) enum Waiting<C: PoolableConnection> {
+    /// The checkout is waiting on an idle connection, and should
+    /// attempt its own connection in the interim as well.
     Idle(#[pin] Receiver<Pooled<C>>),
+
+    /// The checkout is waiting on a connection currently in the process
+    /// of connecting, and should wait for that connection to complete,
+    /// not starting its own connection.
     Connecting(#[pin] Receiver<Pooled<C>>),
+
+    /// There is no pool for connections to wait for.
     NoPool,
 }
 
@@ -147,12 +153,13 @@ impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug
 #[pin_project(PinnedDrop)]
 pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E: 'static> {
     key: Key,
-    pool: WeakOpt<Mutex<PoolInner<C>>>,
+    pool: PoolRef<C>,
     #[pin]
     waiter: Waiting<C>,
     inner: InnerCheckoutConnecting<C, T, E>,
     connection: Option<C>,
     connection_error: PhantomData<fn() -> E>,
+    delayed_drop: bool,
     #[cfg(debug_assertions)]
     id: CheckoutId,
 }
@@ -169,14 +176,31 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> fmt::Debug for Che
 }
 
 impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> {
+    /// Returns a new checkout which takes over ownership of the in-progress connection.
+    fn as_detached(self: Pin<&mut Self>) -> Self {
+        let this = self.project();
+        Checkout {
+            key: this.key.clone(),
+            pool: this.pool.clone(),
+            waiter: Waiting::NoPool,
+            inner: std::mem::replace(this.inner, InnerCheckoutConnecting::Connected),
+            connection: None,
+            connection_error: PhantomData,
+            delayed_drop: false,
+            #[cfg(debug_assertions)]
+            id: CheckoutId::new(),
+        }
+    }
+
     pub(crate) fn detached(key: Key, connector: Connector<C, T, E>) -> Self {
         Self {
             key,
-            pool: WeakOpt::none(),
+            pool: PoolRef::none(),
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
             connection: None,
             connection_error: PhantomData,
+            delayed_drop: false,
             #[cfg(debug_assertions)]
             id: CheckoutId::new(),
         }
@@ -184,7 +208,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
 
     pub(super) fn new(
         key: Key,
-        pool: &Arc<Mutex<PoolInner<C>>>,
+        pool: &Pool<C>,
         waiter: Receiver<Pooled<C>>,
         connect: Option<Connector<C, T, E>>,
         connection: Option<C>,
@@ -192,38 +216,40 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
 
-        let pool = WeakOpt::downgrade(pool);
         if connection.is_some() {
             tracing::debug!(key=%key, "connection recieved from pool");
             Self {
                 key,
-                pool,
+                pool: pool.as_ref(),
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connected,
                 connection,
                 connection_error: PhantomData,
+                delayed_drop: false,
                 #[cfg(debug_assertions)]
                 id,
             }
         } else if let Some(connector) = connect {
             Self {
                 key,
-                pool,
+                pool: pool.as_ref(),
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connecting(connector),
                 connection,
                 connection_error: PhantomData,
+                delayed_drop: true,
                 #[cfg(debug_assertions)]
                 id,
             }
         } else {
             Self {
                 key,
-                pool,
+                pool: pool.as_ref(),
                 waiter: Waiting::Connecting(waiter),
                 inner: InnerCheckoutConnecting::Waiting,
                 connection,
                 connection_error: PhantomData,
+                delayed_drop: true,
                 #[cfg(debug_assertions)]
                 id,
             }
@@ -288,10 +314,8 @@ where
                 // This can happen if we connect expecting an HTTP/1.1 connection, but during the TLS
                 // handshake we discover that the connection is actually an HTTP/2 connection.
                 trace!(key=%this.key, "connection can be shared, telling pool to wait for handshake");
-                if let Some(pool) = this.pool.upgrade() {
-                    if let Ok(mut inner) = pool.lock() {
-                        inner.connected_in_handshake(this.key);
-                    }
+                if let Some(mut pool) = this.pool.lock() {
+                    pool.connected_in_handshake(this.key);
                 }
             }
 
@@ -326,32 +350,26 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
     }
 }
 
-fn register_connected<C>(
-    poolref: &WeakOpt<Mutex<PoolInner<C>>>,
-    key: &Key,
-    mut connection: C,
-) -> Pooled<C>
+fn register_connected<C>(poolref: &PoolRef<C>, key: &Key, mut connection: C) -> Pooled<C>
 where
     C: PoolableConnection,
 {
-    if let Some(pool) = poolref.upgrade() {
-        if let Ok(mut inner) = pool.lock() {
-            if let Some(reused) = connection.reuse() {
-                inner.push(key.clone(), reused, poolref.clone());
-                return Pooled {
-                    connection: Some(connection),
-                    is_reused: true,
-                    key: key.clone(),
-                    pool: WeakOpt::none(),
-                };
-            } else {
-                return Pooled {
-                    connection: Some(connection),
-                    is_reused: false,
-                    key: key.clone(),
-                    pool: WeakOpt::downgrade(&pool),
-                };
-            }
+    if let Some(mut pool) = poolref.lock() {
+        if let Some(reused) = connection.reuse() {
+            pool.push(key.clone(), reused, poolref.clone());
+            return Pooled {
+                connection: Some(connection),
+                is_reused: true,
+                key: key.clone(),
+                pool: PoolRef::none(),
+            };
+        } else {
+            return Pooled {
+                connection: Some(connection),
+                is_reused: false,
+                key: key.clone(),
+                pool: poolref.clone(),
+            };
         }
     }
 
@@ -360,7 +378,7 @@ where
         connection: Some(connection),
         is_reused: false,
         key: key.clone(),
-        pool: WeakOpt::none(),
+        pool: PoolRef::none(),
     }
 }
 
@@ -370,54 +388,23 @@ where
     E: 'static,
 {
     fn drop(mut self: Pin<&mut Self>) {
-        if let Some(pool) = self.pool.upgrade() {
-            if let Ok(mut inner) = pool.lock() {
-                inner.cancel_connection(&self.key);
-            }
+        if let Some(mut pool) = self.pool.lock() {
+            pool.cancel_connection(&self.key);
 
-            let state = std::mem::replace(&mut self.inner, InnerCheckoutConnecting::Connected);
-
-            match state {
-                InnerCheckoutConnecting::Connecting(mut connector) => {
-                    let pool = self.pool.clone();
-                    let key = self.key.clone();
-                    tokio::spawn(async move {
-                        let io: T = match poll_fn(|cx| connector.transport.as_mut().poll(cx)).await
-                        {
-                            Ok(io) => io,
-                            Err(_) => {
-                                tracing::error!(%key, "error connecting background transport");
-                                return;
-                            }
-                        };
-
-                        let connection = match (connector.handshake)(io).await {
-                            Ok(conn) => conn,
-                            Err(_) => {
-                                tracing::error!(%key, "error handshaking background connection");
-                                return;
-                            }
-                        };
-
-                        register_connected(&pool, &key, connection);
-                    });
-                }
-                InnerCheckoutConnecting::Handshaking(handshake) => {
-                    let pool = self.pool.clone();
-                    let key = self.key.clone();
-                    tokio::spawn(async move {
-                        let connection = match handshake.await {
-                            Ok(conn) => conn,
-                            Err(_) => {
-                                tracing::error!(key=%key, "error handshaking connection");
-                                return;
-                            }
-                        };
-
-                        register_connected(&pool, &key, connection);
-                    });
-                }
-                _ => {}
+            // If we are still connecting, we can detach and finish that elsewhere
+            if self.delayed_drop
+                && !matches!(
+                    self.inner,
+                    InnerCheckoutConnecting::Connected | InnerCheckoutConnecting::Waiting,
+                )
+            {
+                let checkout = self.as_detached();
+                tokio::spawn(async move {
+                    let key = checkout.key.clone();
+                    if let Err(error) = checkout.await {
+                        debug!(%key, "background connection failed to connect: {}", error);
+                    }
+                });
             }
         }
     }
@@ -456,7 +443,7 @@ mod test {
         let dbg = format!("{:?}", checkout);
         assert_eq!(
             dbg,
-            "Checkout { key: Key(\"http\", Some(localhost:8080)), pool: WeakOpt(None), waiter: NoPool, inner: Connecting }"
+            "Checkout { key: Key(\"http\", Some(localhost:8080)), pool: PoolRef(WeakOpt(None)), waiter: NoPool, inner: Connecting }"
         );
 
         let connection = checkout.await.unwrap();
