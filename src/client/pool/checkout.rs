@@ -1,4 +1,5 @@
 use std::fmt;
+use std::future::poll_fn;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -9,7 +10,6 @@ use std::task::Context;
 use std::task::Poll;
 
 use futures_util::future::BoxFuture;
-use futures_util::FutureExt as _;
 use pin_project::pin_project;
 use pin_project::pinned_drop;
 use thiserror::Error;
@@ -145,7 +145,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug
 }
 
 #[pin_project(PinnedDrop)]
-pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E> {
+pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E: 'static> {
     key: Key,
     pool: WeakOpt<Mutex<PoolInner<C>>>,
     #[pin]
@@ -157,7 +157,7 @@ pub(crate) struct Checkout<C: PoolableConnection, T: PoolableTransport, E> {
     id: CheckoutId,
 }
 
-impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug for Checkout<C, T, E> {
+impl<C: PoolableConnection, T: PoolableTransport, E: 'static> fmt::Debug for Checkout<C, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Checkout")
             .field("key", &self.key)
@@ -168,7 +168,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug for Checkout<C, 
     }
 }
 
-impl<C: PoolableConnection, T: PoolableTransport, E> Checkout<C, T, E> {
+impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> {
     pub(crate) fn detached(key: Key, connector: Connector<C, T, E>) -> Self {
         Self {
             key,
@@ -262,6 +262,7 @@ where
             let transport: T = match this.inner {
                 InnerCheckoutConnecting::Waiting => {
                     // We're waiting on a connection to be ready.
+                    // If that were still happening, we would bail out above.
                     return Poll::Ready(Err(Error::Unavailable));
                 }
                 InnerCheckoutConnecting::Connected => {
@@ -274,11 +275,11 @@ where
                     return Poll::Ready(Ok(self.as_mut().connected(connection)));
                 }
                 InnerCheckoutConnecting::Connecting(Connector { transport, .. }) => {
-                    ready!(transport.poll_unpin(cx)).map_err(Error::Connecting)?
+                    ready!(transport.as_mut().poll(cx)).map_err(Error::Connecting)?
                 }
                 InnerCheckoutConnecting::Handshaking(handshake) => {
                     let connection =
-                        ready!(handshake.poll_unpin(cx)).map_err(Error::Handshaking)?;
+                        ready!(handshake.as_mut().poll(cx)).map_err(Error::Handshaking)?;
                     return Poll::Ready(Ok(self.as_mut().connected(connection)));
                 }
             };
@@ -307,7 +308,7 @@ where
     }
 }
 
-impl<C: PoolableConnection, T: PoolableTransport, E> Checkout<C, T, E> {
+impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> {
     /// Checks the waiter to see if a new connection is ready and can be passed along.
     ///
     /// If there is no waiter, this function returns `Poll::Ready(Ok(None))`. If there is
@@ -320,44 +321,103 @@ impl<C: PoolableConnection, T: PoolableTransport, E> Checkout<C, T, E> {
     }
 
     /// Called to register a new connection with the pool.
-    pub(crate) fn connected(self: Pin<&mut Self>, mut connection: C) -> Pooled<C> {
-        if let Some(pool) = self.pool.upgrade() {
-            if let Ok(mut inner) = pool.lock() {
-                if let Some(reused) = connection.reuse() {
-                    inner.push(self.key.clone(), reused, self.pool.clone());
-                    return Pooled {
-                        connection: Some(connection),
-                        is_reused: true,
-                        key: self.key.clone(),
-                        pool: WeakOpt::none(),
-                    };
-                } else {
-                    return Pooled {
-                        connection: Some(connection),
-                        is_reused: false,
-                        key: self.key.clone(),
-                        pool: WeakOpt::downgrade(&pool),
-                    };
-                }
+    pub(crate) fn connected(self: Pin<&mut Self>, connection: C) -> Pooled<C> {
+        register_connected(&self.pool, &self.key, connection)
+    }
+}
+
+fn register_connected<C>(
+    poolref: &WeakOpt<Mutex<PoolInner<C>>>,
+    key: &Key,
+    mut connection: C,
+) -> Pooled<C>
+where
+    C: PoolableConnection,
+{
+    if let Some(pool) = poolref.upgrade() {
+        if let Ok(mut inner) = pool.lock() {
+            if let Some(reused) = connection.reuse() {
+                inner.push(key.clone(), reused, poolref.clone());
+                return Pooled {
+                    connection: Some(connection),
+                    is_reused: true,
+                    key: key.clone(),
+                    pool: WeakOpt::none(),
+                };
+            } else {
+                return Pooled {
+                    connection: Some(connection),
+                    is_reused: false,
+                    key: key.clone(),
+                    pool: WeakOpt::downgrade(&pool),
+                };
             }
         }
+    }
 
-        // No pool or lock was available, so we can't add the connection to the pool.
-        Pooled {
-            connection: Some(connection),
-            is_reused: false,
-            key: self.key.clone(),
-            pool: WeakOpt::none(),
-        }
+    // No pool or lock was available, so we can't add the connection to the pool.
+    Pooled {
+        connection: Some(connection),
+        is_reused: false,
+        key: key.clone(),
+        pool: WeakOpt::none(),
     }
 }
 
 #[pinned_drop]
-impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, T, E> {
-    fn drop(self: Pin<&mut Self>) {
+impl<C: PoolableConnection, T: PoolableTransport, E> PinnedDrop for Checkout<C, T, E>
+where
+    E: 'static,
+{
+    fn drop(mut self: Pin<&mut Self>) {
         if let Some(pool) = self.pool.upgrade() {
             if let Ok(mut inner) = pool.lock() {
                 inner.cancel_connection(&self.key);
+            }
+
+            let state = std::mem::replace(&mut self.inner, InnerCheckoutConnecting::Connected);
+
+            match state {
+                InnerCheckoutConnecting::Connecting(mut connector) => {
+                    let pool = self.pool.clone();
+                    let key = self.key.clone();
+                    tokio::spawn(async move {
+                        let io: T = match poll_fn(|cx| connector.transport.as_mut().poll(cx)).await
+                        {
+                            Ok(io) => io,
+                            Err(_) => {
+                                tracing::error!(%key, "error connecting background transport");
+                                return;
+                            }
+                        };
+
+                        let connection = match (connector.handshake)(io).await {
+                            Ok(conn) => conn,
+                            Err(_) => {
+                                tracing::error!(%key, "error handshaking background connection");
+                                return;
+                            }
+                        };
+
+                        register_connected(&pool, &key, connection);
+                    });
+                }
+                InnerCheckoutConnecting::Handshaking(handshake) => {
+                    let pool = self.pool.clone();
+                    let key = self.key.clone();
+                    tokio::spawn(async move {
+                        let connection = match handshake.await {
+                            Ok(conn) => conn,
+                            Err(_) => {
+                                tracing::error!(key=%key, "error handshaking connection");
+                                return;
+                            }
+                        };
+
+                        register_connected(&pool, &key, connection);
+                    });
+                }
+                _ => {}
             }
         }
     }

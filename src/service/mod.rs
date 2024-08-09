@@ -1,5 +1,10 @@
 //! A collection of utilities for working with `Service` types and Servers.
 
+#[cfg(feature = "client")]
+pub(crate) mod client;
+mod error;
+#[cfg(feature = "client")]
+mod host;
 mod http;
 #[cfg(feature = "incoming")]
 mod incoming;
@@ -11,6 +16,15 @@ mod serviceref;
 mod shared;
 mod timeout;
 
+#[cfg(feature = "client")]
+pub use self::client::{ExecuteRequest, RequestExecutor};
+pub use self::error::{MaybeErrorFuture, PreprocessLayer, PreprocessService};
+#[cfg(feature = "client")]
+pub use self::host::{SetHostHeader, SetHostHeaderLayer};
+#[cfg(feature = "client")]
+pub use self::http::http1::{Http1ChecksLayer, Http1ChecksService};
+#[cfg(feature = "client")]
+pub use self::http::http2::{Http2ChecksLayer, Http2ChecksService};
 pub use self::http::HttpService;
 #[cfg(feature = "incoming")]
 pub use self::incoming::{AdaptIncomingLayer, AdaptIncomingService};

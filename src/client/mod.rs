@@ -4,7 +4,7 @@
 //!
 //! 1. The high-level [`Client`] API, which is the most user-friendly and abstracts away most of the details.
 //!    It is "batteries-included", and supports features like redirects, retries and timeouts.
-//! 2. The [`Service`][ClientService] API, which is a lower-level API that allows for more control over the request and response.
+//! 2. The [`Service`][ConnectionPoolService] API, which is a lower-level API that allows for more control over the request and response.
 //!    It presents a `tower::Service` that can be used to send requests and receive responses, and can be wrapped
 //!    by middleware compatible with the tower ecosystem.
 //! 3. The [connection][self::conn] API, which is the lowest-level API that allows for direct control over the
@@ -21,14 +21,14 @@ use tower::ServiceExt;
 
 use self::conn::protocol::auto;
 use self::conn::transport::tcp::TcpTransportConfig;
-pub use self::service::ClientService;
+pub use self::pool::service::ConnectionPoolLayer;
+pub use self::pool::service::ConnectionPoolService;
 use crate::service::SharedService;
 
 mod builder;
 pub mod conn;
 mod error;
 pub mod pool;
-mod service;
 
 pub use self::error::Error;
 pub use self::pool::Config as PoolConfig;
@@ -82,7 +82,7 @@ impl ClientRef {
 
 /// A high-level async HTTP client.
 ///
-/// This client is built on top of the [`Service`][ClientService] API and provides a more user-friendly interface,
+/// This client is built on top of the [`Service`][ConnectionPoolService] API and provides a more user-friendly interface,
 /// including support for retries, redirects and timeouts.
 ///
 /// # Example
