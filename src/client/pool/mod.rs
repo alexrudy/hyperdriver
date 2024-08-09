@@ -21,9 +21,11 @@ use std::fmt;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::Mutex;
+
 use std::time::Duration;
 
+use parking_lot::ArcMutexGuard;
+use parking_lot::Mutex;
 use tokio::sync::oneshot::Sender;
 use tracing::trace;
 
@@ -69,6 +71,12 @@ impl<T: PoolableConnection> Pool<T> {
             inner: Arc::new(Mutex::new(PoolInner::new(config))),
         }
     }
+
+    fn as_ref(&self) -> PoolRef<T> {
+        PoolRef {
+            inner: WeakOpt::downgrade(&self.inner),
+        }
+    }
 }
 
 impl<T: PoolableConnection> Default for Pool<T> {
@@ -88,14 +96,21 @@ impl<C: PoolableConnection> Pool<C> {
     where
         T: PoolableTransport,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut connector: Option<Connector<C, T, E>> = Some(connector);
 
         if let Some(connection) = inner.pop(&key) {
             trace!("connection found in pool");
             connector = None;
-            return Checkout::new(key, &self.inner, rx, connector, Some(connection));
+            return Checkout::new(
+                key,
+                self,
+                rx,
+                connector,
+                Some(connection),
+                inner.config.continue_after_premeption,
+            );
         }
 
         trace!("checkout interested in pooled connections");
@@ -104,7 +119,7 @@ impl<C: PoolableConnection> Pool<C> {
         if inner.connecting.contains(&key) {
             trace!("connection in progress elsewhere, will wait");
             connector = None;
-            Checkout::new(key, &self.inner, rx, connector, None)
+            Checkout::new(key, self, rx, connector, None, false)
         } else {
             if multiplex {
                 // Only block new connection attempts if we can multiplex on this one.
@@ -112,8 +127,88 @@ impl<C: PoolableConnection> Pool<C> {
                 inner.connecting.insert(key.clone());
             }
             trace!("connecting to host");
-            Checkout::new(key, &self.inner, rx, connector, None)
+            Checkout::new(
+                key,
+                self,
+                rx,
+                connector,
+                None,
+                inner.config.continue_after_premeption,
+            )
         }
+    }
+}
+
+struct PoolRef<C>
+where
+    C: PoolableConnection,
+{
+    inner: WeakOpt<Mutex<PoolInner<C>>>,
+}
+
+impl<C> fmt::Debug for PoolRef<C>
+where
+    C: PoolableConnection,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PoolRef").field(&self.inner).finish()
+    }
+}
+
+impl<C> PoolRef<C>
+where
+    C: PoolableConnection,
+{
+    fn none() -> Self {
+        Self {
+            inner: WeakOpt::none(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn try_lock(&self) -> Option<PoolGuard<C>> {
+        self.inner
+            .upgrade()
+            .and_then(|inner| inner.try_lock_arc().map(PoolGuard))
+    }
+
+    fn lock(&self) -> Option<PoolGuard<C>> {
+        self.inner
+            .upgrade()
+            .map(|inner| PoolGuard(inner.lock_arc()))
+    }
+}
+
+impl<C> Clone for PoolRef<C>
+where
+    C: PoolableConnection,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+struct PoolGuard<C: PoolableConnection>(ArcMutexGuard<parking_lot::RawMutex, PoolInner<C>>);
+
+impl<C> Deref for PoolGuard<C>
+where
+    C: PoolableConnection,
+{
+    type Target = PoolInner<C>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<C> DerefMut for PoolGuard<C>
+where
+    C: PoolableConnection,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -154,7 +249,7 @@ impl<C: PoolableConnection> PoolInner<C> {
 }
 
 impl<C: PoolableConnection> PoolInner<C> {
-    fn push(&mut self, key: key::Key, mut connection: C, pool_ref: WeakOpt<Mutex<Self>>) {
+    fn push(&mut self, key: key::Key, mut connection: C, pool_ref: PoolRef<C>) {
         self.connecting.remove(&key);
 
         if let Some(waiters) = self.waiting.get_mut(&key) {
@@ -221,6 +316,9 @@ pub struct Config {
 
     /// The maximum number of idle connections per host.
     pub max_idle_per_host: usize,
+
+    /// Should in-progress connections continue after they get pre-empted by a new connection?
+    pub continue_after_premeption: bool,
 }
 
 impl Default for Config {
@@ -228,6 +326,7 @@ impl Default for Config {
         Self {
             idle_timeout: Some(Duration::from_secs(90)),
             max_idle_per_host: 32,
+            continue_after_premeption: true,
         }
     }
 }
@@ -282,7 +381,7 @@ pub(crate) struct Pooled<C: PoolableConnection> {
     connection: Option<C>,
     is_reused: bool,
     key: key::Key,
-    pool: weakopt::WeakOpt<Mutex<PoolInner<C>>>,
+    pool: PoolRef<C>,
 }
 
 impl<C: fmt::Debug + PoolableConnection> fmt::Debug for Pooled<C> {
@@ -313,11 +412,9 @@ impl<C: PoolableConnection> Drop for Pooled<C> {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
             if connection.is_open() && !self.is_reused {
-                if let Some(pool) = self.pool.upgrade() {
-                    if let Ok(mut inner) = pool.lock() {
-                        trace!(key=%self.key, "open connection returned to pool");
-                        inner.push(self.key.clone(), connection, self.pool.clone());
-                    }
+                if let Some(mut pool) = self.pool.lock() {
+                    trace!(key=%self.key, "open connection returned to pool");
+                    pool.push(self.key.clone(), connection, self.pool.clone());
                 }
             }
         }
@@ -342,9 +439,9 @@ mod tests {
         let config = Config::default();
         let pool: Pool<MockStream> = Pool::new(config);
 
-        assert!(pool.inner.lock().unwrap().config.idle_timeout.unwrap() > Duration::from_secs(1));
-        assert!(pool.inner.lock().unwrap().config.max_idle_per_host > 0);
-        assert!(pool.inner.lock().unwrap().config.max_idle_per_host < 2048);
+        assert!(pool.inner.lock().config.idle_timeout.unwrap() > Duration::from_secs(1));
+        assert!(pool.inner.lock().config.max_idle_per_host > 0);
+        assert!(pool.inner.lock().config.max_idle_per_host < 2048);
     }
 
     assert_impl_all!(Pool<MockStream>: Clone);
@@ -356,6 +453,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -411,6 +509,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -465,6 +564,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -511,6 +611,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -531,9 +632,8 @@ mod tests {
 
         // Return the connection to the pool, sending it out to the new checkout
         // that is waiting, cancelling the checkout connect.
-        let pool_ref = WeakOpt::downgrade(&pool.inner);
 
-        pool.inner.lock().unwrap().push(key.clone(), conn, pool_ref);
+        pool.inner.lock().push(key.clone(), conn, pool.as_ref());
 
         let conn = checkout.now_or_never().unwrap().unwrap();
 
@@ -548,6 +648,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -574,7 +675,6 @@ mod tests {
         assert!(!pool
             .inner
             .lock()
-            .unwrap()
             .waiting
             .get(&key)
             .expect("no waiting connections in pool")
@@ -587,11 +687,9 @@ mod tests {
         tracing::debug!("Inserting original connection");
         // Return the connection to the pool, sending it out to the new checkout
         // that is waiting, cancelling the checkout connect.
-        let pool_ref = WeakOpt::downgrade(&pool.inner);
         pool.inner
             .lock()
-            .unwrap()
-            .push(key.clone(), conn_first, pool_ref);
+            .push(key.clone(), conn_first, pool.as_ref());
 
         assert!(conn.is_open());
         assert_ne!(conn.id(), first_id, "connection should not be re-used");
@@ -604,6 +702,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -637,6 +736,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -663,6 +763,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
 
         let key: key::Key = (
@@ -689,6 +790,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
+            continue_after_premeption: false,
         });
         let other = pool.clone();
 
