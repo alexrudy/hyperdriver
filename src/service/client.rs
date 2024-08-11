@@ -20,12 +20,22 @@ use crate::client::Error;
 #[derive(Debug)]
 pub struct ExecuteRequest<C: Connection<B> + PoolableConnection, B> {
     /// The connection to use for the request.
-    pub(crate) conn: Pooled<C>,
+    conn: Pooled<C>,
     /// The request to execute.
-    pub(crate) request: http::Request<B>,
+    request: http::Request<B>,
 }
 
 impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
+    /// Create a new request
+    pub fn new(conn: Pooled<C>, request: http::Request<B>) -> Self {
+        Self { conn, request }
+    }
+
+    /// Split the request into its parts.
+    pub fn into_parts(self) -> (Pooled<C>, http::Request<B>) {
+        (self.conn, self.request)
+    }
+
     /// A reference to the connection.
     pub fn connection(&self) -> &C {
         &self.conn

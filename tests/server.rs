@@ -12,11 +12,12 @@ use hyperdriver::client::conn::Connection as _;
 use hyperdriver::client::conn::Stream;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::service::MakeServiceRef;
+use hyperdriver::Body;
 
 use hyperdriver::server::{Protocol, Server};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Response, BoxError> {
+async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
     tracing::trace!("processing request");
     let body = req.into_body();
     let data = body.collect().await?;
@@ -41,10 +42,10 @@ async fn connection<P: hyperdriver::client::conn::Protocol<Stream, hyperdriver::
     Ok(conn)
 }
 
-fn hello_world() -> hyperdriver::body::Request {
+fn hello_world() -> http::Request<Body> {
     http::Request::builder()
         .uri("https://localhost/hello")
-        .body(hyperdriver::body::Body::from("hello world"))
+        .body(Body::from("hello world"))
         .unwrap()
 }
 

@@ -3,8 +3,6 @@ use std::fmt::Debug;
 use tower::Layer;
 use tower::Service;
 
-use http::{Request, Response};
-
 /// Layer to convert a body to use `Body` as the request body from `hyper::body::Incoming`.
 #[derive(Debug, Clone)]
 pub struct AdaptIncomingLayer<BIn, BOut> {
@@ -86,12 +84,13 @@ impl<S, BIn, BOut> AdaptIncomingService<S, BIn, BOut> {
 }
 
 #[cfg(feature = "incoming")]
-impl<T, BIn, BOut> Service<Request<hyper::body::Incoming>> for AdaptIncomingService<T, BIn, BOut>
+impl<T, BIn, BOut> Service<http::Request<hyper::body::Incoming>>
+    for AdaptIncomingService<T, BIn, BOut>
 where
-    T: Service<Request<BIn>, Response = Response<BOut>>,
+    T: Service<http::Request<BIn>, Response = http::Response<BOut>>,
     BIn: From<hyper::body::Incoming>,
 {
-    type Response = Response<BOut>;
+    type Response = http::Response<BOut>;
     type Error = T::Error;
     type Future = T::Future;
 
@@ -114,16 +113,15 @@ mod tests {
 
     use super::*;
     use crate::body::Body;
-    use http::Request;
     use http_body::Body as HttpBody;
 
     #[allow(dead_code, clippy::async_yields_async)]
     fn compile_adapt_incoming() {
         let _ = tower::ServiceBuilder::new()
             .layer(AdaptIncomingLayer::<Body, Body>::new())
-            .service(tower::service_fn(|req: Request<Body>| async move {
+            .service(tower::service_fn(|req: http::Request<Body>| async move {
                 assert_eq!(req.body().size_hint().exact(), Some(0));
-                async { Ok::<_, Infallible>(Response::new(Body::empty())) }
+                async { Ok::<_, Infallible>(http::Response::new(Body::empty())) }
             }));
     }
 }

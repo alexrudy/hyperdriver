@@ -5,7 +5,6 @@ use std::{fmt, future::Future};
 
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt as _;
-use http::Response;
 use http_body::Body as HttpBody;
 use hyper::body::Incoming;
 use thiserror::Error;
@@ -95,7 +94,7 @@ where
 
     type Error = hyper::Error;
 
-    type Future = BoxFuture<'static, Result<Response<Incoming>, hyper::Error>>;
+    type Future = BoxFuture<'static, Result<http::Response<Incoming>, hyper::Error>>;
 
     fn send_request(&mut self, mut request: http::Request<B>) -> Self::Future {
         match &mut self.inner {

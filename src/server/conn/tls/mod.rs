@@ -188,8 +188,6 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use http::Response;
-
     use tower::make::Shared;
     use tower::Service;
 
@@ -209,7 +207,7 @@ mod tests {
         let _guard = tracing::info_span!("tls").entered();
 
         let service = tower::service_fn(|_: http::Request<crate::Body>| async {
-            Ok::<_, Infallible>(Response::new(crate::Body::empty()))
+            Ok::<_, Infallible>(http::Response::new(crate::Body::empty()))
         });
 
         let (client, incoming) = crate::stream::duplex::pair();

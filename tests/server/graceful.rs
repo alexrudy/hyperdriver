@@ -4,11 +4,9 @@ use std::task::Context;
 use std::task::Poll;
 
 use futures_util::task::noop_waker;
-use hyperdriver::body::Request;
-use hyperdriver::body::Response;
 use hyperdriver::server::conn::Acceptor;
 use hyperdriver::stream::duplex::{self, DuplexClient};
-use hyperdriver::Server;
+use hyperdriver::{Body, Server};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -23,8 +21,8 @@ where
 }
 
 // Very simple echo server that responds with the request body.
-async fn echo(req: Request) -> Result<Response, BoxError> {
-    Ok(Response::new(req.into_body()))
+async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
+    Ok(http::Response::new(req.into_body()))
 }
 
 async fn pair() -> (Acceptor, DuplexClient) {

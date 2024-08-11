@@ -1,13 +1,12 @@
 use std::future::Future;
 
-use http::Request;
-use http::Response;
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::transport::TransportExt as _;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::service::MakeServiceRef;
+use hyperdriver::Body;
 use rustls::ServerConfig;
 
 use hyperdriver::server::{Protocol, Server};
@@ -45,12 +44,12 @@ fn tls_root_store() -> rustls::RootCertStore {
     root_store
 }
 
-async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Response, BoxError> {
+async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
     tracing::trace!("processing request");
     let body = req.into_body();
     let data = body.collect().await?;
     tracing::trace!("collected body, responding");
-    Ok(Response::new(hyperdriver::body::Body::from(
+    Ok(http::Response::new(hyperdriver::body::Body::from(
         data.to_bytes(),
     )))
 }
@@ -112,7 +111,7 @@ async fn tls_echo_h1() {
         .with_tls(client_tls)
         .build();
 
-    let response: Response<hyperdriver::Body> = client
+    let response: http::Response<hyperdriver::Body> = client
         .request(
             http::Request::builder()
                 .uri("https://example.com/")
@@ -161,9 +160,9 @@ async fn tls_echo_h2() {
         .with_transport(DuplexTransport::new(1024, duplex_client).with_tls(client_tls.into()))
         .build();
 
-    let response: Response<hyperdriver::Body> = client
+    let response: http::Response<hyperdriver::Body> = client
         .request(
-            Request::builder()
+            http::Request::builder()
                 .uri("https://example.com/")
                 .version(http::Version::HTTP_2)
                 .body("Hello H2".into())

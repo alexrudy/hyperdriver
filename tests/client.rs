@@ -1,8 +1,8 @@
 use futures_util::StreamExt;
 use http::StatusCode;
-use hyperdriver::body::Response;
 use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::rt::TokioExecutor;
+use hyperdriver::Body;
 use std::pin::pin;
 
 use hyperdriver::client::conn::protocol::auto::HttpConnectionBuilder;
@@ -26,7 +26,7 @@ async fn client() -> Result<(), BoxError> {
         .with_default_pool()
         .build();
 
-    let resp: Response = client
+    let resp: http::Response<Body> = client
         .get("http://test/".parse().unwrap())
         .await?
         .map(Into::into);
@@ -58,7 +58,7 @@ async fn client_h2() -> Result<(), BoxError> {
     let request = http::Request::get("http://test/")
         .version(http::Version::HTTP_2)
         .body(hyperdriver::body::Body::empty())?;
-    let resp: Response = client.request(request).await?.map(Into::into);
+    let resp: http::Response<Body> = client.request(request).await?.map(Into::into);
 
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -70,7 +70,7 @@ async fn client_h2() -> Result<(), BoxError> {
 
 async fn service_ok(
     req: http::Request<hyper::body::Incoming>,
-) -> Result<hyperdriver::body::Response, BoxError> {
+) -> Result<http::Response<hyperdriver::Body>, BoxError> {
     Ok(http::response::Builder::new()
         .status(200)
         .header(
