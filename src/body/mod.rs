@@ -1,5 +1,22 @@
-//! Arnold is a [Body](http_body::Body) builder, useful for wrapping
-//! different potential bodies for sending responses or requests.
+//! A wrapper [Body](http_body::Body) type with limited support
+//! for in-memory bodies and [hyper::body::Incoming]. Optionally
+//! includes support for [axum][] bodies.
+//!
+//! # Examples
+//!
+//! A body can be created empty (for GET or HEAD requests), or from a [`String`]
+//! or [`Bytes`]. The two requests below will have identical types, but the
+//! empty request will not internally store a string, effectively making it
+//! the size of a pointer.
+//!
+//! ```rust
+//! # use hyperdriver::Body;
+//! let mut req: http::Request<Body> = http::Request::get("http://example.com").body(Body::empty()).unwrap();
+//! // Note that they are the same type:
+//! req = http::Request::post("http://example.com").body(Body::from("hello")).unwrap();
+//!```
+
+//! [axum]: https://docs.rs/axum
 #![cfg_attr(
     feature = "docs",
     doc = r#"
@@ -72,6 +89,16 @@ impl Body {
     }
 
     /// Convert this body into a boxed body.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use hyperdriver::Body;
+    /// # use bytes::Bytes;
+    /// # use std::error::Error;
+    /// # use http_body_util::combinators::UnsyncBoxBody;
+    /// let req: http::Request<Body> = http::Request::post("http://example.com").body(Body::from("hello")).unwrap();
+    /// let req: http::Request<UnsyncBoxBody<Bytes, Box<dyn Error + Send + Sync>>> = req.map(|body| body.as_boxed());
+    /// ```
     pub fn as_boxed(self) -> UnsyncBoxBody<Bytes, BoxError> {
         match self.inner {
             InnerBody::Full(body) => UnsyncBoxBody::new(body.map_err(|_| unreachable!())),

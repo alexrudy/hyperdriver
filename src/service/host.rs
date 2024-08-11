@@ -51,6 +51,15 @@ fn set_host_header<B>(request: &mut http::Request<B>) {
 }
 
 /// Middleware which sets the Host header on requests.
+///
+/// This middleware applies the host header when it is not already set
+/// to requests with versions lower than HTTP/2. If a connection is also
+/// passed (because this layer is used below the connection pool), it will
+/// defer to the connection version rather than the request version to
+/// determine if the host header should be set.
+///
+/// The `HOST` header is not set on HTTP/2 requests because the authority
+/// is sent in the `:authority` pseudo-header field.
 #[derive(Debug, Default, Clone)]
 pub struct SetHostHeader<S> {
     inner: S,
