@@ -16,7 +16,14 @@ use crate::client::pool::PoolableConnection;
 use crate::client::pool::Pooled;
 use crate::client::Error;
 
-/// A wrapper that binds a connection and request together.
+/// Couples the connection with the http request, so that downstream
+/// services can access both - they are needed in tandem to send
+/// the request. This also means that middleware can implement
+/// [`tower::Service`] on `tower::Service<ExecuteRequest<C, B>>` to
+/// modify the request before it is sent in the context of the connection.
+///
+/// See [`crate::service::SetHostHeader`] for an example of a middleware that modifies
+/// the request before it is sent in the context of the connection.
 #[derive(Debug)]
 pub struct ExecuteRequest<C: Connection<B> + PoolableConnection, B> {
     /// The connection to use for the request.
@@ -52,7 +59,9 @@ impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
     }
 }
 
-/// A service that executes requests on associated connections.
+/// A service which executes a request on a `hyper` Connection as described
+/// by the `Connection` trait. This should be the innermost service
+/// for clients, as it is responsible for actually sending the request.
 pub struct RequestExecutor<C: Connection<B> + PoolableConnection, B> {
     _private: std::marker::PhantomData<fn(C, B) -> ()>,
 }

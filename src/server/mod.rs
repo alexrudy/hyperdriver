@@ -21,10 +21,11 @@
 //!
 //! # Example
 //! ```rust
+//! # use hyperdriver::Body;
 //! # type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 //!
-//! async fn echo(req: hyperdriver::body::Request) -> Result<hyperdriver::body::Response, BoxError> {
-//!     Ok(hyperdriver::body::Response::new(req.into_body()))
+//! async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
+//!     Ok(http::Response::new(req.into_body()))
 //! }
 //!
 //! async fn example_server() {

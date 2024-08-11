@@ -106,7 +106,9 @@ impl<C: PoolableConnection> Future for Waiting<C> {
     }
 }
 
-pub(crate) struct Connector<C: PoolableConnection, T: PoolableTransport, E> {
+/// A connector combines the futures required to connect to a transport
+/// and then complete the transport's associated startup handshake.
+pub struct Connector<C: PoolableConnection, T: PoolableTransport, E> {
     transport: BoxFuture<'static, Result<T, E>>,
     handshake: Box<dyn FnOnce(T) -> BoxFuture<'static, Result<C, E>> + Send>,
 }
@@ -118,7 +120,8 @@ impl<C: PoolableConnection, T: PoolableTransport, E> fmt::Debug for Connector<C,
 }
 
 impl<C: PoolableConnection, T: PoolableTransport, E> Connector<C, T, E> {
-    pub(crate) fn new<R, F, H>(transport: F, handshake: H) -> Self
+    /// Create a new connection from a transport connector and a handshake function.
+    pub fn new<R, F, H>(transport: F, handshake: H) -> Self
     where
         H: FnOnce(T) -> BoxFuture<'static, Result<C, E>> + Send + 'static,
         R: Future<Output = Result<T, E>> + Send + 'static,
