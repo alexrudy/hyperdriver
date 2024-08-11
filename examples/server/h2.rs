@@ -8,6 +8,7 @@
 use std::convert::Infallible;
 use std::net::{SocketAddr, SocketAddrV4};
 
+use hyperdriver::Body;
 use tracing_subscriber::EnvFilter;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {
@@ -45,7 +46,7 @@ async fn main() {
     let incoming = tokio::net::TcpListener::bind(addr).await.unwrap();
     let addr = incoming.local_addr().unwrap();
 
-    let svc = tower::service_fn(|req: hyperdriver::body::Request| async {
+    let svc = tower::service_fn(|req: http::Request<Body>| async {
         println!("{} {}", req.method(), req.uri());
         for (name, value) in req.headers() {
             if let Ok(value) = value.to_str() {
@@ -55,9 +56,7 @@ async fn main() {
 
         let body = req.into_body();
         let data = body.collect().await.unwrap();
-        Ok::<_, Infallible>(hyperdriver::body::Response::new(
-            hyperdriver::body::Body::from(data.to_bytes()),
-        ))
+        Ok::<_, Infallible>(http::Response::new(Body::from(data.to_bytes())))
     });
 
     let server = hyperdriver::server::Server::builder()

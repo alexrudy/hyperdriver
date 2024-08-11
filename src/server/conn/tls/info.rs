@@ -181,8 +181,6 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use http::Response;
-
     use tower::make::Shared;
     use tower::Service;
 

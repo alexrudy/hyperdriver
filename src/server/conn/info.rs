@@ -15,7 +15,6 @@ use crate::service::ServiceRef;
 /// This layer is meant to be applied to the "make service" part of the stack:
 /// ```rust
 /// # use std::convert::Infallible;
-/// # use http::{Request, Response};
 /// # use hyperdriver::Body;
 /// # use hyperdriver::info::ConnectionInfo;
 /// # use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
@@ -25,10 +24,10 @@ use crate::service::ServiceRef;
 ///
 /// # async fn make_service_with_layer() {
 ///
-/// let service = service_fn(|req: Request<Body>| async move {
+/// let service = service_fn(|req: http::Request<Body>| async move {
 ///    let info = req.extensions().get::<ConnectionInfo>().unwrap();
 ///    println!("Connection info: {:?}", info);
-///    Ok::<_, Infallible>(Response::new(Body::from("Hello, World!")))
+///    Ok::<_, Infallible>(http::Response::new(Body::from("Hello, World!")))
 /// });
 ///
 /// let make_service = MakeServiceConnectionInfoLayer::default().layer(Shared::new(service));

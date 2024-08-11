@@ -376,8 +376,9 @@ pub trait PoolableConnection: Unpin + Send + Sized + 'static {
 /// Wrapper type for a connection which is managed by a pool.
 ///
 /// This type is used outside of the Pool to ensure that dropped
-/// connections are returned to the pool.
-pub(crate) struct Pooled<C: PoolableConnection> {
+/// connections are returned to the pool. The underlying connection
+/// is available via `Deref` and `DerefMut`.
+pub struct Pooled<C: PoolableConnection> {
     connection: Option<C>,
     is_reused: bool,
     key: key::Key,

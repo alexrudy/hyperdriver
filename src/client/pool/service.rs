@@ -404,12 +404,9 @@ where
                     request,
                     service,
                 } => match checkout.poll_unpin(cx) {
-                    Poll::Ready(Ok(conn)) => {
-                        ResponseFutureState::Request(service.call(ExecuteRequest {
-                            conn,
-                            request: request.take().expect("request polled again"),
-                        }))
-                    }
+                    Poll::Ready(Ok(conn)) => ResponseFutureState::Request(service.call(
+                        ExecuteRequest::new(conn, request.take().expect("request polled again")),
+                    )),
                     Poll::Ready(Err(error)) => {
                         return Poll::Ready(Err(error.into()));
                     }

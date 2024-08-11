@@ -72,7 +72,7 @@ impl ClientRef {
 
     fn request(
         &mut self,
-        request: crate::body::Request,
+        request: http::Request<crate::Body>,
     ) -> Oneshot<SharedClientService<crate::Body, hyper::body::Incoming>, http::Request<crate::Body>>
     {
         let service = self.service.clone();
@@ -155,7 +155,7 @@ impl Client {
     /// Send an http Request, and return a Future of the Response.
     pub fn request(
         &mut self,
-        request: crate::body::Request,
+        request: http::Request<crate::Body>,
     ) -> Oneshot<SharedClientService<crate::Body, hyper::body::Incoming>, http::Request<crate::Body>>
     {
         Arc::make_mut(&mut self.inner).request(request)

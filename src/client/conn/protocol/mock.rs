@@ -22,10 +22,10 @@ impl Connection<crate::Body> for MockSender {
 
     type Error = MockProtocolError;
 
-    type Future = Ready<Result<crate::body::Response, Self::Error>>;
+    type Future = Ready<Result<http::Response<crate::Body>, Self::Error>>;
 
-    fn send_request(&mut self, request: crate::body::Request) -> Self::Future {
-        ready(Ok(crate::body::Response::new(request.into_body())))
+    fn send_request(&mut self, request: http::Request<crate::Body>) -> Self::Future {
+        ready(Ok(http::Response::new(request.into_body())))
     }
 
     fn poll_ready(
