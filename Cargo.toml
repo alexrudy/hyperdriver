@@ -70,7 +70,7 @@ default-features = false
 optional = true
 
 [dev-dependencies]
-clap = { version = "4.5.13" }
+clap = { version = "4.5.15" }
 color-eyre = "0.6"
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 static-assertions = { version = "1", package = "static_assertions" }
