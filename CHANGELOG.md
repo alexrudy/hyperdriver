@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/alexrudy/hyperdriver/compare/v0.6.0...v0.6.1) - 2024-08-13
+
+### Other
+- Bump clap from 4.5.13 to 4.5.15
+
 ## [0.6.0](https://github.com/alexrudy/hyperdriver/compare/v0.5.6...v0.6.0) - 2024-08-11
 
 ### Other
