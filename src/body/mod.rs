@@ -29,7 +29,6 @@ use std::pin::pin;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use http_body::Body as HttpBody;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
@@ -280,36 +279,6 @@ impl fmt::Debug for InnerBody {
             InnerBody::Incoming(_) => f.debug_struct("Incoming").finish(),
             #[cfg(feature = "axum")]
             InnerBody::AxumBody(_) => f.debug_struct("AxumBody").finish(),
-        }
-    }
-}
-
-/// Extension trait to help clone a request that contains a `Body`.
-pub trait TryCloneRequest {
-    /// Try to clone the request. If the body can't be cloned, `None` is returned.
-    fn try_clone_request(&self) -> Option<Self>
-    where
-        Self: Sized;
-}
-
-impl<B: HttpBody + Default> TryCloneRequest for http::Request<B> {
-    fn try_clone_request(&self) -> Option<Self> {
-        if self.body().size_hint().exact() == Some(0) {
-            let mut req = http::Request::builder()
-                .uri(self.uri().clone())
-                .method(self.method().clone())
-                .version(self.version());
-
-            if let Some(headers) = req.headers_mut() {
-                *headers = self.headers().clone();
-            };
-
-            Some(
-                req.body(B::default())
-                    .expect("request builder should succeed"),
-            )
-        } else {
-            None
         }
     }
 }
