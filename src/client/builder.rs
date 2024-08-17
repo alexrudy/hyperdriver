@@ -75,7 +75,6 @@ pub struct Builder<T, P, RP = policy::Standard, S = Identity, BIn = crate::Body>
     user_agent: Option<String>,
     redirect: Option<RP>,
     timeout: Option<Duration>,
-    retries: Option<usize>,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
     pool: Option<crate::client::pool::Config>,
@@ -92,7 +91,6 @@ impl Builder<(), (), policy::Standard> {
             user_agent: None,
             redirect: None,
             timeout: None,
-            retries: None,
             #[cfg(feature = "tls")]
             tls: None,
             pool: None,
@@ -118,7 +116,6 @@ impl Default
             user_agent: None,
             redirect: Some(policy::Standard::default()),
             timeout: Some(Duration::from_secs(30)),
-            retries: Some(3),
             #[cfg(feature = "tls")]
             tls: Some(default_tls_config()),
             pool: Some(Default::default()),
@@ -140,7 +137,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -157,7 +153,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -240,7 +235,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -257,7 +251,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -294,7 +287,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: Some(policy),
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -311,7 +303,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             builder: self.builder,
             redirect: None,
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -328,7 +319,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: Some(policy::Standard::default()),
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -368,25 +358,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
 }
 
 impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
-    /// Set the number of retries for failed requests.
-    pub fn with_retries(mut self, retries: usize) -> Self {
-        self.retries = Some(retries);
-        self
-    }
-
-    /// Get the number of retries for failed requests.
-    pub fn retries(&self) -> Option<usize> {
-        self.retries
-    }
-
-    /// Disable retries for failed requests.
-    pub fn without_retries(mut self) -> Self {
-        self.retries = None;
-        self
-    }
-}
-
-impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
     /// Add a layer to the service under construction
     pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>, BIn> {
         Builder {
@@ -396,7 +367,6 @@ impl<T, P, RP, S, BIn> Builder<T, P, RP, S, BIn> {
             user_agent: self.user_agent,
             redirect: self.redirect,
             timeout: self.timeout,
-            retries: self.retries,
             #[cfg(feature = "tls")]
             tls: self.tls,
             pool: self.pool,
@@ -474,9 +444,6 @@ where
         let service = self
             .builder
             .layer(SharedService::layer())
-            .optional(self.retries.map(|attempts| {
-                tower::retry::RetryLayer::new(crate::service::Attempts::new(attempts))
-            }))
             .optional(
                 self.timeout
                     .map(|d| TimeoutLayer::new(|| super::Error::RequestTimeout, d)),
