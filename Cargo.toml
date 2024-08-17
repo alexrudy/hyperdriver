@@ -59,7 +59,7 @@ default-features = false
 optional = true
 
 [dependencies.tower]
-version = "0.4"
+version = "0.5"
 features = ["make", "util"]
 default-features = false
 
@@ -87,7 +87,6 @@ client = [
     "dep:thiserror",
     "dep:tower-http",
     "tower/timeout",
-    "tower/retry",
 ]
 default = ["client", "server", "discovery", "stream"]
 discovery = ["server", "client", "pidfile", "stream", "dep:dashmap"]
