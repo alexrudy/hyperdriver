@@ -124,8 +124,6 @@ pub(crate) mod happy_eyeballs;
 pub mod info;
 #[cfg(feature = "client")]
 mod lazy;
-#[cfg(feature = "pidfile")]
-pub mod pidfile;
 #[cfg(feature = "server")]
 mod rewind;
 #[cfg(feature = "server")]
