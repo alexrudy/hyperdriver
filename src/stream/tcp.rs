@@ -136,6 +136,13 @@ impl HasConnectionInfo for TcpStream {
     }
 }
 
+#[cfg(feature = "client")]
+impl crate::client::pool::PoolableTransport for TcpStream {
+    fn can_share(&self) -> bool {
+        false
+    }
+}
+
 impl AsyncRead for TcpStream {
     fn poll_read(
         self: Pin<&mut Self>,

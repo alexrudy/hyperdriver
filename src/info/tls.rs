@@ -56,6 +56,12 @@ impl TlsConnectionInfo {
         }
     }
 
+    #[cfg_attr(not(all(feature = "tls", feature = "client")), allow(dead_code))]
+    pub(crate) fn can_share(&self) -> bool {
+        self.alpn == Some(Protocol::Http(http::Version::HTTP_2))
+            || self.alpn == Some(Protocol::Http(http::Version::HTTP_3))
+    }
+
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn new_server(
@@ -186,10 +192,13 @@ mod channel {
 
 #[cfg(test)]
 mod tests {
+    use crate::fixtures;
     use std::sync::Arc;
 
     #[test]
     fn tls_server_info() {
+        fixtures::tls_install_default();
+
         #[derive(Debug, Clone)]
         struct NoCertResolver;
 
@@ -215,6 +224,8 @@ mod tests {
 
     #[test]
     fn tls_client_info() {
+        fixtures::tls_install_default();
+
         let root_store = rustls::RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.into(),
         };

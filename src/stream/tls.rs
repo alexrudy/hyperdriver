@@ -80,6 +80,20 @@ where
     }
 }
 
+#[cfg(feature = "client")]
+impl<Tls, NoTls> crate::client::pool::PoolableTransport for TlsBraid<Tls, NoTls>
+where
+    Tls: TlsHandshakeStream + Unpin + 'static,
+    NoTls: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    fn can_share(&self) -> bool {
+        match self {
+            TlsBraid::NoTls(_) => false,
+            TlsBraid::Tls(_) => true,
+        }
+    }
+}
+
 macro_rules! dispatch {
     ($driver:ident.$method:ident($($args:expr),+)) => {
 

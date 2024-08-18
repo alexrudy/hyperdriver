@@ -202,6 +202,13 @@ impl HasConnectionInfo for UnixStream {
     }
 }
 
+#[cfg(feature = "client")]
+impl crate::client::pool::PoolableTransport for UnixStream {
+    fn can_share(&self) -> bool {
+        false
+    }
+}
+
 impl AsyncRead for UnixStream {
     fn poll_read(
         self: Pin<&mut Self>,

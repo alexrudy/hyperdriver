@@ -225,4 +225,21 @@ pub(crate) mod fixtures {
         config.alpn_protocols.push(b"http/1.1".to_vec());
         config
     }
+
+    pub(crate) fn tls_install_default() {
+        #[cfg(feature = "tls-ring")]
+        {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+
+        #[cfg(all(feature = "tls-aws-lc", not(feature = "tls-ring")))]
+        {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        }
+
+        #[cfg(not(any(feature = "tls-aws-lc", feature = "tls-ring")))]
+        {
+            panic!("No TLS backend enabled, please enable one of `tls-ring` or `tls-aws-lc`");
+        }
+    }
 }

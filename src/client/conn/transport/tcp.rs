@@ -27,7 +27,6 @@ use tokio::task::JoinError;
 use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
-use super::TransportStream;
 use crate::client::builder::BuildTransport;
 use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
@@ -182,7 +181,7 @@ where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Unpin + Send + 'static,
 {
-    type Response = TransportStream<IO>;
+    type Response = IO;
     type Error = TcpConnectionError;
     type Future = BoxFuture<'static, Self::Response, Self::Error>;
 
@@ -213,14 +212,8 @@ where
                 }
 
                 let stream = stream.into();
-                let info = stream.info();
 
-                Ok(TransportStream {
-                    stream,
-                    info,
-                    #[cfg(feature = "tls")]
-                    tls: None,
-                })
+                Ok(stream)
             }
             .instrument(span),
         )
@@ -681,9 +674,9 @@ mod test {
         uri: Uri,
         transport: T,
         listener: TcpListener,
-    ) -> (TransportStream<T::IO>, TcpStream)
+    ) -> (T::IO, TcpStream)
     where
-        T: Transport + Service<Uri, Response = TransportStream<T::IO>>,
+        T: Transport + Service<Uri, Response = T::IO>,
         <T as Service<Uri>>::Error: std::fmt::Debug,
     {
         tokio::join!(async { transport.oneshot(uri).await.unwrap() }, async {

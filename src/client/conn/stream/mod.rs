@@ -17,7 +17,6 @@ use crate::stream::{TcpStream, UnixStream};
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
 use crate::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
@@ -28,6 +27,7 @@ use crate::stream::tls::TlsHandshakeStream;
 use crate::stream::Braid;
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
+use crate::{client::pool::PoolableTransport, info::HasConnectionInfo};
 
 #[cfg(feature = "mocks")]
 pub mod mock;
@@ -191,6 +191,21 @@ where
         match self.inner {
             TlsBraid::Tls(ref stream) => stream.tls_info(),
             TlsBraid::NoTls(_) => None,
+        }
+    }
+}
+
+impl<IO> PoolableTransport for Stream<IO>
+where
+    IO: HasConnectionInfo + Unpin + Send + 'static,
+    IO::Addr: Send + Unpin + Clone,
+{
+    fn can_share(&self) -> bool {
+        match self.inner {
+            #[cfg(feature = "tls")]
+            TlsBraid::Tls(ref stream) => stream.can_share(),
+
+            _ => false,
         }
     }
 }

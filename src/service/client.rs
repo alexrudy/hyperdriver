@@ -183,7 +183,7 @@ mod tests {
     async fn test_client_mock_connection_error() {
         use crate::client::{conn::connection::ConnectionError, ConnectionPoolService};
 
-        let transport = MockTransport::connection_error();
+        let transport = MockTransport::error();
         let protocol = MockProtocol::default();
         let pool = PoolConfig::default();
 

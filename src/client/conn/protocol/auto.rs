@@ -12,8 +12,8 @@ use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::client::conn::connection::ConnectionError;
 use crate::client::conn::connection::HttpConnection;
-use crate::client::conn::TransportStream;
 use crate::info::HasConnectionInfo;
+use crate::info::HasTlsConnectionInfo;
 
 use super::HttpProtocol;
 use super::ProtocolRequest;
@@ -106,18 +106,24 @@ where
         Ok(HttpConnection::h1(sender))
     }
 
-    #[tracing::instrument(name = "tls", skip_all)]
+    #[tracing::instrument(name = "handshake", skip_all)]
     pub(crate) async fn handshake<IO>(
         &self,
-        transport: TransportStream<IO>,
+        transport: IO,
         protocol: HttpProtocol,
     ) -> Result<HttpConnection<B>, ConnectionError>
     where
-        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        IO: HasTlsConnectionInfo
+            + HasConnectionInfo
+            + AsyncRead
+            + AsyncWrite
+            + Send
+            + Unpin
+            + 'static,
         <IO as HasConnectionInfo>::Addr: Clone,
     {
         match protocol {
-            HttpProtocol::Http2 => self.handshake_h2(transport.into_inner()).await,
+            HttpProtocol::Http2 => self.handshake_h2(transport).await,
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
                 if transport
@@ -127,13 +133,13 @@ where
                     == Some(&crate::info::Protocol::Http(http::Version::HTTP_2))
                 {
                     trace!("alpn h2 switching");
-                    return self.handshake_h2(transport.into_inner()).await;
+                    return self.handshake_h2(transport).await;
                 }
 
                 #[cfg(feature = "tls")]
                 trace!(tls=?transport.tls_info(), "no alpn h2 switching");
 
-                self.handshake_h1(transport.into_inner()).await
+                self.handshake_h1(transport).await
             }
         }
     }
@@ -151,7 +157,7 @@ impl<B> Default for HttpConnectionBuilder<B> {
 
 impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for HttpConnectionBuilder<B>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO: HasTlsConnectionInfo + HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Send + Sync,
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
@@ -189,8 +195,7 @@ mod future {
 
     use crate::client::conn::connection::ConnectionError;
     use crate::client::conn::protocol::HttpProtocol;
-    use crate::client::conn::TransportStream;
-    use crate::info::HasConnectionInfo;
+    use crate::info::{HasConnectionInfo, HasTlsConnectionInfo};
     use crate::DebugLiteral;
 
     use super::HttpConnection;
@@ -213,7 +218,13 @@ mod future {
 
     impl<IO, B> HttpConnectFuture<IO, B>
     where
-        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        IO: HasTlsConnectionInfo
+            + HasConnectionInfo
+            + AsyncRead
+            + AsyncWrite
+            + Send
+            + Unpin
+            + 'static,
         IO::Addr: Clone + Send + Sync,
         B: Body + Unpin + Send + 'static,
         <B as Body>::Data: Send,
@@ -221,7 +232,7 @@ mod future {
     {
         pub(super) fn new(
             builder: HttpConnectionBuilder<B>,
-            stream: TransportStream<IO>,
+            stream: IO,
             protocol: HttpProtocol,
         ) -> HttpConnectFuture<IO, B> {
             let future = Box::pin(async move { builder.handshake(stream, protocol).await });
@@ -271,7 +282,7 @@ mod tests {
     assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
     assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);
 
-    async fn transport() -> Result<(TransportStream<Stream>, Stream), BoxError> {
+    async fn transport() -> Result<(Stream, Stream), BoxError> {
         let (client, mut incoming) = crate::stream::duplex::pair();
 
         // Connect to the server. This is a helper function that creates a client and server
@@ -279,12 +290,12 @@ mod tests {
         let (tx, rx) = tokio::try_join!(
             async {
                 let stream = client.connect(1024).await?;
-                Ok::<_, BoxError>(TransportStream::new_stream(stream.into()).await?)
+                Ok::<_, BoxError>(stream)
             },
             async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }
         )?;
 
-        Ok((tx, rx.into()))
+        Ok((tx.into(), rx.into()))
     }
 
     #[tokio::test]
@@ -378,8 +389,11 @@ mod tests {
         assert!(rrx.is_ok());
     }
 
+    #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn http_connector_alpn_h2() {
+        use crate::client::conn::stream::mock::MockTls;
+
         let _ = tracing_subscriber::fmt::try_init();
 
         let (stream, client) = transport().await.unwrap();
@@ -391,8 +405,9 @@ mod tests {
                 crate::info::Protocol::http(http::Version::HTTP_2),
             ));
 
-            let stream = TransportStream::new(stream, Some(tls));
-            builder.connect(stream, HttpProtocol::Http1).await
+            builder
+                .connect(MockTls::new(stream, tls), HttpProtocol::Http1)
+                .await
         }
 
         async fn handshake(mut stream: Stream) -> Result<(), io::Error> {
@@ -401,9 +416,7 @@ mod tests {
             Ok(())
         }
 
-        let inner = stream.into_inner();
-
-        let (conn, client) = tokio::join!(serve(inner), handshake(client));
+        let (conn, client) = tokio::join!(serve(stream), handshake(client));
         client.unwrap();
 
         let mut conn = conn.unwrap();

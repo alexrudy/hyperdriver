@@ -32,13 +32,7 @@ async fn connection<P: hyperdriver::client::conn::Protocol<Stream, hyperdriver::
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
     let stream = client.connect(1024).await?;
-    let conn = protocol
-        .connect(
-            hyperdriver::client::conn::transport::TransportStream::new_stream(stream.into())
-                .await?,
-            HttpProtocol::Http1,
-        )
-        .await?;
+    let conn = protocol.connect(stream.into(), HttpProtocol::Http1).await?;
     Ok(conn)
 }
 

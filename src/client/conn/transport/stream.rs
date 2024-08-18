@@ -9,7 +9,6 @@ use crate::info::BraidAddr;
 use crate::info::HasConnectionInfo;
 
 use super::Transport;
-use super::TransportStream;
 
 /// A transport which can be converted into a stream.
 #[derive(Debug, Clone)]
@@ -30,7 +29,7 @@ where
     T::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + Send + 'static,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Into<BraidAddr>,
 {
-    type Response = TransportStream<Stream>;
+    type Response = Stream;
     type Error = T::Error;
     type Future = fut::ConnectFuture<T>;
 
@@ -51,7 +50,7 @@ mod fut {
     use pin_project::pin_project;
 
     use crate::client::conn::Stream;
-    use crate::client::conn::{Transport, TransportStream};
+    use crate::client::conn::Transport;
     use crate::info::{BraidAddr, HasConnectionInfo};
 
     /// Future returned by `IntoStream` transports.
@@ -80,16 +79,13 @@ mod fut {
         T::IO: Into<Stream>,
         <<T as Transport>::IO as HasConnectionInfo>::Addr: Into<BraidAddr>,
     {
-        type Output = Result<TransportStream<Stream>, T::Error>;
+        type Output = Result<Stream, T::Error>;
 
         fn poll(
             self: std::pin::Pin<&mut Self>,
             cx: &mut std::task::Context<'_>,
         ) -> std::task::Poll<Self::Output> {
-            self.project()
-                .future
-                .poll(cx)
-                .map_ok(|io| io.map(Into::into))
+            self.project().future.poll(cx).map_ok(|io| io.into())
         }
     }
 }
