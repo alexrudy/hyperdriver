@@ -33,7 +33,6 @@ http = { version = "1" }
 http-body = { version = "1" }
 http-body-util = { version = "0.1" }
 hyper = { version = "1", features = ["full"] }
-libc = { version = "0.2", optional = true }
 ouroboros = { version = "0.18", optional = true }
 parking_lot = { version = "0.12", optional = true, features = ["arc_lock"] }
 pin-project = { version = "1" }
@@ -89,7 +88,6 @@ default = ["client", "server", "stream"]
 docs = []
 incoming = []
 mocks = []
-pidfile = ["dep:libc"]
 server = ["incoming", "dep:ouroboros", "dep:thiserror"]
 sni = []
 stream = []
