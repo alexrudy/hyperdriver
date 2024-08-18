@@ -27,20 +27,17 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 axum = { version = "0.7", optional = true }
 bytes = "1"
 camino = { version = "1", default-features = false }
-dashmap = { version = "6", optional = true }
 futures-core = "0.3"
 futures-util = "0.3"
 http = { version = "1" }
 http-body = { version = "1" }
 http-body-util = { version = "0.1" }
-humantime-serde = { version = "1.1.1", optional = true }
 hyper = { version = "1", features = ["full"] }
 libc = { version = "0.2", optional = true }
 ouroboros = { version = "0.18", optional = true }
 parking_lot = { version = "0.12", optional = true, features = ["arc_lock"] }
 pin-project = { version = "1" }
 rustls-native-certs = { version = "0.7.1", optional = true }
-serde = { version = "1", optional = true }
 socket2 = { version = "0.5", optional = true }
 thiserror = { version = "1", optional = true }
 tokio = { version = "1", features = ["full"] }
@@ -88,13 +85,11 @@ client = [
     "dep:tower-http",
     "tower/timeout",
 ]
-default = ["client", "server", "discovery", "stream"]
-discovery = ["server", "client", "pidfile", "stream", "dep:dashmap"]
+default = ["client", "server", "stream"]
 docs = []
 incoming = []
 mocks = []
 pidfile = ["dep:libc"]
-serde = ["dep:serde", "camino/serde1", "dep:humantime-serde"]
 server = ["incoming", "dep:ouroboros", "dep:thiserror"]
 sni = []
 stream = []
@@ -172,11 +167,8 @@ name = "tls"
 path = "tests/tls.rs"
 required-features = ["client", "server", "tls", "tls-ring"]
 
-[package.metadata.cargo-machete]
-ignored = ["humantime-serde"]
-
 [package.metadata.cargo-udeps.ignore]
-normal = ["rustls-native-certs", "rustls", "tokio-rustls", "humantime-serde"]
+normal = ["rustls-native-certs", "rustls", "tokio-rustls"]
 
 [package.metadata.docs.rs]
 all-features = true

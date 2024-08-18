@@ -119,8 +119,6 @@ pub mod body;
 pub mod bridge;
 #[cfg(feature = "client")]
 pub mod client;
-#[cfg(feature = "discovery")]
-pub mod discovery;
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
 pub mod info;

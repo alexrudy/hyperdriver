@@ -19,7 +19,6 @@ then `hyperdriver` is for you.
 - Client with HTTP/2 and TLS support.
 - Streams which can dispatch between TCP, Unix domain, and in-process duplex sockets.
 - A unifying Body type to make building small Clients and Servers easier.
-- Serivce discovery and dispatching for building combined servers and clients.
 - Bridge between Tokio and Hyper, similar to `hyper-utils`.
 
 [crate-image]: https://buildstats.info/crate/hyperdriver
