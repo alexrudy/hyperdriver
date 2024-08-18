@@ -424,13 +424,14 @@ impl<C: PoolableConnection> Drop for Pooled<C> {
 
 #[cfg(all(test, feature = "mocks"))]
 mod tests {
+
     use futures_util::FutureExt as _;
     use static_assertions::assert_impl_all;
 
     use crate::client::conn::transport::mock::MockConnectionError;
 
     use super::*;
-    use crate::client::conn::stream::mock::MockStream;
+    use crate::client::conn::stream::mock::{MockConnection, MockStream};
     use crate::client::conn::transport::mock::MockTransport;
 
     #[test]
@@ -438,14 +439,14 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let config = Config::default();
-        let pool: Pool<MockStream> = Pool::new(config);
+        let pool: Pool<MockConnection> = Pool::new(config);
 
         assert!(pool.inner.lock().config.idle_timeout.unwrap() > Duration::from_secs(1));
         assert!(pool.inner.lock().config.max_idle_per_host > 0);
         assert!(pool.inner.lock().config.max_idle_per_host < 2048);
     }
 
-    assert_impl_all!(Pool<MockStream>: Clone);
+    assert_impl_all!(Pool<MockConnection>: Clone);
 
     #[tokio::test]
     async fn checkout_simple() {
@@ -464,11 +465,7 @@ mod tests {
             .into();
 
         let conn = pool
-            .checkout(
-                key.clone(),
-                false,
-                Connector::new(MockTransport::single, MockTransport::handshake),
-            )
+            .checkout(key.clone(), false, MockTransport::single().connector())
             .await
             .unwrap();
 
@@ -477,11 +474,7 @@ mod tests {
         drop(conn);
 
         let conn = pool
-            .checkout(
-                key.clone(),
-                false,
-                Connector::new(MockTransport::single, MockTransport::handshake),
-            )
+            .checkout(key.clone(), false, MockTransport::single().connector())
             .await
             .unwrap();
 
@@ -491,11 +484,7 @@ mod tests {
         drop(conn);
 
         let c2 = pool
-            .checkout(
-                key,
-                false,
-                Connector::new(MockTransport::single, MockTransport::handshake),
-            )
+            .checkout(key, false, MockTransport::single().connector())
             .await
             .unwrap();
 
@@ -520,11 +509,7 @@ mod tests {
             .into();
 
         let conn = pool
-            .checkout(
-                key.clone(),
-                true,
-                Connector::new(MockTransport::reusable, MockTransport::handshake),
-            )
+            .checkout(key.clone(), true, MockTransport::reusable().connector())
             .await
             .unwrap();
 
@@ -533,11 +518,7 @@ mod tests {
         drop(conn);
 
         let conn = pool
-            .checkout(
-                key.clone(),
-                true,
-                Connector::new(MockTransport::reusable, MockTransport::handshake),
-            )
+            .checkout(key.clone(), true, MockTransport::reusable().connector())
             .await
             .unwrap();
 
@@ -547,11 +528,7 @@ mod tests {
         drop(conn);
 
         let conn = pool
-            .checkout(
-                key.clone(),
-                true,
-                Connector::new(MockTransport::reusable, MockTransport::handshake),
-            )
+            .checkout(key.clone(), true, MockTransport::reusable().connector())
             .await
             .unwrap();
         assert!(conn.is_open());
@@ -579,10 +556,7 @@ mod tests {
         let mut checkout_a = std::pin::pin!(pool.checkout(
             key.clone(),
             true,
-            Connector::new(
-                move || async { Ok(rx.await.expect("rx closed")) },
-                MockTransport::handshake
-            )
+            MockTransport::channel(rx).connector()
         ));
 
         assert!(futures_util::poll!(&mut checkout_a).is_pending());
@@ -590,11 +564,11 @@ mod tests {
         let mut checkout_b = std::pin::pin!(pool.checkout(
             key.clone(),
             true,
-            Connector::new(MockTransport::reusable, MockTransport::handshake)
+            MockTransport::reusable().connector(),
         ));
 
         assert!(futures_util::poll!(&mut checkout_b).is_pending());
-        assert!(tx.send(MockTransport::reusable().await.unwrap()).is_ok());
+        assert!(tx.send(MockStream::reusable()).is_ok());
         assert!(futures_util::poll!(&mut checkout_b).is_pending());
 
         let conn_a = checkout_a.await.unwrap();
@@ -621,15 +595,11 @@ mod tests {
         )
             .into();
 
-        let conn = MockStream::single();
+        let conn = MockConnection::single();
 
         let first_id = conn.id();
 
-        let checkout = pool.checkout(
-            key.clone(),
-            false,
-            Connector::new(MockTransport::single, MockTransport::handshake),
-        );
+        let checkout = pool.checkout(key.clone(), false, MockTransport::single().connector());
 
         // Return the connection to the pool, sending it out to the new checkout
         // that is waiting, cancelling the checkout connect.
@@ -658,17 +628,13 @@ mod tests {
         )
             .into();
 
-        let conn_first = MockStream::single();
+        let conn_first = MockConnection::single();
 
         let first_id = conn_first.id();
 
         tracing::debug!("Checkout from pool");
 
-        let checkout = pool.checkout(
-            key.clone(),
-            false,
-            Connector::new(MockTransport::single, MockTransport::handshake),
-        );
+        let checkout = pool.checkout(key.clone(), false, MockTransport::single().connector());
 
         tracing::debug!("Checking interest");
 
@@ -712,17 +678,9 @@ mod tests {
         )
             .into();
 
-        let start = pool.checkout(
-            key.clone(),
-            true,
-            Connector::new(MockTransport::reusable, MockTransport::handshake),
-        );
+        let start = pool.checkout(key.clone(), true, MockTransport::reusable().connector());
 
-        let checkout = pool.checkout(
-            key.clone(),
-            true,
-            Connector::new(MockTransport::reusable, MockTransport::handshake),
-        );
+        let checkout = pool.checkout(key.clone(), true, MockTransport::reusable().connector());
 
         drop(start);
         drop(pool);
@@ -746,11 +704,7 @@ mod tests {
         )
             .into();
 
-        let checkout = pool.checkout(
-            key.clone(),
-            true,
-            Connector::new(MockTransport::reusable, MockTransport::handshake),
-        );
+        let checkout = pool.checkout(key.clone(), true, MockTransport::reusable().connector());
 
         drop(pool);
 
@@ -773,11 +727,7 @@ mod tests {
         )
             .into();
 
-        let checkout = pool.checkout(
-            key.clone(),
-            true,
-            Connector::new(MockTransport::error, MockTransport::handshake),
-        );
+        let checkout = pool.checkout(key.clone(), true, MockTransport::error().connector());
 
         let outcome = checkout.now_or_never().unwrap();
         let error = outcome.unwrap_err();
@@ -802,11 +752,7 @@ mod tests {
             .into();
 
         let conn = pool
-            .checkout(
-                key.clone(),
-                false,
-                Connector::new(MockTransport::single, MockTransport::handshake),
-            )
+            .checkout(key.clone(), false, MockTransport::single().connector())
             .await
             .unwrap();
 
@@ -815,11 +761,7 @@ mod tests {
         drop(conn);
 
         let conn = other
-            .checkout(
-                key.clone(),
-                false,
-                Connector::new(MockTransport::single, MockTransport::handshake),
-            )
+            .checkout(key.clone(), false, MockTransport::single().connector())
             .await
             .unwrap();
 
@@ -829,11 +771,7 @@ mod tests {
         drop(conn);
 
         let c2 = pool
-            .checkout(
-                key,
-                false,
-                Connector::new(MockTransport::single, MockTransport::handshake),
-            )
+            .checkout(key, false, MockTransport::single().connector())
             .await
             .unwrap();
 

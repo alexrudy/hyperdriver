@@ -3,12 +3,10 @@
 //! Transports are responsible for establishing a connection to a remote server, shuffling bytes back and forth,
 
 use std::future::Future;
-use std::io;
 #[cfg(feature = "tls")]
 use std::sync::Arc;
 
 use ::http::Uri;
-use pin_project::pin_project;
 #[cfg(feature = "tls")]
 use rustls::client::ClientConfig;
 #[cfg(feature = "tls")]
@@ -19,23 +17,15 @@ use tower::Service;
 
 #[cfg(feature = "stream")]
 pub use self::stream::IntoStream;
+#[cfg(feature = "tls")]
+use self::tls::TlsTransportWrapper;
 use crate::client::conn::Stream;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
-use crate::client::pool::PoolableTransport;
-#[cfg(feature = "tls")]
-use crate::info::tls::HasTlsConnectionInfo;
+
 #[cfg(feature = "stream")]
 use crate::info::BraidAddr;
-use crate::info::ConnectionInfo;
 use crate::info::HasConnectionInfo;
-#[cfg(feature = "tls")]
-use crate::info::TlsConnectionInfo;
-#[cfg(all(feature = "tls", feature = "stream"))]
-use crate::stream::tls::TlsHandshakeStream as _;
-
-#[cfg(feature = "tls")]
-use self::tls::TlsTransportWrapper;
 
 #[cfg(feature = "stream")]
 pub mod duplex;
@@ -49,10 +39,9 @@ pub mod tls;
 
 /// A transport provides data transmission between two endpoints.
 ///
-/// To implement a transport stream, implement a [`tower::Service`] which accepts a URI and returns a
-/// [`TransportStream`]. [`TransportStream`] is a wrapper around an IO stream which provides additional
-/// information about the connection, such as the remote address and the protocol being used. The underlying
-/// IO stream must implement [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`].
+/// To implement a transport stream, implement a [`tower::Service`] which accepts a URI and returns
+/// an IO stream, which must be compatible with a [`super::Protocol`]. For example, HTTP protocols
+/// require an IO stream which implements [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`].
 pub trait Transport: Clone + Send {
     /// The type of IO stream used by this transport
     type IO: HasConnectionInfo + Send + 'static;
@@ -61,9 +50,7 @@ pub trait Transport: Clone + Send {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The future type returned by this service
-    type Future: Future<Output = Result<TransportStream<Self::IO>, <Self as Transport>::Error>>
-        + Send
-        + 'static;
+    type Future: Future<Output = Result<Self::IO, <Self as Transport>::Error>> + Send + 'static;
 
     /// Connect to a remote server and return a stream.
     fn connect(&mut self, uri: Uri) -> <Self as Transport>::Future;
@@ -77,7 +64,7 @@ pub trait Transport: Clone + Send {
 
 impl<T, IO> Transport for T
 where
-    T: Service<Uri, Response = TransportStream<IO>>,
+    T: Service<Uri, Response = IO>,
     T: Clone + Send + Sync + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
@@ -164,200 +151,6 @@ pub trait TransportExt: Transport {
 }
 
 impl<T> TransportExt for T where T: Transport {}
-
-/// A wrapper around an IO stream which provides additional information about the connection.
-///
-/// This is used to attach [`ConnectionInfo`] to an arbitrary IO stream. IO streams must implement
-/// [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`] to be functional.
-#[derive(Debug)]
-#[pin_project]
-pub struct TransportStream<IO>
-where
-    IO: HasConnectionInfo,
-{
-    #[pin]
-    stream: IO,
-    info: ConnectionInfo<IO::Addr>,
-    #[cfg(feature = "tls")]
-    tls: Option<TlsConnectionInfo>,
-}
-
-impl<IO> TransportStream<IO>
-where
-    IO: HasConnectionInfo,
-{
-    /// Create a new transport from an IO stream.
-    pub fn new(stream: IO, #[cfg(feature = "tls")] tls: Option<TlsConnectionInfo>) -> Self {
-        let info = stream.info();
-
-        #[cfg(feature = "tls")]
-        return Self { stream, info, tls };
-
-        #[cfg(not(feature = "tls"))]
-        Self { stream, info }
-    }
-}
-
-impl<IO> TransportStream<IO>
-where
-    IO: HasConnectionInfo,
-{
-    #[cfg(feature = "tls")]
-    /// Get the connection information for the transport.
-    pub fn tls_info(&self) -> Option<&TlsConnectionInfo> {
-        #[cfg(feature = "tls")]
-        return self.tls.as_ref();
-    }
-
-    /// Reduce the transport to its inner IO stream.
-    pub fn into_inner(self) -> IO {
-        self.stream
-    }
-
-    /// Get a reference to the inner IO stream.
-    pub fn get_io_ref(&self) -> &IO {
-        &self.stream
-    }
-
-    /// Get a mutable reference to the inner IO stream.
-    pub fn get_io_mut(&mut self) -> &mut IO {
-        &mut self.stream
-    }
-
-    /// Return the parts of the stream.
-    pub fn into_parts(self) -> (IO, ConnectionInfo<IO::Addr>) {
-        (self.stream, self.info)
-    }
-
-    /// Map the inner IO stream to a new IO stream.
-    pub fn map<F, U>(self, f: F) -> TransportStream<U>
-    where
-        F: FnOnce(IO) -> U,
-        U: HasConnectionInfo,
-        IO::Addr: Into<U::Addr>,
-    {
-        TransportStream {
-            stream: f(self.stream),
-            info: self.info.map(Into::into),
-            #[cfg(feature = "tls")]
-            tls: self.tls,
-        }
-    }
-}
-
-#[cfg(feature = "stream")]
-impl TransportStream<Stream> {
-    /// Create a new transport from a `crate::client::stream::Stream`.
-    #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
-    pub async fn new_stream(mut stream: Stream) -> io::Result<Self> {
-        #[cfg(feature = "tls")]
-        stream.finish_handshake().await?;
-
-        let info = stream.info();
-
-        #[cfg(feature = "tls")]
-        let tls = stream.tls_info().cloned();
-
-        Ok(Self {
-            stream,
-            info,
-            #[cfg(feature = "tls")]
-            tls,
-        })
-    }
-}
-
-impl<IO> PoolableTransport for TransportStream<IO>
-where
-    IO: HasConnectionInfo + Unpin + Send + 'static,
-    IO::Addr: Send,
-{
-    #[cfg(feature = "tls")]
-    fn can_share(&self) -> bool {
-        self.tls.as_ref().and_then(|tls| tls.alpn.as_ref())
-            == Some(&crate::info::Protocol::Http(::http::Version::HTTP_2))
-    }
-
-    #[cfg(not(feature = "tls"))]
-    fn can_share(&self) -> bool {
-        false
-    }
-}
-
-impl<IO> HasConnectionInfo for TransportStream<IO>
-where
-    IO: HasConnectionInfo,
-    <IO as HasConnectionInfo>::Addr: Clone,
-{
-    type Addr = IO::Addr;
-
-    fn info(&self) -> ConnectionInfo<Self::Addr> {
-        self.info.clone()
-    }
-}
-
-#[cfg(feature = "tls")]
-impl<IO> HasTlsConnectionInfo for TransportStream<IO>
-where
-    IO: HasTlsConnectionInfo,
-    <IO as HasConnectionInfo>::Addr: Clone,
-{
-    fn tls_info(&self) -> Option<&TlsConnectionInfo> {
-        self.tls.as_ref()
-    }
-}
-
-impl<IO> AsyncRead for TransportStream<IO>
-where
-    IO: HasConnectionInfo + AsyncRead,
-{
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
-        self.project().stream.poll_read(cx, buf)
-    }
-}
-
-impl<IO> AsyncWrite for TransportStream<IO>
-where
-    IO: HasConnectionInfo + AsyncWrite,
-{
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, io::Error>> {
-        self.project().stream.poll_write(cx, buf)
-    }
-
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
-        self.project().stream.poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
-        self.project().stream.poll_shutdown(cx)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        self.stream.is_write_vectored()
-    }
-
-    fn poll_write_vectored(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        bufs: &[io::IoSlice<'_>],
-    ) -> std::task::Poll<Result<usize, io::Error>> {
-        self.project().stream.poll_write_vectored(cx, bufs)
-    }
-}
 
 /// An error returned when a TLS connection attempt fails
 #[cfg(feature = "tls")]
@@ -489,7 +282,7 @@ where
     <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
-    type Response = TransportStream<Stream<T::IO>>;
+    type Response = Stream<T::IO>;
 
     #[cfg(feature = "tls")]
     type Error = TlsConnectionError<T::Error>;
@@ -611,13 +404,10 @@ mod future {
         <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
         #[cfg(feature = "tls")]
-        type Output = Result<
-            super::TransportStream<super::Stream<T::IO>>,
-            super::TlsConnectionError<T::Error>,
-        >;
+        type Output = Result<super::Stream<T::IO>, super::TlsConnectionError<T::Error>>;
 
         #[cfg(not(feature = "tls"))]
-        type Output = Result<super::TransportStream<super::Stream<T::IO>>, T::Error>;
+        type Output = Result<super::Stream<T::IO>, T::Error>;
 
         fn poll(
             self: std::pin::Pin<&mut Self>,
@@ -627,16 +417,14 @@ mod future {
             match self.project().inner.project() {
                 InnerBraidFutureProj::Plain(fut) => fut
                     .poll(cx)
-                    .map_ok(|ts| ts.map(super::Stream::new))
+                    .map_ok(super::Stream::new)
                     .map_err(TlsConnectionError::Connection),
                 InnerBraidFutureProj::Tls(fut) => fut.poll(cx),
             }
 
             #[cfg(not(feature = "tls"))]
             match self.project().inner.project() {
-                InnerBraidFutureProj::Plain(fut) => {
-                    fut.poll(cx).map_ok(|ts| ts.map(super::Stream::new))
-                }
+                InnerBraidFutureProj::Plain(fut) => fut.poll(cx).map_ok(super::Stream::new),
             }
         }
     }
@@ -646,11 +434,11 @@ mod future {
 mod tests {
     use super::*;
 
-    use crate::stream::tcp::TcpStream;
+    use crate::{info::HasTlsConnectionInfo, stream::tcp::TcpStream};
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(TransportStream<Stream>: HasTlsConnectionInfo, HasConnectionInfo);
-    assert_impl_all!(TransportStream<Stream>: Send, Sync, Unpin);
+    assert_impl_all!(Stream: HasTlsConnectionInfo, HasConnectionInfo);
+    assert_impl_all!(Stream: Send, Sync, Unpin);
 
-    assert_impl_all!(TransportStream<TcpStream>: HasConnectionInfo);
+    assert_impl_all!(TcpStream: HasConnectionInfo);
 }

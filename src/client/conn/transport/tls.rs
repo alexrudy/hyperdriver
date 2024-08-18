@@ -8,7 +8,7 @@ use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::{TlsConnectionError, Transport, TransportStream};
+use super::{TlsConnectionError, Transport};
 use crate::client::conn::Stream as ClientStream;
 use crate::info::HasConnectionInfo;
 
@@ -52,7 +52,7 @@ where
     <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
-    type Response = TransportStream<ClientStream<T::IO>>;
+    type Response = ClientStream<T::IO>;
     type Error = TlsConnectionError<T::Error>;
     type Future = future::TlsConnectionFuture<T>;
 
@@ -83,7 +83,6 @@ pub(in crate::client::conn::transport) mod future {
     use pin_project::pin_project;
     use tokio::io::{AsyncRead, AsyncWrite};
 
-    use crate::info::tls::HasTlsConnectionInfo;
     use crate::stream::tls::TlsHandshakeStream as _;
 
     use super::super::Transport;
@@ -154,7 +153,7 @@ pub(in crate::client::conn::transport) mod future {
         <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
         <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
     {
-        type Output = Result<TransportStream<ClientStream<T::IO>>, TlsConnectionError<T::Error>>;
+        type Output = Result<ClientStream<T::IO>, TlsConnectionError<T::Error>>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let mut this = self.project();
@@ -166,7 +165,6 @@ pub(in crate::client::conn::transport) mod future {
                         domain,
                     } => match future.poll(cx) {
                         Poll::Ready(Ok(stream)) => {
-                            let stream = stream.into_inner();
                             tracing::trace!(domain=%domain, "Transport connected. TLS handshake starting");
                             let stream = ClientStream::new(stream).tls(domain, config.clone());
                             this.state.set(State::Handshake { stream });
@@ -186,10 +184,9 @@ pub(in crate::client::conn::transport) mod future {
                             };
 
                             let info = stream.info();
-                            let tls = stream.tls_info().cloned();
 
                             tracing::trace!(?info, "TLS handshake complete");
-                            return Poll::Ready(Ok(TransportStream { stream, info, tls }));
+                            return Poll::Ready(Ok(stream));
                         }
                         Poll::Ready(Err(e)) => {
                             tracing::trace!(?e, "Transport handshake error");
@@ -220,12 +217,15 @@ mod tests {
 
     use crate::{
         fixtures,
+        info::HasTlsConnectionInfo as _,
         server::conn::AcceptExt,
         stream::tls::{TlsHandshakeExt, TlsHandshakeStream as _},
     };
 
     #[tokio::test]
     async fn test_tls_transport_wrapper() {
+        fixtures::tls_install_default();
+
         let (client, server) = crate::stream::duplex::pair();
 
         let mut config = fixtures::tls_client_config();
@@ -244,7 +244,7 @@ mod tests {
         let (stream, _) = tokio::join!(
             async {
                 let mut stream = transport.oneshot(uri).await.unwrap();
-                stream.get_io_mut().finish_handshake().await.unwrap();
+                stream.finish_handshake().await.unwrap();
                 stream
             },
             async move {

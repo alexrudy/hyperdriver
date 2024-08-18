@@ -14,7 +14,6 @@ use crate::client::conn::connection::HttpConnection;
 use crate::client::conn::protocol::auto::HttpConnectionBuilder;
 use crate::client::conn::protocol::HttpProtocol;
 use crate::client::conn::transport::tcp::TcpTransport;
-use crate::client::conn::transport::TransportStream;
 use crate::client::conn::Connection;
 use crate::client::conn::Protocol;
 use crate::client::conn::TlsTransport;
@@ -26,6 +25,8 @@ use crate::client::pool::PoolableConnection;
 use crate::client::Error;
 use crate::info::HasConnectionInfo;
 use crate::service::client::ExecuteRequest;
+
+use super::PoolableTransport;
 
 /// Layer which adds connection pooling and converts
 /// to an inner service which accepts `ExecuteRequest`
@@ -218,7 +219,7 @@ where
         + Sync
         + 'static,
     T: Transport + 'static,
-    T::IO: Unpin,
+    T::IO: PoolableTransport + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
     #[allow(clippy::type_complexity)]
@@ -226,8 +227,7 @@ where
         &self,
         uri: http::Uri,
         http_protocol: HttpProtocol,
-    ) -> Result<Checkout<P::Connection, TransportStream<T::IO>, ConnectionError>, ConnectionError>
-    {
+    ) -> Result<Checkout<P::Connection, T::IO, ConnectionError>, ConnectionError> {
         let key: pool::Key = uri.clone().try_into()?;
         let mut protocol = self.protocol.clone();
         let mut transport = self.transport.clone();
@@ -273,7 +273,7 @@ where
         + Sync
         + 'static,
     T: Transport + 'static,
-    T::IO: Unpin,
+    T::IO: PoolableTransport + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
     S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Clone,
     S::Error: Into<Error>,
@@ -284,7 +284,7 @@ where
 {
     type Response = http::Response<BOut>;
     type Error = Error;
-    type Future = ResponseFuture<P::Connection, TransportStream<T::IO>, S, BIn, BOut>;
+    type Future = ResponseFuture<P::Connection, T::IO, S, BIn, BOut>;
 
     fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -311,7 +311,7 @@ where
         + Sync
         + 'static,
     T: Transport + 'static,
-    T::IO: Unpin,
+    T::IO: PoolableTransport + Unpin,
     S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Clone,
     S::Error: Into<Error>,
     BIn: Body + Unpin + Send + 'static,

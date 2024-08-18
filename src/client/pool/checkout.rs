@@ -439,10 +439,9 @@ mod test {
     async fn detatched_checkout() {
         let key: Key = "http://localhost:8080".parse().unwrap();
 
-        let checkout = Checkout::detached(
-            key,
-            Connector::new(MockTransport::single, MockTransport::handshake),
-        );
+        let transport = MockTransport::single();
+
+        let checkout = Checkout::detached(key, transport.connector());
 
         let dbg = format!("{:?}", checkout);
         assert_eq!(

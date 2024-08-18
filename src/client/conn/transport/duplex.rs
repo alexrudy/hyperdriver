@@ -6,7 +6,6 @@ use std::task::{Context, Poll};
 use futures_util::future::BoxFuture;
 use http::Uri;
 
-use super::TransportStream;
 use crate::stream::duplex::DuplexStream as Stream;
 
 /// Transport via duplex stream
@@ -27,11 +26,11 @@ impl DuplexTransport {
 }
 
 impl tower::Service<Uri> for DuplexTransport {
-    type Response = TransportStream<Stream>;
+    type Response = Stream;
 
     type Error = io::Error;
 
-    type Future = BoxFuture<'static, Result<TransportStream<Stream>, io::Error>>;
+    type Future = BoxFuture<'static, Result<Stream, io::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -42,11 +41,7 @@ impl tower::Service<Uri> for DuplexTransport {
         let max_buf_size = self.max_buf_size;
         let fut = async move {
             let stream = client.connect(max_buf_size).await?;
-            Ok(TransportStream::new(
-                stream,
-                #[cfg(feature = "tls")]
-                None,
-            ))
+            Ok(stream)
         };
 
         Box::pin(fut)

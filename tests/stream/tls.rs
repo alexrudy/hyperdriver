@@ -31,10 +31,16 @@ fn tls_root_store() -> rustls::RootCertStore {
     root_store
 }
 
+fn tls_install_default() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[tokio::test]
 async fn braided_tls() {
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    tls_install_default();
 
     let incoming = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await

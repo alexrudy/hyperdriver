@@ -16,7 +16,6 @@ use tracing::Instrument;
 
 use super::connection::ConnectionError;
 use super::connection::HttpConnection;
-use super::transport::TransportStream;
 use super::Connection;
 use crate::bridge::io::TokioIo;
 use crate::info::HasConnectionInfo;
@@ -33,7 +32,7 @@ pub use hyper::client::conn::http2;
 #[non_exhaustive]
 pub struct ProtocolRequest<IO: HasConnectionInfo, B> {
     /// The transport to use for the connection
-    pub transport: TransportStream<IO>,
+    pub transport: IO,
 
     /// The HTTP protocol to use for the connection
     pub version: HttpProtocol,
@@ -71,7 +70,7 @@ where
     /// The protocol version is provided to facilitate the correct handshake procedure.
     fn connect(
         &mut self,
-        transport: TransportStream<IO>,
+        transport: IO,
         version: HttpProtocol,
     ) -> <Self as Protocol<IO, B>>::Future;
 
@@ -96,7 +95,7 @@ where
 
     fn connect(
         &mut self,
-        transport: TransportStream<IO>,
+        transport: IO,
         version: HttpProtocol,
     ) -> <Self as Protocol<IO, B>>::Future {
         self.call(ProtocolRequest {
@@ -179,7 +178,7 @@ where
 
     fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
         let builder = self.clone();
-        let stream = req.transport.into_inner();
+        let stream = req.transport;
 
         let info = stream.info();
         let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
@@ -234,7 +233,7 @@ where
 
     fn call(&mut self, req: ProtocolRequest<IO, BIn>) -> Self::Future {
         let builder = self.clone();
-        let stream = req.transport.into_inner();
+        let stream = req.transport;
         let info = stream.info();
         let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 

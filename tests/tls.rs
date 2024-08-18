@@ -44,6 +44,10 @@ fn tls_root_store() -> rustls::RootCertStore {
     root_store
 }
 
+fn tls_install_default() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
     tracing::trace!("processing request");
     let body = req.into_body();
@@ -85,6 +89,7 @@ async fn tls_echo_h1() {
     use hyperdriver::client::conn::transport::duplex::DuplexTransport;
     use hyperdriver::Client;
 
+    tls_install_default();
     let _ = tracing_subscriber::fmt::try_init();
 
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair();
@@ -137,6 +142,7 @@ async fn tls_echo_h2() {
     use hyperdriver::client::conn::transport::duplex::DuplexTransport;
     use hyperdriver::Client;
 
+    tls_install_default();
     let _ = tracing_subscriber::fmt::try_init();
 
     let (duplex_client, incoming) = hyperdriver::stream::duplex::pair();

@@ -9,8 +9,11 @@ use std::sync::Arc;
 
 use tracing::trace;
 
-use crate::client::pool::PoolableConnection;
+use crate::client::pool::{PoolableConnection, PoolableTransport};
 use crate::info::HasConnectionInfo;
+
+#[cfg(feature = "tls")]
+pub use self::tls::MockTls;
 
 static IDENT: AtomicU16 = AtomicU16::new(1);
 
@@ -81,22 +84,57 @@ impl MockStream {
     }
 }
 
-impl PoolableConnection for MockStream {
-    fn is_open(&self) -> bool {
-        self.open.load(Ordering::SeqCst)
-    }
-
+impl PoolableTransport for MockStream {
     fn can_share(&self) -> bool {
         self.reuse
     }
+}
+
+/// A mock connection for testing.
+#[derive(Debug)]
+pub struct MockConnection {
+    stream: MockStream,
+}
+
+impl MockConnection {
+    /// Create a new mock connection.
+    pub fn new(stream: MockStream) -> Self {
+        Self { stream }
+    }
+
+    /// Close the connection.
+    pub fn close(&self) {
+        self.stream.close();
+    }
+
+    /// Get the unique ID for this connection stream.
+    pub fn id(&self) -> StreamID {
+        self.stream.id()
+    }
+
+    /// Create a new single-use mock connection.
+    pub fn single() -> Self {
+        Self::new(MockStream::single())
+    }
+
+    /// Create a new reusable mock connection.
+    pub fn reusable() -> Self {
+        Self::new(MockStream::reusable())
+    }
+}
+
+impl PoolableConnection for MockConnection {
+    fn is_open(&self) -> bool {
+        self.stream.open.load(Ordering::SeqCst)
+    }
+
+    fn can_share(&self) -> bool {
+        self.stream.reuse
+    }
 
     fn reuse(&mut self) -> Option<Self> {
-        if self.reuse && self.is_open() {
-            Some(Self {
-                open: self.open.clone(),
-                reuse: true,
-                ident: self.ident,
-            })
+        if self.stream.reuse {
+            Some(Self::new(self.stream.clone()))
         } else {
             None
         }
@@ -121,6 +159,116 @@ impl HasConnectionInfo for MockStream {
     }
 }
 
+#[cfg(feature = "tls")]
+mod tls {
+    use crate::{
+        info::{HasConnectionInfo, TlsConnectionInfo},
+        stream::tls::TlsHandshakeStream,
+    };
+
+    /// Wraps a stream with TLS for testing, with a no-op handshake.
+    #[derive(Debug)]
+    #[pin_project::pin_project]
+    pub struct MockTls<IO> {
+        #[pin]
+        inner: IO,
+        info: crate::info::TlsConnectionInfo,
+    }
+
+    impl<IO> MockTls<IO> {
+        /// Create a new mock TLS stream.
+        pub fn new(inner: IO, info: TlsConnectionInfo) -> Self {
+            Self { inner, info }
+        }
+    }
+
+    impl<IO> std::ops::Deref for MockTls<IO> {
+        type Target = IO;
+
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+
+    impl<IO> std::ops::DerefMut for MockTls<IO> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.inner
+        }
+    }
+
+    impl<IO> TlsHandshakeStream for MockTls<IO>
+    where
+        IO: TlsHandshakeStream,
+    {
+        fn poll_handshake(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), std::io::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    impl<IO> HasConnectionInfo for MockTls<IO>
+    where
+        IO: HasConnectionInfo,
+    {
+        type Addr = IO::Addr;
+
+        fn info(&self) -> crate::info::ConnectionInfo<Self::Addr> {
+            self.inner.info()
+        }
+    }
+
+    impl<IO> crate::info::HasTlsConnectionInfo for MockTls<IO>
+    where
+        IO: HasConnectionInfo,
+    {
+        fn tls_info(&self) -> Option<&TlsConnectionInfo> {
+            Some(&self.info)
+        }
+    }
+
+    impl<IO> tokio::io::AsyncRead for MockTls<IO>
+    where
+        IO: tokio::io::AsyncRead,
+    {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            self.project().inner.poll_read(cx, buf)
+        }
+    }
+
+    impl<IO> tokio::io::AsyncWrite for MockTls<IO>
+    where
+        IO: tokio::io::AsyncWrite,
+    {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<Result<usize, std::io::Error>> {
+            self.project().inner.poll_write(cx, buf)
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), std::io::Error>> {
+            self.project().inner.poll_flush(cx)
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), std::io::Error>> {
+            self.project().inner.poll_shutdown(cx)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -130,14 +278,11 @@ mod tests {
 
     #[test]
     fn verify_stream() {
-        let mut conn = MockStream::new(false);
-        assert!(conn.is_open());
+        let conn = MockStream::new(false);
         assert!(!conn.can_share());
-        assert!(conn.reuse().is_none());
 
         let conn = MockStream::new(false);
         conn.close();
-        assert!(!conn.is_open());
 
         assert_eq!(conn.info().remote_addr(), &MockAddress);
 

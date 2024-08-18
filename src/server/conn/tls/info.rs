@@ -184,6 +184,8 @@ mod tests {
     use tower::make::Shared;
     use tower::Service;
 
+    use crate::fixtures;
+
     use crate::client::conn::transport::duplex::DuplexTransport;
     use crate::client::conn::transport::TransportExt as _;
     use crate::client::conn::Transport as _;
@@ -196,6 +198,7 @@ mod tests {
     async fn tls_server_info() {
         let _ = tracing_subscriber::fmt::try_init();
         let _ = color_eyre::install();
+        fixtures::tls_install_default();
 
         let _guard = tracing::info_span!("tls").entered();
 
@@ -214,14 +217,13 @@ mod tests {
             .with_tls(crate::fixtures::tls_client_config().into());
 
         let client = async move {
-            let conn = client
+            let mut stream = client
                 .connect("https://example.com".parse().unwrap())
                 .await
                 .unwrap();
 
             tracing::debug!("client connected");
 
-            let (mut stream, _) = conn.into_parts();
             stream.finish_handshake().await.unwrap();
 
             tracing::debug!("client handshake finished");

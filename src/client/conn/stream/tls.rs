@@ -11,6 +11,7 @@ use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::ToSocketAddrs;
 
+use crate::client::pool::PoolableTransport;
 use crate::info::tls::HasTlsConnectionInfo;
 use crate::info::TlsConnectionInfo;
 use crate::info::{ConnectionInfo, HasConnectionInfo};
@@ -70,6 +71,19 @@ where
 {
     fn tls_info(&self) -> Option<&TlsConnectionInfo> {
         self.tls.as_ref()
+    }
+}
+
+impl<IO> PoolableTransport for TlsStream<IO>
+where
+    IO: HasConnectionInfo + Unpin + Send + 'static,
+    IO::Addr: Clone + Unpin + Send,
+{
+    fn can_share(&self) -> bool {
+        match self.tls.as_ref() {
+            Some(info) => info.can_share(),
+            None => false,
+        }
     }
 }
 

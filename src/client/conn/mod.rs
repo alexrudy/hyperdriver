@@ -46,5 +46,5 @@ pub mod transport;
 pub use self::connection::Connection;
 pub use self::protocol::{Protocol, ProtocolRequest};
 pub use self::stream::Stream;
+pub use self::transport::Transport;
 pub use self::transport::{TlsTransport, TransportExt as _};
-pub use self::transport::{Transport, TransportStream};

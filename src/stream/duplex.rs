@@ -102,6 +102,13 @@ impl DuplexStream {
     }
 }
 
+#[cfg(feature = "client")]
+impl crate::client::pool::PoolableTransport for DuplexStream {
+    fn can_share(&self) -> bool {
+        false
+    }
+}
+
 impl AsyncRead for DuplexStream {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
