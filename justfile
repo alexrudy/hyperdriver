@@ -26,7 +26,7 @@ udeps:
 
 # Use machete to check for unused dependencies
 machete:
-    cargo +{{rust}} machete
+    cargo +{{rust}} machete --skip-target-dir
 
 alias c := check
 # Check compilation

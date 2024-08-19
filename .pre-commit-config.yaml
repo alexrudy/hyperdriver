@@ -27,6 +27,7 @@ repos:
       - id: cargo-machete
         name: cargo-machete
         entry: cargo machete
+        args: ["--skip-target-dir"]
         pass_filenames: false
         language: rust
         additional_dependencies:
