@@ -16,11 +16,12 @@ use crate::client::pool::PoolableConnection;
 use crate::client::pool::Pooled;
 use crate::client::Error;
 
-/// Couples the connection with the http request, so that downstream
-/// services can access both - they are needed in tandem to send
-/// the request. This also means that middleware can implement
-/// [`tower::Service`] on `tower::Service<ExecuteRequest<C, B>>` to
-/// modify the request before it is sent in the context of the connection.
+/// Couples the connection with the http request.
+///
+/// This allows downstream services to access both the request and connection
+/// -- they are needed in tandem to send the request. This also means that
+/// middleware can implement [`tower::Service`] on `tower::Service<ExecuteRequest<C, B>>`
+/// to modify the request before it is sent in the context of the connection.
 ///
 /// See [`crate::service::SetHostHeader`] for an example of a middleware that modifies
 /// the request before it is sent in the context of the connection.
@@ -59,6 +60,8 @@ impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
     }
 }
 
+/// A service to execute a request on a hyper connection.
+///
 /// A service which executes a request on a `hyper` Connection as described
 /// by the `Connection` trait. This should be the innermost service
 /// for clients, as it is responsible for actually sending the request.
