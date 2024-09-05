@@ -156,11 +156,6 @@ path = "tests/server/graceful.rs"
 required-features = ["server"]
 
 [[test]]
-name = "httpbin"
-path = "tests/httpbin.rs"
-required-features = ["client", "tls", "tls-ring"]
-
-[[test]]
 name = "tls"
 path = "tests/tls.rs"
 required-features = ["client", "server", "tls", "tls-ring"]

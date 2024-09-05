@@ -86,3 +86,11 @@ deny:
 # Run fmt checks
 fmt:
     cargo +{{rust}} fmt --all --check
+
+# Run httpbin tests
+httpbin:
+    cargo +{{rust}} build --features client,tls,tls-ring --example httpbin
+    cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X GET
+    cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X POST -d "Hello World"
+    cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X GET --http2
+    cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X POST --http2 -d "Hello World"

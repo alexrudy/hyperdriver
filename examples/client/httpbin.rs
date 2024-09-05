@@ -3,7 +3,10 @@
 //! Defaults to sending a GET request to https://www.httpbin.org/ over HTTP/1.1.
 //!
 //! Run with `--help` to see options.
-use clap::arg;
+
+use std::time::Duration;
+
+use clap::{arg, value_parser};
 use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;
 use hyperdriver::client::Client;
@@ -20,11 +23,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
             arg!(-X --method [METHOD] "HTTP method to use").default_value("GET"),
             arg!(-d --body [BODY] "HTTP body to send"),
             arg!(-H --header [HEADER]... "HTTP headers to send"),
+            arg!(--timeout [SECONDS] "Timeout for the request in seconds")
+                .default_value("30")
+                .value_parser(value_parser!(u64).range(1..)),
             arg!(--http2 "Use HTTP/2"),
         ])
         .get_matches();
 
-    let mut client = Client::build_tcp_http().build();
+    let timeout = Duration::from_secs(*args.get_one::<u64>("timeout").unwrap());
+
+    let mut client = Client::build_tcp_http().with_timeout(timeout).build();
 
     let uri: Uri = "https://www.httpbin.org/".parse()?;
 
