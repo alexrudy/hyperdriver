@@ -4,7 +4,7 @@
 
 use std::{fmt, task::Poll};
 
-use futures_core::future::BoxFuture;
+use crate::BoxFuture;
 use hyper::{Request, Response};
 use tower::{Layer, Service};
 use tracing::Instrument;

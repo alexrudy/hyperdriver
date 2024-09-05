@@ -14,7 +14,6 @@ use std::future::Future;
 use std::io;
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -32,6 +31,7 @@ use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 use crate::info::HasConnectionInfo;
 use crate::stream::tcp::TcpStream;
+use crate::BoxError;
 
 /// A TCP connector for client connections.
 ///
@@ -167,7 +167,7 @@ impl<R, IO> TcpTransport<R, IO> {
     }
 }
 
-type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
 impl<R, IO> tower::Service<Uri> for TcpTransport<R, IO>
 where
@@ -371,7 +371,7 @@ pub struct InvalidUri {
 pub struct TcpConnectionError {
     message: String,
     #[source]
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<BoxError>,
 }
 
 impl TcpConnectionError {

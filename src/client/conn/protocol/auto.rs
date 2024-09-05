@@ -13,6 +13,7 @@ use crate::client::conn::connection::ConnectionError;
 use crate::client::conn::connection::HttpConnection;
 use crate::info::HasConnectionInfo;
 use crate::info::HasTlsConnectionInfo;
+use crate::BoxError;
 
 use super::HttpProtocol;
 use super::ProtocolRequest;
@@ -51,7 +52,7 @@ impl<B> HttpConnectionBuilder<B>
 where
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
-    <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <B as Body>::Error: Into<BoxError>,
 {
     async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
     where
@@ -156,7 +157,7 @@ where
     IO::Addr: Clone + Send + Sync,
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
-    <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <B as Body>::Error: Into<BoxError>,
 {
     type Response = HttpConnection<B>;
 
@@ -192,12 +193,13 @@ mod future {
     use crate::client::conn::connection::ConnectionError;
     use crate::client::conn::protocol::HttpProtocol;
     use crate::info::{HasConnectionInfo, HasTlsConnectionInfo};
+    use crate::BoxError;
     use crate::DebugLiteral;
 
     use super::HttpConnection;
     use super::HttpConnectionBuilder;
 
-    type BoxFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+    type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
     pub struct HttpConnectFuture<IO, B> {
         future: BoxFuture<'static, HttpConnection<B>, ConnectionError>,
@@ -224,7 +226,7 @@ mod future {
         IO::Addr: Clone + Send + Sync,
         B: Body + Unpin + Send + 'static,
         <B as Body>::Data: Send,
-        <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        <B as Body>::Error: Into<BoxError>,
     {
         pub(super) fn new(
             builder: HttpConnectionBuilder<B>,
@@ -272,8 +274,6 @@ mod tests {
     use static_assertions::assert_impl_all;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tower::Service;
-
-    type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
     assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
     assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);

@@ -3,7 +3,7 @@
 use std::io;
 use std::task::{Context, Poll};
 
-use futures_util::future::BoxFuture;
+use crate::BoxFuture;
 use http::Uri;
 
 use crate::stream::duplex::DuplexStream as Stream;

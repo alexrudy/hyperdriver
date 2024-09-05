@@ -24,6 +24,7 @@ use self::conn::transport::tcp::TcpTransportConfig;
 pub use self::pool::service::ConnectionPoolLayer;
 pub use self::pool::service::ConnectionPoolService;
 use crate::service::SharedService;
+use crate::BoxError;
 
 mod builder;
 pub mod conn;
@@ -33,8 +34,6 @@ pub mod pool;
 pub use self::error::Error;
 pub use self::pool::Config as PoolConfig;
 pub use builder::Builder;
-
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(feature = "tls")]
 /// Get a default TLS client configuration by loading the platform's native certificates.

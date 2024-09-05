@@ -15,6 +15,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::rewind::Rewind;
 use crate::server::Protocol;
+use crate::BoxError;
 
 use super::connecting::Connecting;
 use super::{http1, http2, Connection, ConnectionError};
@@ -74,9 +75,9 @@ impl<E> Builder<E> {
     where
         S: hyper::service::HttpService<body::Incoming, ResBody = B> + Clone,
         S::Future: 'static,
-        S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        S::Error: Into<BoxError>,
         B: Body + 'static,
-        // B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        // B::Error: Into<BoxError>,
         I: Read + Write + Unpin + Send + 'static,
     {
         UpgradableConnection {
@@ -93,11 +94,11 @@ impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for Builder<TokioExecutor>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + 'static,
     BOut: http_body::Body + Send + 'static,
     BOut::Data: Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type ResponseBody = BOut;
@@ -124,9 +125,9 @@ impl<'b, I, S, Executor, B> Connection for UpgradableConnection<'b, I, S, Execut
 where
     S: hyper::service::HttpService<hyper::body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     B: Body + 'static,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    B::Error: Into<BoxError>,
     I: Read + Write + Unpin + Send + 'static,
     Executor: Http2ServerConnExec<S::Future, B>,
 {
@@ -146,9 +147,9 @@ impl<'b, I, S, E, B> Future for UpgradableConnection<'b, I, S, E>
 where
     S: hyper::service::HttpService<hyper::body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     B: Body + 'static,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    B::Error: Into<BoxError>,
     I: Read + Write + Unpin + Send + 'static,
     E: Http2ServerConnExec<S::Future, B>,
 {

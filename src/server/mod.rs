@@ -63,12 +63,10 @@ use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
 use crate::info::HasConnectionInfo;
 use crate::service::MakeServiceRef;
+use crate::{BoxError, BoxFuture};
 
 mod builder;
 pub mod conn;
-
-type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// A transport protocol for serving connections.
 ///
@@ -79,7 +77,7 @@ pub trait Protocol<S, IO, B> {
     type ResponseBody: Body + Send + 'static;
 
     /// The error when a connection has a problem.
-    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+    type Error: Into<BoxError>;
 
     /// The connection future, used to drive a connection IO to completion.
     type Connection: Connection + Future<Output = Result<(), Self::Error>> + Send + 'static;

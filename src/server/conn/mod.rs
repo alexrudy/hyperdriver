@@ -14,6 +14,7 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
 use crate::server::Protocol;
+use crate::BoxError;
 pub use acceptor::Acceptor;
 #[cfg(feature = "stream")]
 pub use acceptor::AcceptorCore;
@@ -40,7 +41,7 @@ pub enum ConnectionError {
 
     /// An error occurred in the internal service used to handle requests.
     #[error("service: {0}")]
-    Service(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Service(#[source] BoxError),
 
     /// An error occurred while handling the protocol or upgrading the connection.
     #[error("protocol: {0}")]
@@ -60,10 +61,10 @@ impl<S, IO, BIn, BOut> Connection
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming>,
     BOut: http_body::Body + Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
@@ -75,10 +76,10 @@ impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for http1::Builder
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + Send + 'static,
     BOut: http_body::Body + Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     BOut::Data: Send,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
@@ -103,11 +104,11 @@ impl<S, IO, BIn, BOut> Connection
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + 'static,
     BOut: http_body::Body + Send + 'static,
     BOut::Data: Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
@@ -119,10 +120,10 @@ impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for http2::Builder<TokioExecutor>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + Send + 'static,
     BOut: http_body::Body + Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     BOut::Data: Send + 'static,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {

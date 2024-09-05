@@ -7,7 +7,7 @@
 use std::future::Future;
 use std::marker::PhantomData;
 
-use futures_core::future::BoxFuture;
+use crate::BoxFuture;
 use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
@@ -18,6 +18,7 @@ use super::connection::HttpConnection;
 use super::Connection;
 use crate::bridge::io::TokioIo;
 use crate::info::HasConnectionInfo;
+use crate::BoxError;
 
 pub mod auto;
 #[cfg(feature = "mocks")]
@@ -161,7 +162,7 @@ where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
-    <B as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <B as Body>::Error: Into<BoxError>,
 {
     type Response = HttpConnection<B>;
 
@@ -213,7 +214,7 @@ where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     BIn: Body + Unpin + Send + 'static,
     <BIn as Body>::Data: Send,
-    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <BIn as Body>::Error: Into<BoxError>,
 {
     type Response = HttpConnection<BIn>;
 
