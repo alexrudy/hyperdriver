@@ -22,6 +22,7 @@ use super::pool::{PoolableConnection, PoolableStream};
 use super::ConnectionPoolLayer;
 use crate::service::RequestExecutor;
 use crate::service::{Http1ChecksLayer, Http2ChecksLayer, SetHostHeaderLayer};
+use crate::BoxError;
 
 use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
@@ -419,7 +420,7 @@ where
     <S::Service as tower::Service<http::Request<BIn>>>::Future: Send + 'static,
     BIn: Default + Body + Unpin + Send + 'static,
     <BIn as Body>::Data: Send,
-    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <BIn as Body>::Error: Into<BoxError>,
     BOut: From<hyper::body::Incoming> + Body + Unpin + Send + 'static,
 {
     /// Build a client service with the configured layers

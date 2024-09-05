@@ -1,7 +1,6 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -11,6 +10,8 @@ use tower::Service;
 
 use tower::{layer::layer_fn, Layer, ServiceExt};
 
+use crate::BoxError;
+
 pub trait Sealed<Conn> {}
 
 /// A trait for types that can be used to make HTTP services, by recieving references to connections.
@@ -19,13 +20,13 @@ pub trait MakeServiceRef<Target, ReqBody>: Sealed<(Target, ReqBody)> {
     type ResBody: HttpBody;
 
     /// The error type that can occur within this `Service`.
-    type Error: Into<Box<dyn StdError + Send + Sync>>;
+    type Error: Into<BoxError>;
 
     /// The Service type produced to handle requests.
     type Service: HttpService<ReqBody, ResBody = Self::ResBody, Error = Self::Error>;
 
     /// The error type that occurs if we can't create the service.
-    type MakeError: Into<Box<dyn StdError + Send + Sync>>;
+    type MakeError: Into<BoxError>;
 
     /// The `Future` returned by this `MakeService`.
     type Future: Future<Output = Result<Self::Service, Self::MakeError>>;
@@ -142,7 +143,8 @@ impl<F> fmt::Debug for MakeServiceFn<F> {
     }
 }
 
-type BoxFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
+//TODO: Should this really be 'static?
+type BoxFuture<T, E> = crate::BoxFuture<'static, Result<T, E>>;
 type ServiceRef<T, S, E> =
     dyn for<'a> tower::Service<&'a T, Response = S, Error = E, Future = BoxFuture<S, E>> + Send;
 

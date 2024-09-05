@@ -111,7 +111,7 @@
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-use std::fmt;
+use std::{fmt, future::Future, pin::Pin};
 
 use tracing::dispatcher;
 
@@ -134,6 +134,9 @@ pub use body::Body;
 pub use client::Client;
 #[cfg(feature = "server")]
 pub use server::Server;
+
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Utility struct for formatting a `Display` type in a `Debug` context.
 #[allow(unused)]

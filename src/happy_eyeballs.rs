@@ -11,7 +11,7 @@ use std::future::IntoFuture;
 use std::time::Instant;
 use std::{fmt, future::Future, marker::PhantomData, time::Duration};
 
-use futures_core::future::BoxFuture;
+use crate::BoxFuture;
 use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use tokio::time::error::Elapsed;

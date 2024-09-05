@@ -15,6 +15,7 @@ use crate::body::IncomingRequestService;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
+use crate::BoxError;
 
 type Connection<'a, S, IO, BIn, BOut> = UpgradableConnection<
     'a,
@@ -30,7 +31,7 @@ pub struct Connecting<S, IO, BIn, BOut>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming>,
     BOut: http_body::Body,
 {
@@ -45,7 +46,7 @@ impl<S, IO, BIn, BOut> Connecting<S, IO, BIn, BOut>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + 'static,
     BOut: http_body::Body + 'static,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -64,11 +65,11 @@ impl<S, IO, BIn, BOut> crate::server::Connection for Connecting<S, IO, BIn, BOut
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + 'static,
     BOut: http_body::Body + Send + 'static,
     BOut::Data: Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     fn graceful_shutdown(mut self: Pin<&mut Self>) {
@@ -80,11 +81,11 @@ impl<S, IO, BIn, BOut> Future for Connecting<S, IO, BIn, BOut>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<BoxError>,
     BIn: From<hyper::body::Incoming> + 'static,
     BOut: http_body::Body + Send + 'static,
     BOut::Data: Send + 'static,
-    BOut::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    BOut::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Output = Result<(), ConnectionError>;

@@ -1,9 +1,10 @@
-use std::error::Error as StdError;
 use std::future::Future;
 use std::task::{Context, Poll};
 
 use http::{Request, Response};
 use http_body::Body as HttpBody;
+
+use crate::BoxError;
 
 /// An asynchronous function from `Request` to `Response`.
 pub trait HttpService<ReqBody> {
@@ -15,7 +16,7 @@ pub trait HttpService<ReqBody> {
     /// Note: Returning an `Error` to a hyper server will cause the connection
     /// to be abruptly aborted. In most cases, it is better to return a `Response`
     /// with a 4xx or 5xx status code.
-    type Error: Into<Box<dyn StdError + Send + Sync>>;
+    type Error: Into<BoxError>;
 
     /// The `Future` returned by this `Service`.
     type Future: Future<Output = Result<Response<Self::ResBody>, Self::Error>>;
@@ -31,7 +32,7 @@ impl<T, BIn, BOut> HttpService<BIn> for T
 where
     T: tower::Service<Request<BIn>, Response = Response<BOut>>,
     BOut: HttpBody,
-    T::Error: Into<Box<dyn StdError + Send + Sync>>,
+    T::Error: Into<BoxError>,
 {
     type ResBody = BOut;
 

@@ -14,6 +14,7 @@ use crate::info::HasConnectionInfo;
 use crate::stream::duplex::DuplexStream;
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
+use crate::BoxError;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -36,7 +37,7 @@ pub trait Accept {
     type Conn: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static;
 
     /// The error type for this acceptor
-    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+    type Error: Into<BoxError>;
 
     /// Poll for a new connection
     fn poll_accept(

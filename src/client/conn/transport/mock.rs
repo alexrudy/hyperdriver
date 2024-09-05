@@ -1,6 +1,6 @@
 //! A transport full of empty implementations, suitable for testing behavior of transport-dependent code.
 
-use std::future::{ready, Future};
+use std::future::ready;
 
 use http::Uri;
 use thiserror::Error;
@@ -9,8 +9,7 @@ use crate::client::conn::protocol::mock::MockProtocol;
 use crate::client::conn::protocol::HttpProtocol;
 use crate::client::conn::stream::mock::MockStream;
 use crate::client::pool::{self};
-
-type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+use crate::BoxFuture;
 
 /// An error that can occur when creating a mock transport.
 #[derive(Debug, Error, PartialEq, Eq)]

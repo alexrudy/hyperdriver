@@ -3,7 +3,7 @@
 
 use std::{fmt, future::Future};
 
-use futures_core::future::BoxFuture;
+use crate::BoxFuture;
 use futures_util::FutureExt as _;
 use http_body::Body as HttpBody;
 use hyper::body::Incoming;

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
-use super::{pool, BoxError};
+use super::pool;
+use crate::BoxError;
 
 /// Client error type.
 #[derive(Debug, Error)]
@@ -61,5 +62,5 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(Error: std::error::Error, Send, Sync, Into<Box<dyn std::error::Error + Send + Sync>>);
+    assert_impl_all!(Error: std::error::Error, Send, Sync, Into<BoxError>);
 }

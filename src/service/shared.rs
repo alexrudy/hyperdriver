@@ -1,6 +1,6 @@
 use std::fmt;
 
-use futures_core::future::BoxFuture;
+use crate::BoxFuture;
 use tower::{Service, ServiceExt};
 
 /// A [`Service`] that can be cloned, sent, and shared across threads.

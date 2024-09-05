@@ -20,10 +20,10 @@ use crate::client::pool;
 use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
 use crate::client::pool::PoolableConnection;
-use crate::client::BoxError;
 use crate::client::Error;
 use crate::info::HasConnectionInfo;
 use crate::service::client::ExecuteRequest;
+use crate::BoxError;
 
 use super::PoolableStream;
 
@@ -259,7 +259,7 @@ where
     BOut: Body + Unpin + 'static,
     BIn: Body + Unpin + Send + 'static,
     <BIn as Body>::Data: Send,
-    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <BIn as Body>::Error: Into<BoxError>,
 {
     type Response = http::Response<BOut>;
     type Error = Error;
@@ -298,7 +298,7 @@ where
     S::Error: Into<Error>,
     BIn: Body + Unpin + Send + 'static,
     <BIn as Body>::Data: Send,
-    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <BIn as Body>::Error: Into<BoxError>,
     BOut: Body + Unpin + 'static,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
 {
@@ -375,7 +375,7 @@ where
     BOut: Body + Unpin + 'static,
     BIn: Body + Unpin + Send + 'static,
     <BIn as Body>::Data: Send,
-    <BIn as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    <BIn as Body>::Error: Into<BoxError>,
 {
     type Output = Result<http::Response<BOut>, Error>;
 

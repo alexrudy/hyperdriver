@@ -8,7 +8,7 @@
 use std::fmt;
 use std::task::Poll;
 
-use futures_util::future::BoxFuture;
+use crate::BoxFuture;
 use http_body::Body;
 use tracing::Instrument;
 
