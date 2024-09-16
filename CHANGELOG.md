@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/alexrudy/hyperdriver/compare/v0.6.0...v0.7.0) - 2024-09-16
+
+### <!-- 0 -->⛰️ Features
+
+- [**breaking**] remove `TransportStream` type.
+- [**breaking**] remove PID file module, publish as separate crate
+- feat!(discovery): remove discovery support
+- *(body)* [**breaking**] Remove the TryCloneRequest trait from the body module.
+- *(client)* [**breaking**] Remove support for retries from the client
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Bump clap from 4.5.16 to 4.5.17
+- remote httpbin tests, make them examples as a script
+- make dependabot go in proper section in changelog
+- add release-plz config to customize changelog
+- cargo-machete ignore target/ directory
+- Bump rustls-native-certs from 0.7.1 to 0.7.2
+- Bump serde from 1.0.204 to 1.0.207
+- Bump tempfile from 3.11.0 to 3.12.0
+- Bump clap from 4.5.13 to 4.5.15
+
 ## [0.6.0](https://github.com/alexrudy/hyperdriver/compare/v0.5.6...v0.6.0) - 2024-08-11
 
 ### Other
