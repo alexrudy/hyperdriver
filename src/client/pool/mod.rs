@@ -253,7 +253,7 @@ impl<C: PoolableConnection> PoolInner<C> {
         self.connecting.remove(&key);
 
         if let Some(waiters) = self.waiting.get_mut(&key) {
-            trace!(waiters=%waiters.len(), "Walking waiters");
+            trace!(waiters=%waiters.len(), "walking waiters");
 
             while let Some(waiter) = waiters.pop_front() {
                 if waiter.is_closed() {
@@ -270,17 +270,26 @@ impl<C: PoolableConnection> PoolInner<C> {
                         pool: pool_ref.clone(),
                     };
 
-                    let _ = waiter.send(pooled);
+                    if waiter.send(pooled).is_err() {
+                        trace!("waiter closed, skipping");
+                        continue;
+                    };
                 } else {
                     trace!("connection not re-usable, but will be sent to waiter");
                     let pooled = Pooled {
                         connection: Some(connection),
                         is_reused: false,
-                        key,
-                        pool: pool_ref,
+                        key: key.clone(),
+                        pool: pool_ref.clone(),
                     };
-                    let _ = waiter.send(pooled);
-                    return;
+
+                    let Err(pooled) = waiter.send(pooled) else {
+                        trace!("connection sent");
+                        return;
+                    };
+
+                    trace!("waiter closed, continuing");
+                    connection = pooled.take().unwrap();
                 }
             }
         }
@@ -383,6 +392,12 @@ pub struct Pooled<C: PoolableConnection> {
     is_reused: bool,
     key: key::Key,
     pool: PoolRef<C>,
+}
+
+impl<C: PoolableConnection> Pooled<C> {
+    fn take(mut self) -> Option<C> {
+        self.connection.take()
+    }
 }
 
 impl<C: fmt::Debug + PoolableConnection> fmt::Debug for Pooled<C> {
