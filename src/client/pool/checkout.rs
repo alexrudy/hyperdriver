@@ -70,6 +70,22 @@ pub(crate) enum Waiting<C: PoolableConnection> {
     NoPool,
 }
 
+impl<C: PoolableConnection> Waiting<C> {
+    fn close(&mut self) {
+        match self {
+            Waiting::Idle(rx) => {
+                rx.close();
+            }
+            Waiting::Connecting(rx) => {
+                rx.close();
+            }
+            Waiting::NoPool => {}
+        }
+
+        *self = Waiting::NoPool;
+    }
+}
+
 impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -133,6 +149,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E> Connector<C, T, E> {
         }
     }
 }
+
 pub(crate) enum InnerCheckoutConnecting<C: PoolableConnection, T: PoolableTransport, E> {
     Waiting,
     Connected,
@@ -182,6 +199,10 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
     /// Returns a new checkout which takes over ownership of the in-progress connection.
     fn as_detached(self: Pin<&mut Self>) -> Self {
         let this = self.project();
+
+        #[cfg(debug_assertions)]
+        tracing::trace!(%this.key, %this.id, "detaching checkout");
+
         Checkout {
             key: this.key.clone(),
             pool: this.pool.clone(),
@@ -191,11 +212,17 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
             connection_error: PhantomData,
             delayed_drop: false,
             #[cfg(debug_assertions)]
-            id: CheckoutId::new(),
+            id: *this.id,
         }
     }
 
     pub(crate) fn detached(key: Key, connector: Connector<C, T, E>) -> Self {
+        #[cfg(debug_assertions)]
+        let id = CheckoutId::new();
+
+        #[cfg(debug_assertions)]
+        tracing::trace!(%key, %id, "creating detached checkout");
+
         Self {
             key,
             pool: PoolRef::none(),
@@ -205,7 +232,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
             connection_error: PhantomData,
             delayed_drop: false,
             #[cfg(debug_assertions)]
-            id: CheckoutId::new(),
+            id,
         }
     }
 
@@ -220,8 +247,11 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
 
+        #[cfg(debug_assertions)]
+        tracing::trace!(%key, %id, "creating new checkout");
+
         if connection.is_some() {
-            tracing::debug!(key=%key, "connection recieved from pool");
+            tracing::trace!(%key, "connection recieved from pool");
             Self {
                 key,
                 pool: pool.as_ref(),
@@ -234,6 +264,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
                 id,
             }
         } else if let Some(connector) = connect {
+            tracing::trace!(%key, "connecting to pool");
             Self {
                 key,
                 pool: pool.as_ref(),
@@ -246,6 +277,7 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
                 id,
             }
         } else {
+            tracing::trace!(%key, "waiting for connection");
             Self {
                 key,
                 pool: pool.as_ref(),
@@ -310,6 +342,7 @@ where
                 InnerCheckoutConnecting::Handshaking(handshake) => {
                     let connection =
                         ready!(handshake.as_mut().poll(cx)).map_err(Error::Handshaking)?;
+                    *this.inner = InnerCheckoutConnecting::Connected;
                     return Poll::Ready(Ok(self.as_mut().connected(connection)));
                 }
             };
@@ -323,6 +356,7 @@ where
                 }
             }
 
+            // Destructure the InnerCheckoutConnecting to get the handshake function.
             let InnerCheckoutConnecting::Connecting(Connector {
                 transport: _,
                 handshake,
@@ -349,7 +383,8 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
     }
 
     /// Called to register a new connection with the pool.
-    pub(crate) fn connected(self: Pin<&mut Self>, connection: C) -> Pooled<C> {
+    pub(crate) fn connected(mut self: Pin<&mut Self>, connection: C) -> Pooled<C> {
+        self.waiter.close();
         register_connected(&self.pool, &self.key, connection)
     }
 }
@@ -392,6 +427,9 @@ where
     E: 'static,
 {
     fn drop(mut self: Pin<&mut Self>) {
+        #[cfg(debug_assertions)]
+        tracing::trace!(id=%self.id, "drop for checkout");
+
         if let Some(mut pool) = self.pool.lock() {
             pool.cancel_connection(&self.key);
 
@@ -402,6 +440,7 @@ where
                     InnerCheckoutConnecting::Connected | InnerCheckoutConnecting::Waiting,
                 )
             {
+                trace!(key=%self.key, state=?self.inner, "delaying connection drop");
                 let checkout = self.as_detached();
                 tokio::spawn(async move {
                     let key = checkout.key.clone();

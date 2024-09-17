@@ -55,7 +55,7 @@ default-features = false
 optional = true
 
 [dependencies.tower]
-version = "0.5"
+version = "0.4"
 features = ["make", "util"]
 default-features = false
 

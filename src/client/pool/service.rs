@@ -256,8 +256,10 @@ where
         );
 
         if let Some(pool) = self.pool.as_ref() {
+            tracing::trace!(%key, "checking out connection");
             Ok(pool.checkout(key, http_protocol.multiplex(), connector))
         } else {
+            tracing::trace!(%key, "detatched connection");
             Ok(Checkout::detached(key, connector))
         }
     }
