@@ -58,13 +58,14 @@ where
 
     fn poll_ready(
         &mut self,
-        _cx: &mut std::task::Context<'_>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, stream: &IO) -> Self::Future {
-        let mut inner = self.inner.clone();
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
         let rx = stream.recv();
         future::TlsConnectionFuture::new(inner.call(stream), rx)
     }

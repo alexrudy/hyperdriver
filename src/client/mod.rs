@@ -184,6 +184,7 @@ impl tower::Service<http::Request<crate::Body>> for Client {
     >;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        //TODO: What happens if we poll_ready, then clone, then call? The wrong (not ready) service will be used.
         Arc::make_mut(&mut self.inner).service.poll_ready(cx)
     }
 

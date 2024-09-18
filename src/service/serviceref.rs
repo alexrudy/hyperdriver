@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, task::Context};
 
 pub trait Sealed<C> {}
 
@@ -15,6 +15,9 @@ pub trait ServiceRef<IO>: Sealed<IO> {
     /// The error type of the service.
     type Error;
 
+    /// Poll the service to determine if it is ready to process requests.
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> std::task::Poll<Result<(), Self::Error>>;
+
     /// Call the service with a reference to the connection.
     fn call(&mut self, stream: &IO) -> Self::Future;
 }
@@ -29,6 +32,10 @@ where
     type Future = F;
     type Response = R;
     type Error = E;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        tower::Service::poll_ready(self, cx)
+    }
 
     fn call(&mut self, stream: &IO) -> Self::Future {
         tower::Service::call(self, stream)

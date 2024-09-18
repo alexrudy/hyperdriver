@@ -178,7 +178,8 @@ where
 
     #[tracing::instrument("http-connect", skip_all, fields(addr=?req.transport.info().remote_addr()))]
     fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
-        future::HttpConnectFuture::new(self.clone(), req.transport, req.version)
+        let builder = std::mem::replace(self, self.clone());
+        future::HttpConnectFuture::new(builder, req.transport, req.version)
     }
 }
 
