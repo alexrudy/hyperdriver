@@ -197,7 +197,7 @@ where
             Err(e) => return Box::pin(std::future::ready(Err(e))),
         };
 
-        let transport = std::mem::replace(self, self.clone());
+        let mut transport = std::mem::replace(self, self.clone());
 
         let span = tracing::trace_span!("tcp", host = %host, port = %port);
 
@@ -225,10 +225,13 @@ where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
 {
     /// Connect to a host and port.
-    async fn connect(&self, host: Box<str>, port: u16) -> Result<TcpStream, TcpConnectionError> {
-        let mut addrs = self
-            .resolver
-            .clone()
+    async fn connect(
+        &mut self,
+        host: Box<str>,
+        port: u16,
+    ) -> Result<TcpStream, TcpConnectionError> {
+        let resolver = R::clone(&self.resolver);
+        let mut addrs = std::mem::replace(&mut self.resolver, resolver)
             .oneshot(host)
             .await
             .map_err(TcpConnectionError::msg("dns resolution"))?;
