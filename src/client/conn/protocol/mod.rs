@@ -177,7 +177,7 @@ where
     }
 
     fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
-        let builder = self.clone();
+        let builder = std::mem::replace(self, self.clone());
         let stream = req.transport;
 
         let info = stream.info();
@@ -232,7 +232,7 @@ where
     }
 
     fn call(&mut self, req: ProtocolRequest<IO, BIn>) -> Self::Future {
-        let builder = self.clone();
+        let builder = std::mem::replace(self, self.clone());
         let stream = req.transport;
         let info = stream.info();
         let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
