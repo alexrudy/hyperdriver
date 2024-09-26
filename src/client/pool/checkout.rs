@@ -196,8 +196,16 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> fmt::Debug for Che
 }
 
 impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> {
-    /// Returns a new checkout which takes over ownership of the in-progress connection.
-    fn as_detached(self: Pin<&mut Self>) -> Self {
+    /// Creates a new checkout in the delayed state.
+    ///
+    /// The delayed checkout is used to poll a connection to completion and return it to
+    /// the pool for re-use. This is useful if the conncection got pre-empted by a newly
+    /// available connection from the pool, but we don't want to "waste" the work we've
+    /// already done to set up this connection.
+    ///
+    /// This checkout (not the returned value) will now appear as connected, and polling will
+    /// do nothing.
+    fn as_delayed(self: Pin<&mut Self>) -> Self {
         let this = self.project();
 
         #[cfg(debug_assertions)]
@@ -216,6 +224,16 @@ impl<C: PoolableConnection, T: PoolableTransport, E: 'static> Checkout<C, T, E> 
         }
     }
 
+    /// Constructs a checkout which does not hold a reference to the pool
+    /// and so is only waiting on the connector.
+    ///
+    /// This checkout will always proceed with the connector, uninterrupted by
+    /// alternative connection solutions. It will not use the "delayed drop"
+    /// procedure to finish connections if dropped.
+    ///
+    /// This is useful when using a checkout to poll a connection to readiness
+    /// without a pool, or in a context in which the associated connection cannot
+    /// or should not be shared with the pool.
     pub(crate) fn detached(key: Key, connector: Connector<C, T, E>) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
@@ -441,7 +459,7 @@ where
                 )
             {
                 trace!(key=%self.key, state=?self.inner, "delaying connection drop");
-                let checkout = self.as_detached();
+                let checkout = self.as_delayed();
                 tokio::spawn(async move {
                     let key = checkout.key.clone();
                     if let Err(error) = checkout.await {
