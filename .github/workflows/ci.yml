@@ -122,3 +122,13 @@ jobs:
       - name: Run cargo clippy
         if: github.repository_owner != 'linode-sokka'
         run: cargo clippy --all-features -- -D warnings
+
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run cargo deny
+        uses: EmbarkStudios/cargo-deny-action@v1
