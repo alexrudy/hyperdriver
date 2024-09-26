@@ -86,6 +86,18 @@ impl<T: PoolableConnection> Default for Pool<T> {
 }
 
 impl<C: PoolableConnection> Pool<C> {
+    /// Create a checkout for a connection to the given key (host/port pair).
+    ///
+    /// The checkout has several potential behaviors:
+    ///
+    /// 1. A connection already exists in the pool. It will be immediately available when
+    /// polling the checkout object.
+    /// 2. A connection is pending (probably in the handshake phase). The checkout will wait
+    /// for the pending connection to be ready and re-used.
+    /// 3. The checkout will create a new connection if none is available.
+    /// 4. During the connection phase, if a new connection is returned to the pool, it will be returned
+    /// in place of this one. If `continue_after_preemtion` is `true` in the pool config, the in-progress
+    /// connection will continue in the background and be returned to the pool on completion.
     #[cfg_attr(not(tarpaulin), tracing::instrument(skip_all, fields(key = %key), level="debug"))]
     pub(crate) fn checkout<T, E>(
         &self,
