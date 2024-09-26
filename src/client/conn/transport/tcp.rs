@@ -434,7 +434,7 @@ impl Default for TcpTransportConfig {
         Self {
             connect_timeout: Some(Duration::from_secs(10)),
             keep_alive_timeout: Some(Duration::from_secs(90)),
-            happy_eyeballs_timeout: Some(Duration::from_millis(500)),
+            happy_eyeballs_timeout: Some(Duration::from_secs(30)),
             local_address_ipv4: None,
             local_address_ipv6: None,
             nodelay: true,
