@@ -25,13 +25,13 @@ expression = "MIT AND ISC AND OpenSSL"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
 wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 skip-tree = ["windows-targets", "windows-sys"]
-skip = ["sync_wrapper"]
+skip = ["sync_wrapper", "tower@0.4.13"]
 
 [sources]
 unknown-registry = "warn"
