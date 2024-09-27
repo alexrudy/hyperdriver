@@ -17,7 +17,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(all(feature = "server", feature = "stream"))]
-use tokio::net::TcpListener;
+pub use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 
 use crate::info::HasConnectionInfo;
