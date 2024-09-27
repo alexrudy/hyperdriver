@@ -19,7 +19,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(all(feature = "server", feature = "stream"))]
-use tokio::net::UnixListener;
+pub use tokio::net::UnixListener;
 
 use crate::info::HasConnectionInfo;
 #[cfg(all(feature = "server", feature = "stream"))]
