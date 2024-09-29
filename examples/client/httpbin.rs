@@ -11,10 +11,20 @@ use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;
 use hyperdriver::client::Client;
 use tokio::io::AsyncWriteExt as _;
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    tracing_subscriber::fmt::init();
+    let default = "hyperdriver=debug"
+        .parse()
+        .expect("default filter is valid");
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(default)
+                .from_env_lossy(),
+        )
+        .init();
 
     let _ = rustls::crypto::ring::default_provider().install_default();
 

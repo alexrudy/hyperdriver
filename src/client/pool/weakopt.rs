@@ -19,6 +19,11 @@ impl<T> WeakOpt<T> {
     pub(crate) fn upgrade(&self) -> Option<Arc<T>> {
         self.0.as_ref().and_then(|weak| weak.upgrade())
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
 }
 
 impl<T> Clone for WeakOpt<T> {

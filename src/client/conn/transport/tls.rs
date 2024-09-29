@@ -127,22 +127,26 @@ pub(in crate::client::conn::transport) mod future {
     pub struct TlsConnectionFuture<T: Transport> {
         #[pin]
         state: State<T>,
+        span: tracing::Span,
     }
 
     impl<T: Transport> TlsConnectionFuture<T> {
         pub(super) fn new(future: T::Future, config: Arc<TlsClientConfig>, domain: String) -> Self {
+            let span = tracing::debug_span!("tls", %domain);
             Self {
                 state: State::Connecting {
                     future,
                     config,
                     domain,
                 },
+                span,
             }
         }
 
         pub(super) fn error(error: TlsConnectionError<T::Error>) -> Self {
             Self {
                 state: State::Error { error },
+                span: tracing::debug_span!("tls"),
             }
         }
     }
@@ -165,7 +169,8 @@ pub(in crate::client::conn::transport) mod future {
                         domain,
                     } => match future.poll(cx) {
                         Poll::Ready(Ok(stream)) => {
-                            tracing::trace!(domain=%domain, "Transport connected. TLS handshake starting");
+                            let _guard = this.span.enter();
+                            tracing::trace!("Transport connected. TLS handshake starting");
                             let stream = ClientStream::new(stream).tls(domain, config.clone());
                             this.state.set(State::Handshake { stream });
                         }
@@ -175,25 +180,28 @@ pub(in crate::client::conn::transport) mod future {
                         }
                         Poll::Pending => return Poll::Pending,
                     },
-                    StateProject::Handshake { stream } => match stream.poll_handshake(cx) {
-                        Poll::Ready(Ok(())) => {
-                            let StateProjectOwned::Handshake { stream } =
-                                this.state.project_replace(State::Invalid)
-                            else {
-                                unreachable!();
-                            };
+                    StateProject::Handshake { stream } => {
+                        let _guard = this.span.enter();
+                        match stream.poll_handshake(cx) {
+                            Poll::Ready(Ok(())) => {
+                                let StateProjectOwned::Handshake { stream } =
+                                    this.state.project_replace(State::Invalid)
+                                else {
+                                    unreachable!();
+                                };
 
-                            let info = stream.info();
+                                let info = stream.info();
 
-                            tracing::trace!(?info, "TLS handshake complete");
-                            return Poll::Ready(Ok(stream));
+                                tracing::trace!(?info, "TLS handshake complete");
+                                return Poll::Ready(Ok(stream));
+                            }
+                            Poll::Ready(Err(e)) => {
+                                tracing::trace!(?e, "Transport handshake error");
+                                return Poll::Ready(Err(TlsConnectionError::Handshake(e)));
+                            }
+                            Poll::Pending => return Poll::Pending,
                         }
-                        Poll::Ready(Err(e)) => {
-                            tracing::trace!(?e, "Transport handshake error");
-                            return Poll::Ready(Err(TlsConnectionError::Handshake(e)));
-                        }
-                        Poll::Pending => return Poll::Pending,
-                    },
+                    }
                     StateProject::Error { .. } => {
                         let StateProjectOwned::Error { error } =
                             this.state.project_replace(State::Invalid)

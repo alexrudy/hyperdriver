@@ -498,7 +498,6 @@ fn bind_local_address(
     Ok(())
 }
 
-#[tracing::instrument(skip(connect_timeout, config), level = "debug")]
 fn connect(
     addr: &SocketAddr,
     connect_timeout: Option<Duration>,
