@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-use super::conn::connection::ConnectionError;
 use super::{pool, BoxError};
 
 /// Client error type.
@@ -39,8 +38,12 @@ pub enum Error {
     RequestTimeout,
 }
 
-impl From<pool::Error<ConnectionError>> for Error {
-    fn from(error: pool::Error<ConnectionError>) -> Self {
+impl<E1, E2> From<pool::Error<E1, E2>> for Error
+where
+    E1: Into<BoxError>,
+    E2: Into<BoxError>,
+{
+    fn from(error: pool::Error<E1, E2>) -> Self {
         match error {
             pool::Error::Connecting(error) => Error::Connection(error.into()),
             pool::Error::Handshaking(error) => Error::Transport(error.into()),

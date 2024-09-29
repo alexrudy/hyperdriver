@@ -96,11 +96,11 @@ mod test {
     use std::thread;
 
     use super::*;
-    use crate::client::conn::stream::mock::MockConnection;
+    use crate::client::conn::protocol::mock::MockSender;
 
     #[test]
     fn verify_idle() {
-        let conn = MockConnection::single();
+        let conn = MockSender::single();
         let idle = Idle::new(conn);
 
         let dbg = format!("{:?}", idle);
@@ -115,7 +115,7 @@ mod test {
 
         assert_eq!(format!("{:?}", idle), "IdleConnections { inner: [] }");
 
-        let conn = MockConnection::single();
+        let conn = MockSender::single();
         idle.push(conn);
 
         assert_eq!(idle.len(), 1);
@@ -132,9 +132,9 @@ mod test {
         let mut idle = IdleConnections::default();
         assert_eq!(idle.len(), 0);
 
-        let conn1 = MockConnection::single();
-        let conn2 = MockConnection::single();
-        let conn3 = MockConnection::single();
+        let conn1 = MockSender::single();
+        let conn2 = MockSender::single();
+        let conn3 = MockSender::single();
 
         idle.push(conn1);
         idle.push(conn2);
@@ -164,9 +164,9 @@ mod test {
         let mut idle = IdleConnections::default();
         assert_eq!(idle.len(), 0);
 
-        let conn1 = MockConnection::single();
-        let conn2 = MockConnection::single();
-        let conn3 = MockConnection::single();
+        let conn1 = MockSender::single();
+        let conn2 = MockSender::single();
+        let conn3 = MockSender::single();
 
         idle.push(conn1);
         idle.push(conn2);
@@ -196,9 +196,9 @@ mod test {
         let mut idle = IdleConnections::default();
         assert_eq!(idle.len(), 0);
 
-        let conn1 = MockConnection::single();
-        let conn2 = MockConnection::single();
-        let conn3 = MockConnection::single();
+        let conn1 = MockSender::single();
+        let conn2 = MockSender::single();
+        let conn3 = MockSender::single();
 
         idle.push(conn1);
         idle.push(conn2);

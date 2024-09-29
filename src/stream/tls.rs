@@ -81,7 +81,7 @@ where
 }
 
 #[cfg(feature = "client")]
-impl<Tls, NoTls> crate::client::pool::PoolableTransport for TlsBraid<Tls, NoTls>
+impl<Tls, NoTls> crate::client::pool::PoolableStream for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeStream + Unpin + 'static,
     NoTls: AsyncRead + AsyncWrite + Send + Unpin + 'static,

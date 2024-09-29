@@ -2,9 +2,12 @@
 
 use std::future::{ready, Future};
 
+use http::Uri;
 use thiserror::Error;
 
-use crate::client::conn::stream::mock::{MockConnection, MockStream};
+use crate::client::conn::protocol::mock::MockProtocol;
+use crate::client::conn::protocol::HttpProtocol;
+use crate::client::conn::stream::mock::MockStream;
 use crate::client::pool::{self};
 
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -19,7 +22,7 @@ enum TransportMode {
     SingleUse,
     Reusable,
     ConnectionError,
-    Channel(tokio::sync::oneshot::Receiver<MockStream>),
+    Channel(Option<tokio::sync::oneshot::Receiver<MockStream>>),
 }
 
 /// A mock transport that can be used to test connection behavior.
@@ -72,26 +75,17 @@ impl MockTransport {
     /// Transport which returns a stream from a oneshot channel
     pub fn channel(rx: tokio::sync::oneshot::Receiver<MockStream>) -> Self {
         Self {
-            mode: TransportMode::Channel(rx),
+            mode: TransportMode::Channel(Some(rx)),
         }
     }
 
     /// Create a new connector for the transport.
-    pub fn connector(self) -> pool::Connector<MockConnection, MockStream, MockConnectionError> {
-        let connect: BoxFuture<'static, Result<MockStream, MockConnectionError>> = match self.mode {
-            TransportMode::SingleUse => Box::pin(ready(Ok(MockStream::single()))) as _,
-            TransportMode::Reusable => Box::pin(ready(Ok(MockStream::reusable()))) as _,
-            TransportMode::ConnectionError => Box::pin(ready(Err(MockConnectionError))) as _,
-            TransportMode::Channel(rx) => Box::pin(async move {
-                Ok(rx
-                    .await
-                    .expect("mock channel closed before stream was received"))
-            }) as _,
-        };
-
-        let handshake = move |stream| Box::pin(ready(Ok(MockConnection::new(stream)))) as _;
-
-        pool::Connector::new(move || connect, handshake)
+    pub fn connector(
+        self,
+        uri: Uri,
+        version: HttpProtocol,
+    ) -> pool::Connector<Self, MockProtocol, crate::Body> {
+        pool::Connector::new(self, MockProtocol::default(), uri, version)
     }
 }
 
@@ -110,11 +104,22 @@ impl tower::Service<http::Uri> for MockTransport {
     }
 
     fn call(&mut self, _req: http::Uri) -> Self::Future {
-        let reuse = match self.mode {
+        let reuse = match &mut self.mode {
             TransportMode::SingleUse => false,
             TransportMode::Reusable => true,
             TransportMode::ConnectionError => return Box::pin(ready(Err(MockConnectionError))),
-            TransportMode::Channel(_) => return Box::pin(ready(Err(MockConnectionError))),
+            TransportMode::Channel(rx) => {
+                if let Some(rx) = rx.take() {
+                    return Box::pin(async move {
+                        match rx.await {
+                            Ok(stream) => Ok(stream),
+                            Err(_) => Err(MockConnectionError),
+                        }
+                    });
+                }
+
+                return Box::pin(ready(Err(MockConnectionError)));
+            }
         };
 
         let conn = MockStream::new(reuse);

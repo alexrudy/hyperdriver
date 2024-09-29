@@ -11,7 +11,7 @@ use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::ToSocketAddrs;
 
-use crate::client::pool::PoolableTransport;
+use crate::client::pool::PoolableStream;
 use crate::info::tls::HasTlsConnectionInfo;
 use crate::info::TlsConnectionInfo;
 use crate::info::{ConnectionInfo, HasConnectionInfo};
@@ -74,7 +74,7 @@ where
     }
 }
 
-impl<IO> PoolableTransport for TlsStream<IO>
+impl<IO> PoolableStream for TlsStream<IO>
 where
     IO: HasConnectionInfo + Unpin + Send + 'static,
     IO::Addr: Clone + Unpin + Send,

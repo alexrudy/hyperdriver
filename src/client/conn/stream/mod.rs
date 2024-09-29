@@ -27,7 +27,7 @@ use crate::stream::tls::TlsHandshakeStream;
 use crate::stream::Braid;
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
-use crate::{client::pool::PoolableTransport, info::HasConnectionInfo};
+use crate::{client::pool::PoolableStream, info::HasConnectionInfo};
 
 #[cfg(feature = "mocks")]
 pub mod mock;
@@ -195,7 +195,7 @@ where
     }
 }
 
-impl<IO> PoolableTransport for Stream<IO>
+impl<IO> PoolableStream for Stream<IO>
 where
     IO: HasConnectionInfo + Unpin + Send + 'static,
     IO::Addr: Send + Unpin + Clone,

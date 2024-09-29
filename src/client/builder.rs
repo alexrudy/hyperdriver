@@ -18,7 +18,7 @@ use super::conn::transport::TransportExt;
 use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
-use super::pool::{PoolableConnection, PoolableTransport};
+use super::pool::{PoolableConnection, PoolableStream};
 use super::ConnectionPoolLayer;
 use crate::service::RequestExecutor;
 use crate::service::{Http1ChecksLayer, Http2ChecksLayer, SetHostHeaderLayer};
@@ -380,7 +380,7 @@ where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
     <<T as BuildTransport>::Target as Transport>::IO:
-        PoolableTransport + tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+        PoolableStream + tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     <<<T as BuildTransport>::Target as Transport>::IO as HasConnectionInfo>::Addr:
         Unpin + Clone + Send,
     P: BuildProtocol<
@@ -471,7 +471,7 @@ where
     T: BuildTransport,
     <T as BuildTransport>::Target: Transport + Clone + Send + Sync + 'static,
     <<T as BuildTransport>::Target as Transport>::IO:
-        PoolableTransport + tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+        PoolableStream + tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     <<<T as BuildTransport>::Target as Transport>::IO as HasConnectionInfo>::Addr:
         Unpin + Clone + Send,
     P: BuildProtocol<

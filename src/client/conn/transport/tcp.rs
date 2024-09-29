@@ -230,12 +230,14 @@ where
         host: Box<str>,
         port: u16,
     ) -> Result<TcpStream, TcpConnectionError> {
+        tracing::trace!(%host, "resolving hostname");
         let resolver = R::clone(&self.resolver);
         let mut addrs = std::mem::replace(&mut self.resolver, resolver)
             .oneshot(host)
             .await
             .map_err(TcpConnectionError::msg("dns resolution"))?;
         addrs.set_port(port);
+        tracing::trace!("dns resolution finished");
         let connecting = self.connecting(addrs);
         connecting.connect().await
     }
@@ -287,13 +289,19 @@ impl<'c> TcpConnecting<'c> {
             attempts.push(async { attempt.connect().instrument(span).await });
         }
 
+        tracing::trace!("Starting {} connection attempts", attempts.len());
+
         attempts.finish().await.map_err(|err| match err {
             HappyEyeballsError::Error(err) => err,
-            HappyEyeballsError::Timeout(elapsed) => TcpConnectionError::new(format!(
-                "Connection attempts timed out after {}ms",
-                elapsed.as_millis()
-            )),
+            HappyEyeballsError::Timeout(elapsed) => {
+                tracing::trace!("tcp timed out after {}ms", elapsed.as_millis());
+                TcpConnectionError::new(format!(
+                    "Connection attempts timed out after {}ms",
+                    elapsed.as_millis()
+                ))
+            }
             HappyEyeballsError::NoProgress => {
+                tracing::trace!("tcp exhausted connection candidates");
                 TcpConnectionError::new("Exhausted connection candidates")
             }
         })
