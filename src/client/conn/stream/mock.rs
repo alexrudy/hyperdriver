@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use tracing::trace;
 
-use crate::client::pool::{PoolableConnection, PoolableTransport};
+use crate::client::pool::PoolableStream;
 use crate::info::HasConnectionInfo;
 
 #[cfg(feature = "tls")]
@@ -80,64 +80,18 @@ impl MockStream {
 
     /// Close the connection.
     pub fn close(&self) {
-        self.open.store(false, Ordering::SeqCst);
+        self.open.store(false, Ordering::Release);
+    }
+
+    /// Check if the connection is open.
+    pub fn is_open(&self) -> bool {
+        self.open.load(Ordering::Acquire)
     }
 }
 
-impl PoolableTransport for MockStream {
+impl PoolableStream for MockStream {
     fn can_share(&self) -> bool {
         self.reuse
-    }
-}
-
-/// A mock connection for testing.
-#[derive(Debug)]
-pub struct MockConnection {
-    stream: MockStream,
-}
-
-impl MockConnection {
-    /// Create a new mock connection.
-    pub fn new(stream: MockStream) -> Self {
-        Self { stream }
-    }
-
-    /// Close the connection.
-    pub fn close(&self) {
-        self.stream.close();
-    }
-
-    /// Get the unique ID for this connection stream.
-    pub fn id(&self) -> StreamID {
-        self.stream.id()
-    }
-
-    /// Create a new single-use mock connection.
-    pub fn single() -> Self {
-        Self::new(MockStream::single())
-    }
-
-    /// Create a new reusable mock connection.
-    pub fn reusable() -> Self {
-        Self::new(MockStream::reusable())
-    }
-}
-
-impl PoolableConnection for MockConnection {
-    fn is_open(&self) -> bool {
-        self.stream.open.load(Ordering::SeqCst)
-    }
-
-    fn can_share(&self) -> bool {
-        self.stream.reuse
-    }
-
-    fn reuse(&mut self) -> Option<Self> {
-        if self.stream.reuse {
-            Some(Self::new(self.stream.clone()))
-        } else {
-            None
-        }
     }
 }
 

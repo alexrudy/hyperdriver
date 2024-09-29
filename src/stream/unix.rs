@@ -203,7 +203,7 @@ impl HasConnectionInfo for UnixStream {
 }
 
 #[cfg(feature = "client")]
-impl crate::client::pool::PoolableTransport for UnixStream {
+impl crate::client::pool::PoolableStream for UnixStream {
     fn can_share(&self) -> bool {
         false
     }

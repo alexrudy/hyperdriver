@@ -103,7 +103,7 @@ impl DuplexStream {
 }
 
 #[cfg(feature = "client")]
-impl crate::client::pool::PoolableTransport for DuplexStream {
+impl crate::client::pool::PoolableStream for DuplexStream {
     fn can_share(&self) -> bool {
         false
     }

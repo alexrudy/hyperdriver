@@ -37,7 +37,7 @@ pub struct ProtocolRequest<IO: HasConnectionInfo, B> {
     /// The HTTP protocol to use for the connection
     pub version: HttpProtocol,
 
-    _body: PhantomData<fn(B) -> ()>,
+    _body: PhantomData<fn() -> B>,
 }
 
 /// Protocols (like HTTP) define how data is sent and received over a connection.

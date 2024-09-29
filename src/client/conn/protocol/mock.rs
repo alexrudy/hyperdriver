@@ -5,16 +5,56 @@ use std::future::{ready, Ready};
 use thiserror::Error;
 
 use crate::client::conn::connection::ConnectionError;
-use crate::client::conn::stream::mock::MockStream;
+use crate::client::conn::stream::mock::{MockStream, StreamID};
 use crate::client::conn::Connection;
-use crate::client::pool::PoolableConnection;
+use crate::client::pool::{PoolableConnection, PoolableStream};
 
 use super::ProtocolRequest;
 
 /// A minimal protocol sender for testing purposes.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct MockSender {
-    _private: (),
+    id: StreamID,
+    stream: MockStream,
+}
+
+impl MockSender {
+    /// The unique identifier for the stream.
+    pub fn id(&self) -> StreamID {
+        self.id
+    }
+
+    /// Close the connection and stream
+    pub fn close(&self) {
+        self.stream.close();
+    }
+
+    /// Create a single-use mock sender.
+    pub fn single() -> Self {
+        Self {
+            id: StreamID::new(),
+            stream: MockStream::single(),
+        }
+    }
+
+    /// Create a new reusable mock sender.
+    pub fn reusable() -> Self {
+        Self {
+            id: StreamID::new(),
+            stream: MockStream::reusable(),
+        }
+    }
+
+    /// Create a new mock sender.
+    pub fn new() -> Self {
+        Self::reusable()
+    }
+}
+
+impl Default for MockSender {
+    fn default() -> Self {
+        Self::reusable()
+    }
 }
 
 impl Connection<crate::Body> for MockSender {
@@ -42,11 +82,11 @@ impl Connection<crate::Body> for MockSender {
 
 impl PoolableConnection for MockSender {
     fn is_open(&self) -> bool {
-        true
+        self.stream.is_open()
     }
 
     fn can_share(&self) -> bool {
-        true
+        self.stream.can_share()
     }
 
     fn reuse(&mut self) -> Option<Self> {
@@ -80,8 +120,11 @@ impl tower::Service<ProtocolRequest<MockStream, crate::Body>> for MockProtocol {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, _: ProtocolRequest<MockStream, crate::Body>) -> Self::Future {
-        ready(Ok(MockSender::default()))
+    fn call(&mut self, req: ProtocolRequest<MockStream, crate::Body>) -> Self::Future {
+        ready(Ok(MockSender {
+            id: StreamID::new(),
+            stream: req.transport,
+        }))
     }
 }
 

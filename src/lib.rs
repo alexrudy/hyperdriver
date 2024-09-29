@@ -122,8 +122,6 @@ pub mod client;
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
 pub mod info;
-#[cfg(feature = "client")]
-mod lazy;
 #[cfg(feature = "server")]
 mod rewind;
 #[cfg(feature = "server")]

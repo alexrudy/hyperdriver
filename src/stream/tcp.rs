@@ -137,7 +137,7 @@ impl HasConnectionInfo for TcpStream {
 }
 
 #[cfg(feature = "client")]
-impl crate::client::pool::PoolableTransport for TcpStream {
+impl crate::client::pool::PoolableStream for TcpStream {
     fn can_share(&self) -> bool {
         false
     }

@@ -184,7 +184,7 @@ mod tests {
     #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn test_client_mock_connection_error() {
-        use crate::client::{conn::connection::ConnectionError, ConnectionPoolService};
+        use crate::client::ConnectionPoolService;
 
         let transport = MockTransport::error();
         let protocol = MockProtocol::default();
@@ -205,12 +205,6 @@ mod tests {
         let err = result.unwrap_err();
 
         let Error::Connection(err) = err else {
-            panic!("unexpected error: {:?}", err);
-        };
-
-        let err = err.downcast::<ConnectionError>().unwrap();
-
-        let ConnectionError::Connecting(err) = *err else {
             panic!("unexpected error: {:?}", err);
         };
 
