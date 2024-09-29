@@ -241,6 +241,7 @@ where
         self: Pin<&mut Self>,
         pool: &PoolRef<P::Connection>,
         key: &Key,
+        meta: &CheckoutMeta,
         cx: &mut Context<'_>,
     ) -> Poll<Result<P::Connection, ConnectionError<T, P, B>>> {
         let mut connector_projected = self.project();
@@ -252,6 +253,7 @@ where
                     transport,
                     protocol,
                 } => {
+                    let _entered = meta.transport_span.enter();
                     {
                         let transport = transport.as_mut().unwrap();
                         if let Err(error) = ready!(transport.poll_ready(cx)) {
@@ -272,6 +274,7 @@ where
                 }
 
                 ConnectorStateProjected::Connect { future, protocol } => {
+                    let _entered = meta.transport_span.enter();
                     let stream = match ready!(future.poll(cx)) {
                         Ok(stream) => stream,
                         Err(error) => return Poll::Ready(Err(Error::Connecting(error))),
@@ -288,6 +291,8 @@ where
                 }
 
                 ConnectorStateProjected::PollReadyHandshake { protocol, stream } => {
+                    let _entered = meta.protocol_span.enter();
+
                     {
                         let protocol = protocol.as_mut().unwrap();
                         if let Err(error) =
@@ -328,6 +333,8 @@ where
                 }
 
                 ConnectorStateProjected::Handshake { future, info } => {
+                    let _entered = meta.protocol_span.enter();
+
                     return future.poll(cx).map(|result| match result {
                         Ok(conn) => {
                             tracing::debug!("connection to {} ready", info.remote_addr());
@@ -370,6 +377,27 @@ where
     }
 }
 
+struct CheckoutMeta {
+    overall_span: tracing::Span,
+    transport_span: tracing::Span,
+    protocol_span: tracing::Span,
+}
+
+impl CheckoutMeta {
+    fn new() -> Self {
+        let overall_span = tracing::Span::current();
+
+        let transport_span = tracing::trace_span!(parent: &overall_span, "transport");
+        let protocol_span = tracing::trace_span!(parent: &overall_span, "protocol");
+
+        Self {
+            overall_span,
+            transport_span,
+            protocol_span,
+        }
+    }
+}
+
 #[pin_project(PinnedDrop)]
 pub(crate) struct Checkout<T, P, B>
 where
@@ -384,6 +412,7 @@ where
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
+    meta: CheckoutMeta,
     #[cfg(debug_assertions)]
     id: CheckoutId,
 }
@@ -405,10 +434,10 @@ where
     }
 }
 
-impl<T, P, B> Checkout<T, P, B>
+impl<T, P, B, C> Checkout<T, P, B>
 where
     T: Transport,
-    P: Protocol<T::IO, B>,
+    P: Protocol<T::IO, B, Connection = C>,
     P::Connection: PoolableConnection,
 {
     /// Constructs a checkout which does not hold a reference to the pool
@@ -434,6 +463,7 @@ where
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
             connection: None,
+            meta: CheckoutMeta::new(),
             #[cfg(debug_assertions)]
             id,
         }
@@ -448,6 +478,7 @@ where
     ) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
+        let meta = CheckoutMeta::new();
 
         #[cfg(debug_assertions)]
         tracing::trace!(%key, %id, "creating new checkout");
@@ -460,6 +491,7 @@ where
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connected,
                 connection,
+                meta,
                 #[cfg(debug_assertions)]
                 id,
             }
@@ -471,6 +503,7 @@ where
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connecting(connector),
                 connection,
+                meta,
                 #[cfg(debug_assertions)]
                 id,
             }
@@ -482,6 +515,7 @@ where
                 waiter: Waiting::Connecting(waiter),
                 inner: InnerCheckoutConnecting::Waiting,
                 connection,
+                meta,
                 #[cfg(debug_assertions)]
                 id,
             }
@@ -502,28 +536,33 @@ where
 
     #[cfg_attr(debug_assertions, tracing::instrument("checkout::poll", skip_all, fields(id=%self.id), level="trace"))]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Outcomes from .poll_waiter:
-        // - Ready(Some(connection)) => return connection
-        // - Ready(None) => continue to check pool, we don't have a waiter.
-        // - Pending => wait on the waiter to complete, don't bother to check pool.
+        let mut this = self.as_mut().project();
+        let _entered = this.meta.overall_span.enter();
 
-        // Open questions: Should we check the pool for a different connection when the
-        // waiter is pending? Probably not, ideally our semantics should keep the pool
-        // from containing multiple connections if they can be multiplexed.
+        {
+            // Outcomes from .poll_waiter:
+            // - Ready(Some(connection)) => return connection
+            // - Ready(None) => continue to check pool, we don't have a waiter.
+            // - Pending => wait on the waiter to complete, don't bother to check pool.
 
-        if let WaitingPoll::Connected(connection) = ready!(self.as_mut().poll_waiter(cx)) {
-            debug!(key=%self.key, "connection recieved from waiter");
+            // Open questions: Should we check the pool for a different connection when the
+            // waiter is pending? Probably not, ideally our semantics should keep the pool
+            // from containing multiple connections if they can be multiplexed.
+            if let WaitingPoll::Connected(connection) = ready!(this.waiter.as_mut().poll(cx)) {
+                debug!(key=%this.key, "connection recieved from waiter");
 
-            return Poll::Ready(Ok(connection));
+                return Poll::Ready(Ok(connection));
+            }
         }
 
-        trace!(key=%self.key, "polling for new connection");
+        trace!(key=%this.key, "polling for new connection");
         // Try to connect while we also wait for a checkout to be ready.
-        let this = self.as_mut().project();
-        match this.inner.project() {
+
+        match this.inner.as_mut().project() {
             CheckoutConnectingProj::Waiting => {
                 // We're waiting on a connection to be ready.
-                // If that were still happening, we would bail out above.
+                // If that were still happening, we would bail out above, since the waiter
+                // would return Poll::Pending.
                 return Poll::Ready(Err(Error::Unavailable));
             }
             CheckoutConnectingProj::Connected => {
@@ -533,14 +572,20 @@ where
                     .take()
                     .expect("future was polled after completion");
 
-                return Poll::Ready(Ok(self.as_mut().connected(connection)));
+                this.waiter.close();
+                this.inner.set(InnerCheckoutConnecting::Connected);
+                return Poll::Ready(Ok(register_connected(this.pool, this.key, connection)));
             }
             CheckoutConnectingProj::Connecting(connector) => {
-                let result = ready!(connector.poll_connector(this.pool, this.key, cx));
+                let result = ready!(connector.poll_connector(this.pool, this.key, this.meta, cx));
 
                 match result {
                     Ok(connection) => {
-                        return Poll::Ready(Ok(self.as_mut().connected(connection)));
+                        this.waiter.close();
+                        this.inner.set(InnerCheckoutConnecting::Connected);
+                        return Poll::Ready(Ok(register_connected(
+                            this.pool, this.key, connection,
+                        )));
                     }
                     Err(e) => {
                         return Poll::Ready(Err(e));
@@ -551,40 +596,7 @@ where
     }
 }
 
-impl<T, P, B> Checkout<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    /// Checks the waiter to see if a new connection is ready and can be passed along.
-    ///
-    /// If there is no waiter, this function returns `Poll::Ready(Ok(None))`. If there is
-    /// a waiter, then it will poll the waiter and return the result.
-    pub(crate) fn poll_waiter(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<WaitingPoll<P::Connection>> {
-        let this = self.project();
-
-        trace!(key=%this.key, "polling for waiter");
-        this.waiter.poll(cx)
-    }
-
-    /// Called to register a new connection with the pool.
-    pub(crate) fn connected(
-        mut self: Pin<&mut Self>,
-        connection: P::Connection,
-    ) -> Pooled<P::Connection> {
-        {
-            let mut this = self.as_mut().project();
-            this.waiter.close();
-            this.inner.set(InnerCheckoutConnecting::Connected);
-        }
-        register_connected(&self.pool, &self.key, connection)
-    }
-}
-
+/// Register a connection with the pool referenced here.
 fn register_connected<C>(poolref: &PoolRef<C>, key: &Key, mut connection: C) -> Pooled<C>
 where
     C: PoolableConnection,

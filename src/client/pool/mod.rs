@@ -180,6 +180,11 @@ where
             .upgrade()
             .map(|inner| PoolGuard(inner.lock_arc()))
     }
+
+    #[allow(dead_code)]
+    fn is_none(&self) -> bool {
+        self.inner.is_none()
+    }
 }
 
 impl<C> Clone for PoolRef<C>

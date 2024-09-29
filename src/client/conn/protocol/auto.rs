@@ -70,9 +70,11 @@ where
                 let conn = pin!(conn);
                 if let Err(err) = conn.await {
                     if err.is_user() {
-                        tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
+                        tracing::error!(err = format!("{err:#?}"), "h2 connection driver error");
+                    } else if !err.is_closed() {
+                        tracing::debug!(err = format!("{err:#?}"), "h2 connection driver error");
                     } else {
-                        tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
+                        tracing::trace!(err = format!("{err:#?}"), "h2 connection closed")
                     }
                 }
             }

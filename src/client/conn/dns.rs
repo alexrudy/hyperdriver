@@ -189,9 +189,10 @@ impl tower::Service<Box<str>> for GaiResolver {
 
     fn call(&mut self, host: Box<str>) -> Self::Future {
         use std::net::ToSocketAddrs;
+        let span = tracing::Span::current();
         GaiFuture {
             handle: tokio::task::spawn_blocking(move || {
-                tracing::trace_span!("getaddrinfo").in_scope(|| {
+                tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
                     tracing::trace!("dns resolution");
                     (host.as_ref(), 0)
                         .to_socket_addrs()
