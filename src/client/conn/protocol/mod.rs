@@ -12,7 +12,6 @@ use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tower::Service;
-use tracing::Instrument;
 
 use super::connection::ConnectionError;
 use super::connection::HttpConnection;
@@ -180,8 +179,8 @@ where
         let builder = std::mem::replace(self, self.clone());
         let stream = req.transport;
 
-        let info = stream.info();
-        let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
+        // let info = stream.info();
+        // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 
         Box::pin(async move {
             let (sender, conn) = builder
@@ -189,18 +188,15 @@ where
                 .await
                 .map_err(|err| ConnectionError::Handshake(err.into()))?;
 
-            tokio::spawn(
-                async {
-                    if let Err(err) = conn.await {
-                        if err.is_user() {
-                            tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
-                        } else {
-                            tracing::debug!(err = format!("{err:#}"), "h1 connection driver error");
-                        }
+            tokio::spawn(async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
+                    } else {
+                        tracing::debug!(err = format!("{err:#}"), "h1 connection driver error");
                     }
                 }
-                .instrument(span),
-            );
+            });
             Ok(HttpConnection::h1(sender))
         })
     }
@@ -234,26 +230,23 @@ where
     fn call(&mut self, req: ProtocolRequest<IO, BIn>) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
         let stream = req.transport;
-        let info = stream.info();
-        let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
+        // let info = stream.info();
+        // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 
         Box::pin(async move {
             let (sender, conn) = builder
                 .handshake(TokioIo::new(stream))
                 .await
                 .map_err(|err| ConnectionError::Handshake(err.into()))?;
-            tokio::spawn(
-                async {
-                    if let Err(err) = conn.await {
-                        if err.is_user() {
-                            tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
-                        } else {
-                            tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
-                        }
+            tokio::spawn(async {
+                if let Err(err) = conn.await {
+                    if err.is_user() {
+                        tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
+                    } else {
+                        tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
                     }
                 }
-                .instrument(span),
-            );
+            });
             Ok(HttpConnection::h2(sender))
         })
     }

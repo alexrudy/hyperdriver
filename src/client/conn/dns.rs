@@ -193,7 +193,7 @@ impl tower::Service<Box<str>> for GaiResolver {
         GaiFuture {
             handle: tokio::task::spawn_blocking(move || {
                 tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
-                    tracing::trace!("dns resolution");
+                    tracing::trace!("dns resolution starting");
                     (host.as_ref(), 0)
                         .to_socket_addrs()
                         .map(SocketAddrs::from_iter)

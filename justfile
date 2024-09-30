@@ -94,3 +94,11 @@ httpbin:
     cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X POST -d "Hello World"
     cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X GET --http2
     cargo +{{rust}} run --features client,tls,tls-ring --example httpbin -- -X POST --http2 -d "Hello World"
+
+# Run the HURL command
+hurl *args='':
+    cargo +{{rust}} run --features client,tls,tls-ring --example hurl -- {{args}}
+
+# Launch jaeger
+jaeger:
+    docker run -d -p16686:16686 -p4317:4317 -e COLLECTOR_OTLP_ENABLED=true jaegertracing/all-in-one:latest

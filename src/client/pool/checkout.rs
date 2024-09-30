@@ -241,7 +241,7 @@ where
         self: Pin<&mut Self>,
         pool: &PoolRef<P::Connection>,
         key: &Key,
-        meta: &CheckoutMeta,
+        meta: &mut CheckoutMeta,
         cx: &mut Context<'_>,
     ) -> Poll<Result<P::Connection, ConnectionError<T, P, B>>> {
         let mut connector_projected = self.project();
@@ -253,7 +253,7 @@ where
                     transport,
                     protocol,
                 } => {
-                    let _entered = meta.transport_span.enter();
+                    let _entered = meta.transport().enter();
                     {
                         let transport = transport.as_mut().unwrap();
                         if let Err(error) = ready!(transport.poll_ready(cx)) {
@@ -274,7 +274,7 @@ where
                 }
 
                 ConnectorStateProjected::Connect { future, protocol } => {
-                    let _entered = meta.transport_span.enter();
+                    let _entered = meta.transport().enter();
                     let stream = match ready!(future.poll(cx)) {
                         Ok(stream) => stream,
                         Err(error) => return Poll::Ready(Err(Error::Connecting(error))),
@@ -291,7 +291,7 @@ where
                 }
 
                 ConnectorStateProjected::PollReadyHandshake { protocol, stream } => {
-                    let _entered = meta.protocol_span.enter();
+                    let _entered = meta.protocol().enter();
 
                     {
                         let protocol = protocol.as_mut().unwrap();
@@ -333,7 +333,7 @@ where
                 }
 
                 ConnectorStateProjected::Handshake { future, info } => {
-                    let _entered = meta.protocol_span.enter();
+                    let _entered = meta.protocol().enter();
 
                     return future.poll(cx).map(|result| match result {
                         Ok(conn) => {
@@ -379,22 +379,29 @@ where
 
 struct CheckoutMeta {
     overall_span: tracing::Span,
-    transport_span: tracing::Span,
-    protocol_span: tracing::Span,
+    transport_span: Option<tracing::Span>,
+    protocol_span: Option<tracing::Span>,
 }
 
 impl CheckoutMeta {
     fn new() -> Self {
         let overall_span = tracing::Span::current();
 
-        let transport_span = tracing::trace_span!(parent: &overall_span, "transport");
-        let protocol_span = tracing::trace_span!(parent: &overall_span, "protocol");
-
         Self {
             overall_span,
-            transport_span,
-            protocol_span,
+            transport_span: None,
+            protocol_span: None,
         }
+    }
+
+    fn transport(&mut self) -> &tracing::Span {
+        self.transport_span
+            .get_or_insert_with(|| tracing::trace_span!(parent: &self.overall_span, "transport"))
+    }
+
+    fn protocol(&mut self) -> &tracing::Span {
+        self.protocol_span
+            .get_or_insert_with(|| tracing::trace_span!(parent: &self.overall_span, "protocol"))
     }
 }
 
@@ -534,10 +541,9 @@ where
         Error<<T as Transport>::Error, <P as Protocol<T::IO, B>>::Error>,
     >;
 
-    #[cfg_attr(debug_assertions, tracing::instrument("checkout::poll", skip_all, fields(id=%self.id), level="trace"))]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut().project();
-        let _entered = this.meta.overall_span.enter();
+        let _entered = this.meta.overall_span.clone().entered();
 
         {
             // Outcomes from .poll_waiter:
@@ -563,7 +569,7 @@ where
                 // We're waiting on a connection to be ready.
                 // If that were still happening, we would bail out above, since the waiter
                 // would return Poll::Pending.
-                return Poll::Ready(Err(Error::Unavailable));
+                Poll::Ready(Err(Error::Unavailable))
             }
             CheckoutConnectingProj::Connected => {
                 // We've already connected, we can just return the connection.
@@ -574,7 +580,7 @@ where
 
                 this.waiter.close();
                 this.inner.set(InnerCheckoutConnecting::Connected);
-                return Poll::Ready(Ok(register_connected(this.pool, this.key, connection)));
+                Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
             }
             CheckoutConnectingProj::Connecting(connector) => {
                 let result = ready!(connector.poll_connector(this.pool, this.key, this.meta, cx));
@@ -583,16 +589,12 @@ where
                     Ok(connection) => {
                         this.waiter.close();
                         this.inner.set(InnerCheckoutConnecting::Connected);
-                        return Poll::Ready(Ok(register_connected(
-                            this.pool, this.key, connection,
-                        )));
+                        Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
                     }
-                    Err(e) => {
-                        return Poll::Ready(Err(e));
-                    }
-                };
+                    Err(e) => Poll::Ready(Err(e)),
+                }
             }
-        };
+        }
     }
 }
 

@@ -127,26 +127,25 @@ pub(in crate::client::conn::transport) mod future {
     pub struct TlsConnectionFuture<T: Transport> {
         #[pin]
         state: State<T>,
-        span: tracing::Span,
+        span: Option<tracing::Span>,
     }
 
     impl<T: Transport> TlsConnectionFuture<T> {
         pub(super) fn new(future: T::Future, config: Arc<TlsClientConfig>, domain: String) -> Self {
-            let span = tracing::debug_span!("tls", %domain);
             Self {
                 state: State::Connecting {
                     future,
                     config,
                     domain,
                 },
-                span,
+                span: None,
             }
         }
 
         pub(super) fn error(error: TlsConnectionError<T::Error>) -> Self {
             Self {
                 state: State::Error { error },
-                span: tracing::debug_span!("tls"),
+                span: None,
             }
         }
     }
@@ -169,7 +168,10 @@ pub(in crate::client::conn::transport) mod future {
                         domain,
                     } => match future.poll(cx) {
                         Poll::Ready(Ok(stream)) => {
-                            let _guard = this.span.enter();
+                            let _guard = this
+                                .span
+                                .get_or_insert_with(|| tracing::trace_span!("tls"))
+                                .enter();
                             tracing::trace!("Transport connected. TLS handshake starting");
                             let stream = ClientStream::new(stream).tls(domain, config.clone());
                             this.state.set(State::Handshake { stream });
@@ -181,7 +183,10 @@ pub(in crate::client::conn::transport) mod future {
                         Poll::Pending => return Poll::Pending,
                     },
                     StateProject::Handshake { stream } => {
-                        let _guard = this.span.enter();
+                        let _guard = this
+                            .span
+                            .get_or_insert_with(|| tracing::trace_span!("tls"))
+                            .enter();
                         match stream.poll_handshake(cx) {
                             Poll::Ready(Ok(())) => {
                                 let StateProjectOwned::Handshake { stream } =
