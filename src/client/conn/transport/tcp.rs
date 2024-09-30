@@ -232,10 +232,34 @@ where
     ) -> Result<TcpStream, TcpConnectionError> {
         tracing::trace!(%host, "resolving hostname");
         let resolver = R::clone(&self.resolver);
-        let mut addrs = std::mem::replace(&mut self.resolver, resolver)
-            .oneshot(host)
-            .await
-            .map_err(TcpConnectionError::msg("dns resolution"))?;
+        let resolve = std::mem::replace(&mut self.resolver, resolver).oneshot(host);
+
+        let mut addrs = if let Some(timeout) = self.config.connect_timeout {
+            tracing::trace!(?timeout, "resolve with timeout");
+            let outcome = tokio::time::timeout(timeout, resolve).await;
+            tracing::trace!(success=%outcome.is_ok(), "resolved dns");
+            match outcome {
+                Ok(Ok(addrs)) => addrs,
+                Err(_) => {
+                    return Err(TcpConnectionError::new(format!(
+                        "dns resolution timed out after {}",
+                        self.config.connect_timeout.unwrap().as_millis(),
+                    )))
+                }
+                Ok(Err(error)) => {
+                    return Err(TcpConnectionError::build("dns resolution failed", error))
+                }
+            }
+        } else {
+            tracing::trace!("resolve without timeout");
+            match resolve.await {
+                Ok(addrs) => addrs,
+                Err(error) => {
+                    return Err(TcpConnectionError::build("dns resolution failed", error))
+                }
+            }
+        };
+
         addrs.set_port(port);
         tracing::trace!("dns resolution finished");
         let connecting = self.connecting(addrs);
@@ -281,7 +305,12 @@ impl<'c> TcpConnecting<'c> {
                 .map(|duration| duration / (self.addresses.len()) as u32)
         };
 
-        let mut attempts = EyeballSet::new(delay, self.config.happy_eyeballs_timeout);
+        tracing::trace!(?delay, timeout=?self.config.happy_eyeballs_timeout, "happy eyeballs");
+        let mut attempts = EyeballSet::new(
+            delay,
+            self.config.happy_eyeballs_timeout,
+            self.config.happy_eyeballs_concurrency,
+        );
 
         while let Some(address) = self.addresses.pop() {
             let span: tracing::Span = tracing::trace_span!("connect", %address);
@@ -418,6 +447,9 @@ pub struct TcpTransportConfig {
     /// The timeout for happy eyeballs algorithm.
     pub happy_eyeballs_timeout: Option<Duration>,
 
+    /// The number of concurrent connection atttempts to make.
+    pub happy_eyeballs_concurrency: Option<usize>,
+
     /// The local IPv4 address to bind to.
     pub local_address_ipv4: Option<Ipv4Addr>,
 
@@ -443,6 +475,7 @@ impl Default for TcpTransportConfig {
             connect_timeout: Some(Duration::from_secs(10)),
             keep_alive_timeout: Some(Duration::from_secs(90)),
             happy_eyeballs_timeout: Some(Duration::from_secs(30)),
+            happy_eyeballs_concurrency: Some(2),
             local_address_ipv4: None,
             local_address_ipv6: None,
             nodelay: true,
@@ -510,7 +543,7 @@ fn connect(
         .map_err(TcpConnectionError::msg("tcp open error"))?;
     tracing::trace!("tcp socket opened");
 
-    let guard = tracing::trace_span!("socket_options").entered();
+    let guard = tracing::trace_span!("socket::options").entered();
 
     // When constructing a Tokio `TcpSocket` from a raw fd/socket, the user is
     // responsible for ensuring O_NONBLOCK is set.
@@ -563,7 +596,7 @@ fn connect(
 
     drop(guard);
 
-    let span = tracing::trace_span!("tcp", remote.addr = %addr);
+    let span = tracing::trace_span!("socket::connect", remote.addr = %addr);
     let connect = socket.connect(*addr).instrument(span);
     Ok(async move {
         match connect_timeout {

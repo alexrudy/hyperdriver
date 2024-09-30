@@ -10,6 +10,7 @@ use std::task::Poll;
 
 use futures_util::future::BoxFuture;
 use http_body::Body;
+use tracing::Instrument;
 
 use crate::client::conn::Connection;
 use crate::client::pool::PoolableConnection;
@@ -122,10 +123,12 @@ async fn execute_request<C, BIn, BOut>(
 where
     C: Connection<BIn, ResBody = BOut> + PoolableConnection,
 {
-    tracing::trace!(request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
+    let span = tracing::trace_span!("send request", request.uri=%request.uri());
+    tracing::trace!(parent: &span, request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
 
     let response = conn
         .send_request(request)
+        .instrument(span)
         .await
         .map_err(|error| Error::Connection(error.into()))?;
 

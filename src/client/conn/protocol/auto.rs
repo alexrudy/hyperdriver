@@ -6,7 +6,6 @@ use std::pin::pin;
 use http_body::Body;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
-use tracing::Instrument as _;
 
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
@@ -59,27 +58,24 @@ where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake h2");
-        let span = tracing::info_span!("connection", version = ?http::Version::HTTP_2, peer = %stream.info().remote_addr());
+        // let span = tracing::info_span!(parent: tracing::Span::none(), "connection", version = ?http::Version::HTTP_2, peer = %stream.info().remote_addr());
         let (sender, conn) = self
             .http2
             .handshake(TokioIo::new(stream))
             .await
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(
-            async {
-                let conn = pin!(conn);
-                if let Err(err) = conn.await {
-                    if err.is_user() {
-                        tracing::error!(err = format!("{err:#?}"), "h2 connection driver error");
-                    } else if !err.is_closed() {
-                        tracing::debug!(err = format!("{err:#?}"), "h2 connection driver error");
-                    } else {
-                        tracing::trace!(err = format!("{err:#?}"), "h2 connection closed")
-                    }
+        tokio::spawn(async {
+            let conn = pin!(conn);
+            if let Err(err) = conn.await {
+                if err.is_user() {
+                    tracing::error!(err = format!("{err:#?}"), "h2 connection driver error");
+                } else if !err.is_closed() {
+                    tracing::debug!(err = format!("{err:#?}"), "h2 connection driver error");
+                } else {
+                    tracing::trace!(err = format!("{err:#?}"), "h2 connection closed")
                 }
             }
-            .instrument(span),
-        );
+        });
         trace!("handshake complete");
         Ok(HttpConnection::h2(sender))
     }
@@ -88,27 +84,24 @@ where
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
-        trace!("handshake h1");
-        let span = tracing::info_span!("connection", version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr());
+        trace!(version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr(), "handshake h1");
+        // let span = tracing::info_span!("connection", version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr());
 
         let (sender, conn) = self
             .http1
             .handshake(TokioIo::new(stream))
             .await
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(
-            async {
-                if let Err(err) = conn.await {
-                    tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
-                }
+        tokio::spawn(async {
+            if let Err(err) = conn.await {
+                tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
             }
-            .instrument(span),
-        );
+        });
         trace!("handshake complete");
         Ok(HttpConnection::h1(sender))
     }
 
-    #[tracing::instrument(name = "handshake", skip_all)]
+    #[tracing::instrument(level = "trace", name = "handshake", skip_all)]
     pub(crate) async fn handshake<IO>(
         &self,
         transport: IO,
@@ -178,7 +171,7 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument("http-connect", skip_all, fields(addr=?req.transport.info().remote_addr()))]
+    #[tracing::instrument("http-connect", level="trace", skip_all, fields(addr=?req.transport.info().remote_addr()))]
     fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
         future::HttpConnectFuture::new(builder, req.transport, req.version)
