@@ -1,6 +1,6 @@
 [package]
 name = "hyperdriver"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "The missing middle for Hyper - Servers and Clients with ergonomic APIs"
 license = "MIT"
