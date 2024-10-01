@@ -31,7 +31,7 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 skip-tree = ["windows-targets", "windows-sys"]
-skip = ["sync_wrapper", "tower@0.4.13"]
+skip = ["sync_wrapper", "tower@0.4.13", "indexmap@1.9.3", "hashbrown@0.12.3"]
 
 [sources]
 unknown-registry = "warn"
