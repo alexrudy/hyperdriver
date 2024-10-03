@@ -70,7 +70,7 @@ clap = { version = "4.5.18" }
 color-eyre = "0.6"
 opentelemetry = "0.24"
 opentelemetry-otlp = { version = "0.17" }
-opentelemetry-semantic-conventions = "*"
+opentelemetry-semantic-conventions = "0.25"
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 static-assertions = { version = "1", package = "static_assertions" }
