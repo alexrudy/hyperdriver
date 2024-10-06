@@ -360,6 +360,7 @@ where
     Connected,
     Connecting(#[pin] Connector<T, P, B>),
     ConnectingWithDelayDrop(Option<Pin<Box<Connector<T, P, B>>>>),
+    ConnectingDelayed(Pin<Box<Connector<T, P, B>>>),
 }
 
 impl<T, P, B> fmt::Debug for InnerCheckoutConnecting<T, P, B>
@@ -379,6 +380,9 @@ where
                 .debug_tuple("ConnectingWithDelayDrop")
                 .field(connector)
                 .finish(),
+            InnerCheckoutConnecting::ConnectingDelayed(connector) => {
+                f.debug_tuple("ConnectingDelayed").field(connector).finish()
+            }
         }
     }
 }
@@ -426,7 +430,6 @@ where
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
-    is_delayed_drop: bool,
     meta: CheckoutMeta,
     #[cfg(debug_assertions)]
     id: CheckoutId,
@@ -460,10 +463,6 @@ where
     fn as_delayed(self: Pin<&mut Self>) -> Option<Self> {
         let mut this = self.project();
 
-        if *this.is_delayed_drop {
-            return None;
-        }
-
         match this.inner.as_mut().project() {
             CheckoutConnectingProj::ConnectingWithDelayDrop(connector) if connector.is_some() => {
                 tracing::trace!("converting checkout to delayed drop");
@@ -471,9 +470,8 @@ where
                     key: this.key.clone(),
                     pool: this.pool.clone(),
                     waiter: Waiting::NoPool,
-                    inner: InnerCheckoutConnecting::ConnectingWithDelayDrop(connector.take()),
+                    inner: InnerCheckoutConnecting::ConnectingDelayed(connector.take().unwrap()),
                     connection: None,
-                    is_delayed_drop: true,
                     meta: CheckoutMeta::new(), // New meta to avoid holding spans in the spawned task
                     #[cfg(debug_assertions)]
                     id: *this.id,
@@ -506,7 +504,6 @@ where
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
             connection: None,
-            is_delayed_drop: false,
             meta: CheckoutMeta::new(),
             #[cfg(debug_assertions)]
             id,
@@ -536,7 +533,6 @@ where
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connected,
                 connection,
-                is_delayed_drop: false,
                 meta,
                 #[cfg(debug_assertions)]
                 id,
@@ -556,7 +552,6 @@ where
                 waiter: Waiting::Idle(waiter),
                 inner,
                 connection,
-                is_delayed_drop: false,
                 meta,
                 #[cfg(debug_assertions)]
                 id,
@@ -569,7 +564,6 @@ where
                 waiter: Waiting::Connecting(waiter),
                 inner: InnerCheckoutConnecting::Waiting,
                 connection,
-                is_delayed_drop: false,
                 meta,
                 #[cfg(debug_assertions)]
                 id,
@@ -644,7 +638,8 @@ where
                     Err(e) => Poll::Ready(Err(e)),
                 }
             }
-            CheckoutConnectingProj::ConnectingWithDelayDrop(Some(connector)) => {
+            CheckoutConnectingProj::ConnectingWithDelayDrop(Some(connector))
+            | CheckoutConnectingProj::ConnectingDelayed(connector) => {
                 let result = ready!(connector
                     .as_mut()
                     .poll_connector(this.pool, this.key, this.meta, cx));
