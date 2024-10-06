@@ -34,7 +34,7 @@ use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
 
 #[cfg(feature = "incoming")]
-pub use crate::service::{AdaptIncomingLayer, AdaptIncomingService};
+pub use crate::service::{IncomingRequestLayer, IncomingRequestService};
 type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
 
 /// A wrapper for different internal body types which implements [http_body::Body](http_body::Body)
