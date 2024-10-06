@@ -11,7 +11,7 @@ use tokio::io::AsyncWrite;
 use super::auto::Builder;
 use super::auto::UpgradableConnection;
 use super::ConnectionError;
-use crate::body::AdaptIncomingService;
+use crate::body::IncomingRequestService;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
@@ -19,7 +19,7 @@ use crate::bridge::service::TowerHyperService;
 type Connection<'a, S, IO, BIn, BOut> = UpgradableConnection<
     'a,
     TokioIo<IO>,
-    TowerHyperService<AdaptIncomingService<S, BIn, BOut>>,
+    TowerHyperService<IncomingRequestService<S, BIn, BOut>>,
     TokioExecutor,
 >;
 
@@ -54,7 +54,7 @@ where
         Self::new(protocol, move |protocol| {
             Box::pin(protocol.serve_connection_with_upgrades(
                 TokioIo::new(stream),
-                TowerHyperService::new(AdaptIncomingService::new(service)),
+                TowerHyperService::new(IncomingRequestService::new(service)),
             ))
         })
     }

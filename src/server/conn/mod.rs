@@ -3,7 +3,7 @@
 use std::io;
 use std::pin::Pin;
 
-use crate::body::AdaptIncomingService;
+use crate::body::IncomingRequestService;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
@@ -47,7 +47,7 @@ pub enum ConnectionError {
     Protocol(#[source] io::Error),
 }
 
-type Adapted<S, BIn, BOut> = TowerHyperService<AdaptIncomingService<S, BIn, BOut>>;
+type Adapted<S, BIn, BOut> = TowerHyperService<IncomingRequestService<S, BIn, BOut>>;
 
 /// A connection that can be gracefully shutdown.
 pub trait Connection {
@@ -92,7 +92,7 @@ where
     {
         let conn = self.serve_connection(
             TokioIo::new(stream),
-            TowerHyperService::new(AdaptIncomingService::new(service)),
+            TowerHyperService::new(IncomingRequestService::new(service)),
         );
         conn.with_upgrades()
     }
@@ -133,7 +133,7 @@ where
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {
         self.serve_connection(
             TokioIo::new(stream),
-            TowerHyperService::new(AdaptIncomingService::new(service)),
+            TowerHyperService::new(IncomingRequestService::new(service)),
         )
     }
 }

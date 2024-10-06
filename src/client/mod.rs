@@ -60,11 +60,11 @@ pub type SharedClientService<BIn, BOut> =
 /// Inner type for managing the client service.
 #[derive(Clone)]
 struct ClientRef {
-    service: SharedClientService<crate::Body, hyper::body::Incoming>,
+    service: SharedClientService<crate::Body, crate::Body>,
 }
 
 impl ClientRef {
-    fn new(service: impl Into<SharedClientService<crate::Body, hyper::body::Incoming>>) -> Self {
+    fn new(service: impl Into<SharedClientService<crate::Body, crate::Body>>) -> Self {
         Self {
             service: service.into(),
         }
@@ -73,8 +73,7 @@ impl ClientRef {
     fn request(
         &mut self,
         request: http::Request<crate::Body>,
-    ) -> Oneshot<SharedClientService<crate::Body, hyper::body::Incoming>, http::Request<crate::Body>>
-    {
+    ) -> Oneshot<SharedClientService<crate::Body, crate::Body>, http::Request<crate::Body>> {
         let service = self.service.clone();
         std::mem::replace(&mut self.service, service).oneshot(request)
     }
@@ -118,7 +117,7 @@ impl Client {
     /// It is much easier to use the builder interface to create a client.
     pub fn new_from_service<S>(service: S) -> Self
     where
-        S: Into<SharedClientService<crate::Body, hyper::body::Incoming>>,
+        S: Into<SharedClientService<crate::Body, crate::Body>>,
     {
         Client {
             inner: Arc::new(ClientRef::new(service)),
@@ -143,7 +142,7 @@ impl Client {
     }
 
     /// Unwrap the inner service from the client.
-    pub fn into_inner(self) -> SharedClientService<crate::Body, hyper::body::Incoming> {
+    pub fn into_inner(self) -> SharedClientService<crate::Body, crate::Body> {
         match Arc::try_unwrap(self.inner) {
             Ok(client) => client.service,
             Err(client) => client.service.clone(),
@@ -156,16 +155,12 @@ impl Client {
     pub fn request(
         &mut self,
         request: http::Request<crate::Body>,
-    ) -> Oneshot<SharedClientService<crate::Body, hyper::body::Incoming>, http::Request<crate::Body>>
-    {
+    ) -> Oneshot<SharedClientService<crate::Body, crate::Body>, http::Request<crate::Body>> {
         Arc::make_mut(&mut self.inner).request(request)
     }
 
     /// Make a GET request to the given URI.
-    pub async fn get(
-        &mut self,
-        uri: http::Uri,
-    ) -> Result<http::Response<hyper::body::Incoming>, BoxError> {
+    pub async fn get(&mut self, uri: http::Uri) -> Result<http::Response<crate::Body>, BoxError> {
         let request = http::Request::get(uri.clone())
             .body(crate::body::Body::empty())
             .unwrap();
@@ -176,12 +171,10 @@ impl Client {
 }
 
 impl tower::Service<http::Request<crate::Body>> for Client {
-    type Response = http::Response<hyper::body::Incoming>;
+    type Response = http::Response<crate::Body>;
     type Error = Error;
-    type Future = Oneshot<
-        SharedClientService<crate::Body, hyper::body::Incoming>,
-        http::Request<crate::Body>,
-    >;
+    type Future =
+        Oneshot<SharedClientService<crate::Body, crate::Body>, http::Request<crate::Body>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         //TODO: What happens if we poll_ready, then clone, then call? The wrong (not ready) service will be used.

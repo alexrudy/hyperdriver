@@ -9,7 +9,6 @@ use std::time::Duration;
 use clap::{arg, value_parser, ArgMatches};
 use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;
-use hyper::body::Incoming;
 use hyperdriver::{client::Client, Body};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
@@ -100,7 +99,7 @@ async fn build_request(args: &ArgMatches, uri: Uri) -> Result<http::Request<Body
 async fn do_one_request(
     client: &mut Client,
     request: http::Request<Body>,
-) -> Result<http::Response<Incoming>, BoxError> {
+) -> Result<http::Response<Body>, BoxError> {
     Ok(client.request(request).await?)
 }
 

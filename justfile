@@ -37,7 +37,7 @@ check:
 check-all:
     cargo +{{rust}} check --all-targets --all-features
     cargo +{{rust}} hack check --target-dir target/hack/ --no-private --each-feature --no-dev-deps
-    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,pidfile,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,tls-ring,tls-aws-lc
 
 # Run clippy
 clippy:
