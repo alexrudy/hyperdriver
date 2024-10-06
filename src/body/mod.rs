@@ -34,6 +34,9 @@ use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
 
 #[cfg(feature = "incoming")]
+#[deprecated(since = "0.7.0", note = "Use IncomingRequestService instead")]
+pub use crate::service::{AdaptIncomingLayer, AdaptIncomingService};
+#[cfg(feature = "incoming")]
 pub use crate::service::{IncomingRequestLayer, IncomingRequestService};
 type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
 
