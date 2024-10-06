@@ -294,7 +294,7 @@ impl<Addr> ConnectionInfo<Addr> {
 /// Trait for types which can provide connection information.
 pub trait HasConnectionInfo {
     /// The address type for this connection.
-    type Addr: fmt::Display + fmt::Debug;
+    type Addr: fmt::Display + fmt::Debug + Send;
 
     /// Get the connection information for this stream.
     fn info(&self) -> ConnectionInfo<Self::Addr>;

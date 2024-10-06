@@ -20,6 +20,7 @@ use crate::client::conn::Transport;
 use crate::info::ConnectionInfo;
 use crate::info::HasConnectionInfo;
 
+use super::Config;
 use super::Key;
 use super::Pool;
 use super::PoolRef;
@@ -358,6 +359,7 @@ where
     Waiting,
     Connected,
     Connecting(#[pin] Connector<T, P, B>),
+    ConnectingWithDelayDrop(Option<Pin<Box<Connector<T, P, B>>>>),
 }
 
 impl<T, P, B> fmt::Debug for InnerCheckoutConnecting<T, P, B>
@@ -373,6 +375,10 @@ where
             InnerCheckoutConnecting::Connecting(connector) => {
                 f.debug_tuple("Connecting").field(connector).finish()
             }
+            InnerCheckoutConnecting::ConnectingWithDelayDrop(connector) => f
+                .debug_tuple("ConnectingWithDelayDrop")
+                .field(connector)
+                .finish(),
         }
     }
 }
@@ -408,9 +414,10 @@ impl CheckoutMeta {
 #[pin_project(PinnedDrop)]
 pub(crate) struct Checkout<T, P, B>
 where
-    T: Transport,
-    P: Protocol<T::IO, B>,
+    T: Transport + 'static,
+    P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
+    B: 'static,
 {
     key: Key,
     pool: PoolRef<P::Connection>,
@@ -419,6 +426,7 @@ where
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
+    is_delayed_drop: bool,
     meta: CheckoutMeta,
     #[cfg(debug_assertions)]
     id: CheckoutId,
@@ -443,10 +451,38 @@ where
 
 impl<T, P, B, C> Checkout<T, P, B>
 where
-    T: Transport,
-    P: Protocol<T::IO, B, Connection = C>,
+    T: Transport + 'static,
+    P: Protocol<T::IO, B, Connection = C> + Send + 'static,
     P::Connection: PoolableConnection,
+    B: 'static,
 {
+    /// Converts this checkout into a "delayed drop" checkout.
+    fn as_delayed(self: Pin<&mut Self>) -> Option<Self> {
+        let mut this = self.project();
+
+        if *this.is_delayed_drop {
+            return None;
+        }
+
+        match this.inner.as_mut().project() {
+            CheckoutConnectingProj::ConnectingWithDelayDrop(connector) if connector.is_some() => {
+                tracing::trace!("converting checkout to delayed drop");
+                Some(Checkout {
+                    key: this.key.clone(),
+                    pool: this.pool.clone(),
+                    waiter: Waiting::NoPool,
+                    inner: InnerCheckoutConnecting::ConnectingWithDelayDrop(connector.take()),
+                    connection: None,
+                    is_delayed_drop: true,
+                    meta: CheckoutMeta::new(), // New meta to avoid holding spans in the spawned task
+                    #[cfg(debug_assertions)]
+                    id: *this.id,
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Constructs a checkout which does not hold a reference to the pool
     /// and so is only waiting on the connector.
     ///
@@ -470,6 +506,7 @@ where
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
             connection: None,
+            is_delayed_drop: false,
             meta: CheckoutMeta::new(),
             #[cfg(debug_assertions)]
             id,
@@ -482,6 +519,7 @@ where
         waiter: Receiver<Pooled<P::Connection>>,
         connect: Option<Connector<T, P, B>>,
         connection: Option<P::Connection>,
+        config: &Config,
     ) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
@@ -498,18 +536,27 @@ where
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connected,
                 connection,
+                is_delayed_drop: false,
                 meta,
                 #[cfg(debug_assertions)]
                 id,
             }
         } else if let Some(connector) = connect {
             tracing::trace!(%key, "connecting to pool");
+
+            let inner = if config.continue_after_preemption {
+                InnerCheckoutConnecting::ConnectingWithDelayDrop(Some(Box::pin(connector)))
+            } else {
+                InnerCheckoutConnecting::Connecting(connector)
+            };
+
             Self {
                 key,
                 pool: pool.as_ref(),
                 waiter: Waiting::Idle(waiter),
-                inner: InnerCheckoutConnecting::Connecting(connector),
+                inner,
                 connection,
+                is_delayed_drop: false,
                 meta,
                 #[cfg(debug_assertions)]
                 id,
@@ -522,6 +569,7 @@ where
                 waiter: Waiting::Connecting(waiter),
                 inner: InnerCheckoutConnecting::Waiting,
                 connection,
+                is_delayed_drop: false,
                 meta,
                 #[cfg(debug_assertions)]
                 id,
@@ -532,9 +580,10 @@ where
 
 impl<T, P, B> Future for Checkout<T, P, B>
 where
-    T: Transport,
-    P: Protocol<T::IO, B>,
+    T: Transport + 'static,
+    P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
+    B: 'static,
 {
     type Output = Result<
         Pooled<P::Connection>,
@@ -585,14 +634,34 @@ where
             CheckoutConnectingProj::Connecting(connector) => {
                 let result = ready!(connector.poll_connector(this.pool, this.key, this.meta, cx));
 
+                this.waiter.close();
+                this.inner.set(InnerCheckoutConnecting::Connected);
+
                 match result {
                     Ok(connection) => {
-                        this.waiter.close();
-                        this.inner.set(InnerCheckoutConnecting::Connected);
                         Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
                     }
                     Err(e) => Poll::Ready(Err(e)),
                 }
+            }
+            CheckoutConnectingProj::ConnectingWithDelayDrop(Some(connector)) => {
+                let result = ready!(connector
+                    .as_mut()
+                    .poll_connector(this.pool, this.key, this.meta, cx));
+
+                this.waiter.close();
+                this.inner.set(InnerCheckoutConnecting::Connected);
+
+                match result {
+                    Ok(connection) => {
+                        Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
+                    }
+                    Err(e) => Poll::Ready(Err(e)),
+                }
+            }
+            CheckoutConnectingProj::ConnectingWithDelayDrop(None) => {
+                // Something stole our connection, this is an error state.
+                panic!("connection was stolen from checkout")
             }
         }
     }
@@ -634,15 +703,23 @@ where
 #[pinned_drop]
 impl<T, P, B> PinnedDrop for Checkout<T, P, B>
 where
-    T: Transport,
-    P: Protocol<T::IO, B>,
+    T: Transport + 'static,
+    P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
+    B: 'static,
 {
     fn drop(mut self: Pin<&mut Self>) {
         #[cfg(debug_assertions)]
         tracing::trace!(id=%self.id, "drop for checkout");
 
-        if let Some(mut pool) = self.pool.lock() {
+        if let Some(checkout) = self.as_mut().as_delayed() {
+            tokio::task::spawn(async move {
+                if let Err(err) = checkout.await {
+                    tracing::error!(error=%err, "error during delayed drop");
+                }
+            });
+        } else if let Some(mut pool) = self.pool.lock() {
+            // Connection is only cancled when no delayed drop occurs.
             pool.cancel_connection(&self.key);
         }
     }

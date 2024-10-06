@@ -110,8 +110,9 @@ impl<C: PoolableConnection> Pool<C> {
     ) -> Checkout<T, P, B>
     where
         T: Transport,
-        P: Protocol<T::IO, B, Connection = C>,
+        P: Protocol<T::IO, B, Connection = C> + Send + 'static,
         C: PoolableConnection,
+        B: 'static,
     {
         let mut inner = self.inner.lock();
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -120,7 +121,7 @@ impl<C: PoolableConnection> Pool<C> {
         if let Some(connection) = inner.pop(&key) {
             trace!("connection found in pool");
             connector = None;
-            return Checkout::new(key, self, rx, connector, Some(connection));
+            return Checkout::new(key, self, rx, connector, Some(connection), &inner.config);
         }
 
         trace!("checkout interested in pooled connections");
@@ -129,7 +130,7 @@ impl<C: PoolableConnection> Pool<C> {
         if inner.connecting.contains(&key) {
             trace!("connection in progress elsewhere, will wait");
             connector = None;
-            Checkout::new(key, self, rx, connector, None)
+            Checkout::new(key, self, rx, connector, None, &inner.config)
         } else {
             if multiplex {
                 // Only block new connection attempts if we can multiplex on this one.
@@ -137,7 +138,7 @@ impl<C: PoolableConnection> Pool<C> {
                 inner.connecting.insert(key.clone());
             }
             trace!("connecting to host");
-            Checkout::new(key, self, rx, connector, None)
+            Checkout::new(key, self, rx, connector, None, &inner.config)
         }
     }
 }
@@ -335,7 +336,7 @@ pub struct Config {
     pub max_idle_per_host: usize,
 
     /// Should in-progress connections continue after they get pre-empted by a new connection?
-    pub continue_after_premeption: bool,
+    pub continue_after_preemption: bool,
 }
 
 impl Default for Config {
@@ -343,7 +344,7 @@ impl Default for Config {
         Self {
             idle_timeout: Some(Duration::from_secs(90)),
             max_idle_per_host: 32,
-            continue_after_premeption: true,
+            continue_after_preemption: true,
         }
     }
 }
@@ -480,7 +481,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -539,7 +540,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -597,7 +598,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -643,7 +644,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -681,7 +682,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -736,7 +737,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -772,7 +773,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -800,7 +801,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
 
         let key: key::Key = (
@@ -828,7 +829,7 @@ mod tests {
         let pool = Pool::new(Config {
             idle_timeout: Some(Duration::from_secs(10)),
             max_idle_per_host: 5,
-            continue_after_premeption: false,
+            continue_after_preemption: false,
         });
         let other = pool.clone();
 
@@ -879,5 +880,51 @@ mod tests {
 
         assert!(c2.is_open());
         assert_ne!(c2.id(), cid, "connection should not be re-used");
+    }
+
+    #[tokio::test]
+    async fn checkout_delayed_drop() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let pool = Pool::new(Config {
+            idle_timeout: Some(Duration::from_secs(10)),
+            max_idle_per_host: 5,
+            continue_after_preemption: true,
+        });
+
+        let key: key::Key = (
+            http::uri::Scheme::HTTP,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+
+        let conn = pool
+            .checkout(
+                key.clone(),
+                false,
+                MockTransport::single()
+                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            )
+            .await
+            .unwrap();
+
+        assert!(conn.is_open());
+        let cid = conn.id();
+
+        let checkout = pool.checkout(
+            key.clone(),
+            false,
+            MockTransport::single()
+                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+        );
+
+        drop(conn);
+        let conn = checkout.await.unwrap();
+        assert!(conn.is_open());
+        assert_eq!(cid, conn.id());
+
+        let inner = pool.inner.lock();
+        let idles = inner.idle.get(&key).unwrap();
+        assert_eq!(idles.len(), 1);
     }
 }

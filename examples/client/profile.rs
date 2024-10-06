@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use clap::{arg, value_parser, ArgMatches};
+use futures_util::{stream::FuturesUnordered, TryStreamExt};
 use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;
 use hyperdriver::{client::Client, Body};
@@ -95,14 +96,6 @@ async fn build_request(args: &ArgMatches, uri: Uri) -> Result<http::Request<Body
     Ok(req)
 }
 
-#[instrument(level = "info", name = "request", skip_all)]
-async fn do_one_request(
-    client: &mut Client,
-    request: http::Request<Body>,
-) -> Result<http::Response<Body>, BoxError> {
-    Ok(client.request(request).await?)
-}
-
 #[instrument(level = "info", skip_all)]
 async fn demonstrate_requests(args: &ArgMatches) -> Result<(), BoxError> {
     let timeout = Duration::from_secs(*args.get_one::<u64>("timeout").unwrap());
@@ -126,35 +119,44 @@ async fn demonstrate_requests(args: &ArgMatches) -> Result<(), BoxError> {
 
     let mut client = Client::build_tcp_http().with_timeout(timeout).build();
 
-    let mut res = None;
+    let mut fut = FuturesUnordered::new();
     for _ in 1..=repeat {
         let req = build_request(args, uri.clone()).await?;
-        res = Some(do_one_request(&mut client, req).await?);
+        let res = client.request(req);
+        let span = tracing::info_span!("request");
+        fut.push(res.instrument(span))
     }
 
-    let res = res.unwrap();
-    println!("Response: {} - {:?}", res.status(), res.version());
-
-    for (name, value) in res.headers() {
-        if let Ok(value) = value.to_str() {
-            println!("  {}: {}", name, value);
+    {
+        let mut res = None;
+        while let Some(item) = fut.try_next().await? {
+            res = Some(item);
         }
-    }
 
-    let span = tracing::debug_span!("read body");
-    async {
-        let mut stdout = tokio::io::stdout();
+        let res = res.unwrap();
+        println!("Response: {} - {:?}", res.status(), res.version());
 
-        let mut body = res.into_body();
-        while let Some(chunk) = body.frame().await {
-            if let Some(chunk) = chunk?.data_ref() {
-                stdout.write_all(chunk).await?;
+        for (name, value) in res.headers() {
+            if let Ok(value) = value.to_str() {
+                println!("  {}: {}", name, value);
             }
         }
-        Ok::<_, BoxError>(())
+
+        let span = tracing::debug_span!("read body");
+        async {
+            let mut stdout = tokio::io::stdout();
+
+            let mut body = res.into_body();
+            while let Some(chunk) = body.frame().await {
+                if let Some(chunk) = chunk?.data_ref() {
+                    stdout.write_all(chunk).await?;
+                }
+            }
+            Ok::<_, BoxError>(())
+        }
+        .instrument(span)
+        .await?;
     }
-    .instrument(span)
-    .await?;
 
     tracing::info!("finished");
 
