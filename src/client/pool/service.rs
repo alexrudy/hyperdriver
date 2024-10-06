@@ -177,7 +177,7 @@ impl
             pool: Some(pool::Pool::new(pool::Config {
                 idle_timeout: Some(std::time::Duration::from_secs(90)),
                 max_idle_per_host: 32,
-                continue_after_premeption: true,
+                continue_after_preemption: true,
             })),
 
             transport: Default::default(),
