@@ -76,7 +76,7 @@ where
 
 impl<IO> PoolableStream for TlsStream<IO>
 where
-    IO: HasConnectionInfo + Unpin + Send + 'static,
+    IO: HasConnectionInfo + Unpin + 'static,
     IO::Addr: Clone + Unpin + Send,
 {
     fn can_share(&self) -> bool {
@@ -89,7 +89,7 @@ where
 
 impl<IO> TlsHandshakeStream for TlsStream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     IO::Addr: Send + Unpin,
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {

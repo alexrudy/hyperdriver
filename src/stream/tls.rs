@@ -2,7 +2,6 @@
 //! and so involve a negotiation component.
 
 use std::{
-    future::poll_fn,
     io,
     pin::Pin,
     task::{Context, Poll},
@@ -12,12 +11,37 @@ use std::{
 use crate::info::tls::TlsConnectionInfoReciever;
 pub use crate::info::TlsConnectionInfo;
 use futures_core::Future;
-use futures_util::FutureExt;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+/// Future returned by `TlsHandshakeStream::finish_handshake`.
+///
+/// This future resolves when the handshake is complete.
+#[pin_project]
+#[derive(Debug)]
+pub struct Handshaking<'a, T: ?Sized> {
+    inner: &'a mut T,
+}
+
+impl<'a, T: ?Sized> Handshaking<'a, T> {
+    fn new(inner: &'a mut T) -> Self {
+        Handshaking { inner }
+    }
+}
+
+impl<'a, T> Future for Handshaking<'a, T>
+where
+    T: TlsHandshakeStream + ?Sized,
+{
+    type Output = Result<(), io::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll_handshake(cx)
+    }
+}
+
 /// A stream that supports a TLS handshake.
-pub trait TlsHandshakeStream: Send {
+pub trait TlsHandshakeStream {
     /// Poll the handshake to completion.
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>>;
 
@@ -26,10 +50,8 @@ pub trait TlsHandshakeStream: Send {
     /// This method will drive the connection asynchronosly allowing you to wait
     /// for the TLS handshake to complete. If this method is not called, the TLS handshake
     /// will be completed the first time the connection is used.
-    fn finish_handshake(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), io::Error>> + Send + '_>> {
-        poll_fn(|cx| self.poll_handshake(cx)).boxed()
+    fn finish_handshake(&mut self) -> Handshaking<'_, Self> {
+        Handshaking::new(self)
     }
 }
 
@@ -53,7 +75,7 @@ pub enum TlsBraid<Tls, NoTls> {
 impl<Tls, NoTls> TlsHandshakeStream for TlsBraid<Tls, NoTls>
 where
     Tls: TlsHandshakeStream + Unpin,
-    NoTls: AsyncRead + AsyncWrite + Send + Unpin,
+    NoTls: AsyncRead + AsyncWrite + Unpin,
 {
     fn poll_handshake(
         &mut self,

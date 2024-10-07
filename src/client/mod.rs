@@ -23,6 +23,7 @@ use self::conn::protocol::auto;
 use self::conn::transport::tcp::TcpTransportConfig;
 pub use self::pool::service::ConnectionPoolLayer;
 pub use self::pool::service::ConnectionPoolService;
+use crate::bridge::rt::TokioExecutor;
 use crate::service::SharedService;
 use crate::BoxError;
 
@@ -129,8 +130,10 @@ impl Client {
     }
 
     /// Create a new client builder with default settings applied.
-    pub fn build_tcp_http(
-    ) -> self::builder::Builder<TcpTransportConfig, auto::HttpConnectionBuilder<crate::Body>> {
+    pub fn build_tcp_http() -> self::builder::Builder<
+        TcpTransportConfig,
+        auto::HttpConnectionBuilder<crate::Body, TokioExecutor>,
+    > {
         Builder::default()
     }
 

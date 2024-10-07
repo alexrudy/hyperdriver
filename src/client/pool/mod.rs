@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use std::time::Duration;
 
+use hyper::rt::Executor;
 use parking_lot::ArcMutexGuard;
 use parking_lot::Mutex;
 use tokio::sync::oneshot::Sender;
@@ -37,6 +38,7 @@ mod weakopt;
 
 pub(crate) use self::checkout::Checkout;
 pub(crate) use self::checkout::Connector;
+pub(crate) use self::checkout::DelayedCheckout;
 pub(crate) use self::checkout::Error;
 use self::idle::IdleConnections;
 pub(crate) use self::key::Key;
@@ -102,26 +104,26 @@ impl<C: PoolableConnection> Pool<C> {
     /// in place of this one. If `continue_after_preemtion` is `true` in the pool config, the in-progress
     /// connection will continue in the background and be returned to the pool on completion.
     #[cfg_attr(not(tarpaulin), tracing::instrument(skip_all, fields(key = %key), level="debug"))]
-    pub(crate) fn checkout<T, P, B>(
+    pub(crate) fn checkout<T, P, B, E>(
         &self,
         key: key::Key,
         multiplex: bool,
         connector: Connector<T, P, B>,
-    ) -> Checkout<T, P, B>
+        executor: E,
+    ) -> Checkout<T, P, B, E>
     where
         T: Transport,
-        P: Protocol<T::IO, B, Connection = C> + Send + 'static,
+        P: Protocol<T::IO, B, Connection = C> + 'static,
         C: PoolableConnection,
         B: 'static,
+        E: Executor<DelayedCheckout<T, P, B>>,
     {
         let mut inner = self.inner.lock();
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let mut connector: Option<Connector<T, P, B>> = Some(connector);
 
         if let Some(connection) = inner.pop(&key) {
             trace!("connection found in pool");
-            connector = None;
-            return Checkout::new(key, self, rx, connector, Some(connection), &inner.config);
+            return Checkout::connected(key, self, connection);
         }
 
         trace!("checkout interested in pooled connections");
@@ -129,8 +131,7 @@ impl<C: PoolableConnection> Pool<C> {
 
         if inner.connecting.contains(&key) {
             trace!("connection in progress elsewhere, will wait");
-            connector = None;
-            Checkout::new(key, self, rx, connector, None, &inner.config)
+            Checkout::waiting(key, self, rx)
         } else {
             if multiplex {
                 // Only block new connection attempts if we can multiplex on this one.
@@ -138,7 +139,7 @@ impl<C: PoolableConnection> Pool<C> {
                 inner.connecting.insert(key.clone());
             }
             trace!("connecting to host");
-            Checkout::new(key, self, rx, connector, None, &inner.config)
+            Checkout::connecting(key, self, rx, connector, &inner.config, executor)
         }
     }
 }
@@ -358,7 +359,7 @@ impl Default for Config {
 /// upgraded to a protocol which enables multiplexing. This is an
 /// optimistic check, and the connection will be checked again after
 /// the handshake is complete.
-pub trait PoolableStream: Unpin + Send + Sized + 'static {
+pub trait PoolableStream: Unpin + Sized + 'static {
     /// Returns `true` if the transport can be re-used, usually
     /// because it has used ALPN to negotiate a protocol that can
     /// be multiplexed.
@@ -377,7 +378,7 @@ pub trait PoolableStream: Unpin + Send + Sized + 'static {
 /// The pool will call [`PoolableConnection::reuse`] to get a new connection
 /// to return to the pool, which will multiplex against this one. If multiplexing
 /// is not possible, then `None` should be returned.
-pub trait PoolableConnection: Unpin + Send + Sized + 'static {
+pub trait PoolableConnection: Unpin + Sized + 'static {
     /// Returns `true` if the connection is open.
     fn is_open(&self) -> bool;
 
@@ -454,7 +455,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use crate::client::conn::protocol::HttpProtocol;
-    use crate::client::conn::transport::mock::MockConnectionError;
+    use crate::client::conn::transport::mock::{MockConnectionError, MockExecutor};
 
     use super::*;
     use crate::client::conn::protocol::mock::MockSender;
@@ -497,6 +498,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -511,6 +513,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -526,6 +529,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -556,6 +560,7 @@ mod tests {
                 true,
                 MockTransport::reusable()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -570,6 +575,7 @@ mod tests {
                 true,
                 MockTransport::reusable()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -585,6 +591,7 @@ mod tests {
                 true,
                 MockTransport::reusable()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -614,7 +621,8 @@ mod tests {
             key.clone(),
             true,
             MockTransport::channel(rx)
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1)
+                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         ));
 
         assert!(futures_util::poll!(&mut checkout_a).is_pending());
@@ -624,6 +632,7 @@ mod tests {
             true,
             MockTransport::reusable()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         ));
 
         assert!(futures_util::poll!(&mut checkout_b).is_pending());
@@ -663,6 +672,7 @@ mod tests {
             false,
             MockTransport::single()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         // Return the connection to the pool, sending it out to the new checkout
@@ -703,6 +713,7 @@ mod tests {
             false,
             MockTransport::single()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         tracing::debug!("Checking interest");
@@ -752,6 +763,7 @@ mod tests {
             true,
             MockTransport::reusable()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         let checkout = pool.checkout(
@@ -759,6 +771,7 @@ mod tests {
             true,
             MockTransport::reusable()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         drop(start);
@@ -788,6 +801,7 @@ mod tests {
             true,
             MockTransport::reusable()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         drop(pool);
@@ -816,6 +830,7 @@ mod tests {
             true,
             MockTransport::error()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         let outcome = checkout.now_or_never().unwrap();
@@ -846,6 +861,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -860,6 +876,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -875,6 +892,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -905,6 +923,7 @@ mod tests {
                 false,
                 MockTransport::single()
                     .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                MockExecutor,
             )
             .await
             .unwrap();
@@ -917,6 +936,7 @@ mod tests {
             false,
             MockTransport::single()
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            MockExecutor,
         );
 
         drop(conn);

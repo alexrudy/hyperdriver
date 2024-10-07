@@ -1,62 +1,88 @@
 //! Auto-switching HTTP/1 and HTTP/2 connections.
 
 use std::marker::PhantomData;
-use std::pin::pin;
 
 use http_body::Body;
+use hyper::rt::bounds::Http2ClientConnExec;
+use hyper::rt::Executor;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
 use crate::bridge::io::TokioIo;
-use crate::bridge::rt::TokioExecutor;
 use crate::client::conn::connection::ConnectionError;
 use crate::client::conn::connection::HttpConnection;
 use crate::info::HasConnectionInfo;
 use crate::info::HasTlsConnectionInfo;
 use crate::BoxError;
 
+use self::connection::ConnectionFuture;
+
 use super::HttpProtocol;
 use super::ProtocolRequest;
 
 /// A builder for configuring and starting HTTP connections.
 #[derive(Debug)]
-pub struct HttpConnectionBuilder<B> {
+pub struct HttpConnectionBuilder<B, E> {
     http1: hyper::client::conn::http1::Builder,
-    http2: hyper::client::conn::http2::Builder<TokioExecutor>,
+    http2: hyper::client::conn::http2::Builder<E>,
+    executor: E,
     _body: PhantomData<fn(B) -> ()>,
 }
 
-impl<B> Clone for HttpConnectionBuilder<B> {
+impl<B, E> Clone for HttpConnectionBuilder<B, E>
+where
+    E: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             http1: self.http1.clone(),
             http2: self.http2.clone(),
+            executor: self.executor.clone(),
             _body: PhantomData,
         }
     }
 }
 
-impl<B> HttpConnectionBuilder<B> {
+impl<B, E> HttpConnectionBuilder<B, E> {
+    /// Create a new builder with the given configuration.
+    pub fn new(
+        http1: hyper::client::conn::http1::Builder,
+        http2: hyper::client::conn::http2::Builder<E>,
+        executor: E,
+    ) -> Self {
+        Self {
+            http1,
+            http2,
+            executor,
+            _body: PhantomData,
+        }
+    }
+
     /// Get the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
         &mut self.http1
     }
 
     /// Get the HTTP/2 configuration.
-    pub fn http2(&mut self) -> &mut hyper::client::conn::http2::Builder<TokioExecutor> {
+    pub fn http2(&mut self) -> &mut hyper::client::conn::http2::Builder<E> {
         &mut self.http2
     }
 }
 
-impl<B> HttpConnectionBuilder<B>
+impl<B, E> HttpConnectionBuilder<B, E>
 where
-    B: Body + Unpin + Send + 'static,
-    <B as Body>::Data: Send,
+    B: Body + Unpin + 'static,
+    <B as Body>::Data: Send + 'static,
     <B as Body>::Error: Into<BoxError>,
 {
     async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
     where
-        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static,
+        E: Http2ClientConnExec<B, TokioIo<IO>>
+            + Executor<ConnectionFuture<IO, B, E>>
+            + Clone
+            + Unpin
+            + Sync,
     {
         trace!("handshake h2");
         // let span = tracing::info_span!(parent: tracing::Span::none(), "connection", version = ?http::Version::HTTP_2, peer = %stream.info().remote_addr());
@@ -65,25 +91,22 @@ where
             .handshake(TokioIo::new(stream))
             .await
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(async {
-            let conn = pin!(conn);
-            if let Err(err) = conn.await {
-                if err.is_user() {
-                    tracing::error!(err = format!("{err:#?}"), "h2 connection driver error");
-                } else if !err.is_closed() {
-                    tracing::debug!(err = format!("{err:#?}"), "h2 connection driver error");
-                } else {
-                    tracing::trace!(err = format!("{err:#?}"), "h2 connection closed")
-                }
-            }
-        });
+
+        let conn = ConnectionFuture::http2(conn);
+        self.executor.execute(conn);
+
         trace!("handshake complete");
         Ok(HttpConnection::h2(sender))
     }
 
     async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
     where
-        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static,
+        E: Http2ClientConnExec<B, TokioIo<IO>>
+            + Executor<ConnectionFuture<IO, B, E>>
+            + Clone
+            + Unpin
+            + Sync,
     {
         trace!(version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr(), "handshake h1");
         // let span = tracing::info_span!("connection", version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr());
@@ -93,11 +116,10 @@ where
             .handshake(TokioIo::new(stream))
             .await
             .map_err(|error| ConnectionError::Handshake(error.into()))?;
-        tokio::spawn(async {
-            if let Err(err) = conn.await {
-                tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
-            }
-        });
+
+        let conn = ConnectionFuture::http1(conn);
+        self.executor.execute(conn);
+
         trace!("handshake complete");
         Ok(HttpConnection::h1(sender))
     }
@@ -109,14 +131,13 @@ where
         protocol: HttpProtocol,
     ) -> Result<HttpConnection<B>, ConnectionError>
     where
-        IO: HasTlsConnectionInfo
-            + HasConnectionInfo
-            + AsyncRead
-            + AsyncWrite
-            + Send
-            + Unpin
-            + 'static,
+        IO: HasTlsConnectionInfo + HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static,
         <IO as HasConnectionInfo>::Addr: Clone,
+        E: Http2ClientConnExec<B, TokioIo<IO>>
+            + Executor<ConnectionFuture<IO, B, E>>
+            + Clone
+            + Unpin
+            + Sync,
     {
         match protocol {
             HttpProtocol::Http2 => self.handshake_h2(transport).await,
@@ -141,23 +162,31 @@ where
     }
 }
 
-impl<B> Default for HttpConnectionBuilder<B> {
+impl<B, E: Default + Clone> Default for HttpConnectionBuilder<B, E> {
     fn default() -> Self {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
-            http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
+            http2: hyper::client::conn::http2::Builder::new(Default::default()),
+            executor: Default::default(),
             _body: PhantomData,
         }
     }
 }
 
-impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for HttpConnectionBuilder<B>
+impl<IO, B, E> tower::Service<ProtocolRequest<IO, B>> for HttpConnectionBuilder<B, E>
 where
     IO: HasTlsConnectionInfo + HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Send + Sync,
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
     <B as Body>::Error: Into<BoxError>,
+    E: Http2ClientConnExec<B, TokioIo<IO>>
+        + Executor<ConnectionFuture<IO, B, E>>
+        + Unpin
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     type Response = HttpConnection<B>;
 
@@ -179,6 +208,106 @@ where
     }
 }
 
+mod connection {
+    use http_body::Body;
+    use hyper::rt::bounds::Http2ClientConnExec;
+    use pin_project::pin_project;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{ready, Context, Poll};
+    use tokio::io::{AsyncRead, AsyncWrite};
+
+    use crate::bridge::io::TokioIo;
+
+    type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+    #[pin_project(project = InnerConnectionFutureProj)]
+    enum InnerConnectionFuture<IO, B, E>
+    where
+        B: Body + 'static,
+        IO: AsyncRead + AsyncWrite + Unpin,
+        B::Error: Into<BoxError>,
+        E: Http2ClientConnExec<B, TokioIo<IO>> + Unpin,
+    {
+        H1(#[pin] hyper::client::conn::http1::Connection<TokioIo<IO>, B>),
+        H2(#[pin] hyper::client::conn::http2::Connection<TokioIo<IO>, B, E>),
+    }
+
+    #[pin_project]
+    pub(super) struct ConnectionFuture<IO, B, E>
+    where
+        B: Body + 'static,
+        IO: AsyncRead + AsyncWrite + Unpin,
+        B::Error: Into<BoxError>,
+        E: Http2ClientConnExec<B, TokioIo<IO>> + Unpin,
+    {
+        #[pin]
+        inner: InnerConnectionFuture<IO, B, E>,
+    }
+
+    impl<IO, B, E> ConnectionFuture<IO, B, E>
+    where
+        B: Body + 'static,
+        IO: AsyncRead + AsyncWrite + Unpin,
+        B::Error: Into<BoxError>,
+        E: Http2ClientConnExec<B, TokioIo<IO>> + Unpin,
+    {
+        pub(super) fn http2(
+            conn: hyper::client::conn::http2::Connection<TokioIo<IO>, B, E>,
+        ) -> Self {
+            Self {
+                inner: InnerConnectionFuture::H2(conn),
+            }
+        }
+
+        pub(super) fn http1(conn: hyper::client::conn::http1::Connection<TokioIo<IO>, B>) -> Self {
+            Self {
+                inner: InnerConnectionFuture::H1(conn),
+            }
+        }
+    }
+
+    impl<IO, B, E> Future for ConnectionFuture<IO, B, E>
+    where
+        B: Body + Unpin + 'static,
+        B::Data: Send,
+        B::Error: Into<BoxError>,
+        IO: AsyncRead + AsyncWrite + Unpin + 'static,
+        E: Http2ClientConnExec<B, TokioIo<IO>> + Unpin,
+    {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            match self.project().inner.project() {
+                InnerConnectionFutureProj::H1(conn) => {
+                    match ready!(conn.poll(cx)) {
+                        Ok(()) => {}
+                        Err(err) if err.is_user() => {
+                            tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
+                        }
+                        Err(err) => {
+                            tracing::debug!(err = format!("{err:#}"), "h1 connection driver error");
+                        }
+                    };
+                }
+                InnerConnectionFutureProj::H2(conn) => {
+                    match ready!(conn.poll(cx)) {
+                        Ok(()) => {}
+                        Err(err) if err.is_user() => {
+                            tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
+                        }
+                        Err(err) => {
+                            tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
+                        }
+                    };
+                }
+            }
+
+            Poll::Ready(())
+        }
+    }
+}
+
 mod future {
     use std::fmt;
     use std::future::Future;
@@ -188,14 +317,18 @@ mod future {
 
     use futures_util::FutureExt;
     use http_body::Body;
+    use hyper::rt::bounds::Http2ClientConnExec;
+    use hyper::rt::Executor;
     use tokio::io::{AsyncRead, AsyncWrite};
 
+    use crate::bridge::io::TokioIo;
     use crate::client::conn::connection::ConnectionError;
     use crate::client::conn::protocol::HttpProtocol;
     use crate::info::{HasConnectionInfo, HasTlsConnectionInfo};
     use crate::BoxError;
     use crate::DebugLiteral;
 
+    use super::connection::ConnectionFuture;
     use super::HttpConnection;
     use super::HttpConnectionBuilder;
 
@@ -224,15 +357,24 @@ mod future {
             + Unpin
             + 'static,
         IO::Addr: Clone + Send + Sync,
-        B: Body + Unpin + Send + 'static,
-        <B as Body>::Data: Send,
+        B: Body + Send + Unpin + 'static,
+        <B as Body>::Data: Send + 'static,
         <B as Body>::Error: Into<BoxError>,
     {
-        pub(super) fn new(
-            builder: HttpConnectionBuilder<B>,
+        pub(super) fn new<E>(
+            builder: HttpConnectionBuilder<B, E>,
             stream: IO,
             protocol: HttpProtocol,
-        ) -> HttpConnectFuture<IO, B> {
+        ) -> HttpConnectFuture<IO, B>
+        where
+            E: Http2ClientConnExec<B, TokioIo<IO>>
+                + Executor<ConnectionFuture<IO, B, E>>
+                + Clone
+                + Unpin
+                + Send
+                + Sync
+                + 'static,
+        {
             let future = Box::pin(async move { builder.handshake(stream, protocol).await });
 
             Self {
@@ -261,8 +403,11 @@ mod tests {
 
     use super::*;
 
+    use crate::bridge::rt::TokioExecutor;
     use crate::client::conn::connection::ConnectionError;
 
+    #[cfg(feature = "mocks")]
+    use crate::client::conn::transport::mock::MockExecutor;
     use crate::client::conn::Protocol as _;
     use crate::client::conn::{protocol::HttpProtocol, Connection as _, Stream};
     use crate::client::pool::PoolableConnection as _;
@@ -279,11 +424,8 @@ mod tests {
     #[cfg(feature = "mocks")]
     use tower::Service;
 
-    type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
     #[cfg(all(feature = "mocks", feature = "stream"))]
-    assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
-
+    assert_impl_all!(HttpConnectionBuilder<crate::Body, MockExecutor>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
     #[cfg(feature = "stream")]
     assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);
 
@@ -311,7 +453,7 @@ mod tests {
 
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut builder = HttpConnectionBuilder::default();
+        let mut builder: HttpConnectionBuilder<_, TokioExecutor> = HttpConnectionBuilder::default();
 
         let (stream, rx) = transport().await.unwrap();
 
@@ -359,7 +501,7 @@ mod tests {
 
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut builder = HttpConnectionBuilder::default();
+        let mut builder: HttpConnectionBuilder<_, TokioExecutor> = HttpConnectionBuilder::default();
 
         let (stream, rx) = transport().await.unwrap();
 
@@ -411,7 +553,8 @@ mod tests {
         let (stream, client) = transport().await.unwrap();
 
         async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, ConnectionError> {
-            let mut builder = HttpConnectionBuilder::default();
+            let mut builder: HttpConnectionBuilder<_, TokioExecutor> =
+                HttpConnectionBuilder::default();
 
             let tls = crate::info::TlsConnectionInfo::new_client(Some(
                 crate::info::Protocol::http(http::Version::HTTP_2),

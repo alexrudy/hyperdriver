@@ -126,6 +126,16 @@ impl tower::Service<http::Uri> for MockTransport {
     }
 }
 
+/// An executor that does nothing.
+#[derive(Debug, Default, Clone)]
+pub struct MockExecutor;
+
+impl<F> hyper::rt::Executor<F> for MockExecutor {
+    fn execute(&self, fut: F) {
+        drop(fut);
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
