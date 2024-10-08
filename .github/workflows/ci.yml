@@ -46,8 +46,17 @@ jobs:
             hack: true
           - name: cargo hack check --tests
             run: just check-hack-tests
+            hack: true
+          - name: cargo hack check --examples
+            run: just check-hack-examples
+            hack: true
           - name: cargo doc
             run: just docs
+          - name: clippy
+            run: just clippy
+          - name: fmt
+            run: just fmt
+
     steps:
       - uses: extractions/setup-just@v1
       - name: Install rust toolchain
@@ -61,6 +70,22 @@ jobs:
       - name: ${{ matrix.steps.name }}
         run: ${{ matrix.steps.run }}
 
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v3
+      - run: pip install pre-commit
+      - uses: extractions/setup-just@v1
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Run pre-commit
+        run: just pre-commit-ci
+
   msrv:
     name: MSRV 1.74
     runs-on: ubuntu-latest
@@ -69,7 +94,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.74.0
+          toolchain: "1.74"
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Run cargo build
@@ -85,6 +110,9 @@ jobs:
           - beta
 
     steps:
+      - uses: extractions/setup-just@v1
+      - uses: taiki-e/install-action@nextest
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -94,37 +122,10 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
 
       - name: Build cargo tests
-        run: cargo test --features axum,sni,tls,tls-ring,mocks --no-run
+        run: just test-build
 
       - name: Run cargo test
-        run: cargo test --features axum,sni,tls,tls-ring,mocks
-
-  lints:
-    name: Lints
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
-
-      - name: Run cargo clippy
-        uses: actions-rs/clippy-check@v1
-        if: github.repository_owner == 'linode-sokka'
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features -- -D warnings
-
-      - name: Run cargo clippy
-        if: github.repository_owner != 'linode-sokka'
-        run: cargo clippy --all-features -- -D warnings
+        run: just test-run
 
   deny:
     name: Deny
