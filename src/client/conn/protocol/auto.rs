@@ -254,30 +254,40 @@ mod future {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "stream"))]
 mod tests {
     use std::fmt::Debug;
     use std::future::Future;
-    use std::io;
 
     use super::*;
 
     use crate::client::conn::connection::ConnectionError;
+
     use crate::client::conn::Protocol as _;
     use crate::client::conn::{protocol::HttpProtocol, Connection as _, Stream};
     use crate::client::pool::PoolableConnection as _;
     use crate::client::Error;
+
+    #[cfg(all(feature = "mocks", feature = "tls"))]
     use crate::stream::tls::TlsHandshakeStream as _;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};
     use http::Version;
     use static_assertions::assert_impl_all;
     use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[cfg(feature = "mocks")]
     use tower::Service;
 
+    type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+    #[cfg(all(feature = "mocks", feature = "stream"))]
     assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+
+    #[cfg(feature = "stream")]
     assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);
 
+    #[cfg(feature = "stream")]
     async fn transport() -> Result<(Stream, Stream), BoxError> {
         let (client, mut incoming) = crate::stream::duplex::pair();
 
@@ -295,6 +305,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "stream")]
     async fn http_connector_request_h1() {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -340,6 +351,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(all(feature = "stream", feature = "tls"))]
     async fn http_connector_request_h2() {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -385,7 +397,7 @@ mod tests {
         assert!(rrx.is_ok());
     }
 
-    #[cfg(feature = "mocks")]
+    #[cfg(all(feature = "mocks", feature = "stream", feature = "tls"))]
     #[tokio::test]
     async fn http_connector_alpn_h2() {
         use crate::client::conn::stream::mock::MockTls;
@@ -406,7 +418,7 @@ mod tests {
                 .await
         }
 
-        async fn handshake(mut stream: Stream) -> Result<(), io::Error> {
+        async fn handshake(mut stream: Stream) -> Result<(), std::io::Error> {
             stream.finish_handshake().await?;
             tracing::info!("Client finished handshake");
             Ok(())

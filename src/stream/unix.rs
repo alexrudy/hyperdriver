@@ -18,11 +18,11 @@ use std::task::{Context, Poll};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 pub use tokio::net::UnixListener;
 
 use crate::info::HasConnectionInfo;
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 use crate::server::Accept;
 
 /// Connection address for a unix domain socket.
@@ -249,7 +249,7 @@ impl AsyncWrite for UnixStream {
     }
 }
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 impl Accept for UnixListener {
     type Conn = UnixStream;
     type Error = io::Error;

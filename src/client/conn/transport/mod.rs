@@ -430,7 +430,7 @@ mod future {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "stream"))]
 mod tests {
     use super::*;
 

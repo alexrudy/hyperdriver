@@ -16,12 +16,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 pub use tokio::net::TcpListener;
 use tokio::net::ToSocketAddrs;
 
 use crate::info::HasConnectionInfo;
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 use crate::server::Accept;
 
 /// Canonicalize a socket address, converting IPv4 addresses which are
@@ -183,7 +183,7 @@ impl AsyncWrite for TcpStream {
     }
 }
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 impl Accept for TcpListener {
     type Conn = TcpStream;
     type Error = io::Error;

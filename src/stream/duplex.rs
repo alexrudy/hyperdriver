@@ -36,7 +36,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::info::{self, HasConnectionInfo};
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 use crate::server::conn::Accept;
 
 /// Address (blank) for a duplex stream
@@ -227,7 +227,7 @@ impl DuplexIncoming {
     }
 }
 
-#[cfg(all(feature = "server", feature = "stream"))]
+#[cfg(feature = "server")]
 impl Accept for DuplexIncoming {
     type Conn = DuplexStream;
     type Error = io::Error;

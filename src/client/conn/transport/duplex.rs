@@ -48,7 +48,7 @@ impl tower::Service<Uri> for DuplexTransport {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use tower::ServiceExt;
 

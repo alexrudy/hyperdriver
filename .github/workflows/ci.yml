@@ -15,21 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
         toolchain:
           - stable
           - nightly
           - beta
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - uses: extractions/setup-just@v1
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+      - name: Checkout sources
+        uses: actions/checkout@v4
       - name: Run cargo build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: just build
 
   check:
     name: Check
@@ -38,22 +37,25 @@ jobs:
       matrix:
         steps:
           - name: cargo check
-            run: cargo check --all-targets --all-features
+            run: just check
           - name: cargo hack check
-            run: cargo hack check --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,tls-ring,tls-aws-lc
+            run: just check-hack-powerset
             hack: true
           - name: cargo hack check --each-feature
-            run: cargo hack check --no-private --each-feature --no-dev-deps
+            run: just check-hack-each
             hack: true
+          - name: cargo hack check --tests
+            run: just check-hack-tests
           - name: cargo doc
-            run: cargo doc --all-features --no-deps
+            run: just docs
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - uses: extractions/setup-just@v1
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+      - name: Checkout sources
+        uses: actions/checkout@v4
       - uses: taiki-e/install-action@cargo-hack
         if: matrix.steps.hack
       - name: ${{ matrix.steps.name }}
@@ -63,14 +65,15 @@ jobs:
     name: MSRV 1.74
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - uses: extractions/setup-just@v1
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.74.0
+      - name: Checkout sources
+        uses: actions/checkout@v4
       - name: Run cargo build
-        run: cargo check --all-targets --all-features
+        run: just msrv
 
   test:
     name: Tests
@@ -91,10 +94,10 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
 
       - name: Build cargo tests
-        run: cargo test --features axum,sni,tls,tls-ring --no-run
+        run: cargo test --features axum,sni,tls,tls-ring,mocks --no-run
 
       - name: Run cargo test
-        run: cargo test --features axum,sni,tls,tls-ring
+        run: cargo test --features axum,sni,tls,tls-ring,mocks
 
   lints:
     name: Lints
