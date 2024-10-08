@@ -6,6 +6,8 @@
 //! request to execute.
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::task::Poll;
 
 use crate::BoxFuture;
@@ -122,6 +124,7 @@ async fn execute_request<C, BIn, BOut>(
 ) -> Result<http::Response<BOut>, Error>
 where
     C: Connection<BIn, ResBody = BOut> + PoolableConnection,
+    BIn: 'static,
 {
     let span = tracing::trace_span!("send request", request.uri=%request.uri());
     tracing::trace!(parent: &span, request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
@@ -136,14 +139,41 @@ where
     if !conn.can_share() {
         // Only re-insert the connection when it is ready again. Spawn
         // a task to wait for the connection to become ready before dropping.
-        tokio::spawn(async move {
-            if let Err(error) = conn.when_ready().await {
-                tracing::trace!(conn.version=?conn.version(), error=%error, "Connection errored while polling for readiness");
-            };
-        });
+        tokio::spawn(WhenReady::new(conn));
     }
 
     Ok(response.map(Into::into))
+}
+
+/// A future which resolves when the connection is ready again
+#[derive(Debug)]
+pub struct WhenReady<C: Connection<B> + PoolableConnection, B> {
+    conn: Pooled<C>,
+    _private: std::marker::PhantomData<fn(B)>,
+}
+
+impl<C: Connection<B> + PoolableConnection, B> WhenReady<C, B> {
+    pub(crate) fn new(conn: Pooled<C>) -> Self {
+        Self {
+            conn,
+            _private: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<C: Connection<B> + PoolableConnection, B> Future for WhenReady<C, B> {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.conn.poll_ready(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(()),
+            Poll::Ready(Err(err)) => {
+                tracing::trace!(error = %err, "Connection errored while polling for readiness");
+                Poll::Ready(())
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 #[cfg(test)]
