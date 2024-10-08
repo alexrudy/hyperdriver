@@ -121,6 +121,14 @@ deny:
 fmt:
     cargo +{{rust}} fmt --all --check
 
+# Run pre-commit checks
+pre-commit:
+    pre-commit run --all-files
+
+[private]
+pre-commit-ci:
+    SKIP=cargo-machete,fmt,check,clippy pre-commit run --color=always --all-files --show-diff-on-failure --hook-stage commit
+
 # Run httpbin tests
 httpbin:
     cargo +{{rust}} build --features client,tls,tls-ring --example httpbin
