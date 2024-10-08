@@ -34,10 +34,38 @@ check:
     cargo +{{rust}} check --all-targets --all-features
 
 # Check compilation across all features
-check-all:
-    cargo +{{rust}} check --all-targets --all-features
+check-all: check check-hack-each check-hack-powerset check-hack-all-targets
+
+# Check feature combinations
+check-hack: check-hack-each check-hack-powerset check-hack-all-targets
+
+[private]
+check-hack-each:
     cargo +{{rust}} hack check --target-dir target/hack/ --no-private --each-feature --no-dev-deps
+
+[private]
+check-hack-powerset:
     cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,tls-ring,tls-aws-lc
+
+[private]
+check-hack-tests: (check-hack-targets "tests")
+
+[private]
+check-hack-examples: (check-hack-targets "examples")
+
+[private]
+check-hack-benches: (check-hack-targets "benches")
+
+[private]
+check-hack-all-targets: (check-hack-targets "all-targets")
+
+# Check compilation combinations for a specific target
+check-hack-targets targets='tests':
+    cargo +{{rust}} hack check --{{targets}} --target-dir target/hack/ --no-private --feature-powerset --exclude-no-default-features --include-features mocks,tls-ring,server,client,stream
+
+# Build the library in release mode
+build:
+    cargo +{{rust}} build --release
 
 # Run clippy
 clippy:
@@ -65,8 +93,14 @@ msrv:
 
 alias t := test
 # Run cargo tests
-test:
+test: test-build test-run
+
+[private]
+test-build:
     cargo +{{rust}} nextest run --features axum,sni,tls,tls-ring,mocks --no-run
+
+[private]
+test-run:
     cargo +{{rust}} nextest run --features axum,sni,tls,tls-ring,mocks
     cargo +{{rust}} test --features axum,sni,tls,tls-ring,mocks --doc
 

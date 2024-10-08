@@ -128,22 +128,22 @@ required-features = ["server", "tls", "tls-ring"]
 [[test]]
 name = "stream-duplex"
 path = "tests/stream/duplex.rs"
-required-features = ["stream"]
+required-features = ["server", "client", "stream"]
 
 [[test]]
 name = "stream-tcp"
 path = "tests/stream/tcp.rs"
-required-features = ["stream"]
+required-features = ["server", "client", "stream"]
 
 [[test]]
 name = "stream-tls"
 path = "tests/stream/tls.rs"
-required-features = ["stream", "tls", "tls-ring"]
+required-features = ["server", "client", "stream", "tls", "tls-ring"]
 
 [[test]]
 name = "stream-unix"
 path = "tests/stream/unix.rs"
-required-features = ["stream"]
+required-features = ["server", "client", "stream"]
 
 [[test]]
 name = "server"
@@ -158,12 +158,12 @@ required-features = ["server", "client", "stream"]
 [[test]]
 name = "custom-body"
 path = "tests/server/custombody.rs"
-required-features = ["server"]
+required-features = ["server", "stream"]
 
 [[test]]
 name = "graceful-shutdown"
 path = "tests/server/graceful.rs"
-required-features = ["server"]
+required-features = ["server", "stream"]
 
 [[test]]
 name = "tls"
