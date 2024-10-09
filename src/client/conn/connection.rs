@@ -36,14 +36,19 @@ pub trait Connection<B> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>>;
 
+    /// What HTTP version is this connection using?
+    fn version(&self) -> ::http::Version;
+}
+
+/// Extension trait for `Connection` providing additional methods.
+pub trait ConnectionExt<B>: Connection<B> {
     /// Future which resolves when the connection is ready to accept a new request.
     fn when_ready(&mut self) -> WhenReady<'_, Self, B> {
         WhenReady::new(self)
     }
-
-    /// What HTTP version is this connection using?
-    fn version(&self) -> ::http::Version;
 }
+
+impl<T, B> ConnectionExt<B> for T where T: Connection<B> {}
 
 /// A future which resolves when the connection is ready again
 #[derive(Debug)]
@@ -216,4 +221,14 @@ pub enum ConnectionError {
     /// Invalid URI for the connection
     #[error("invalid URI")]
     InvalidUri(#[from] UriError),
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Body;
+    use crate::BoxFuture;
+
+    use super::Connection;
+
+    static_assertions::assert_obj_safe!(Connection<Body, Future=BoxFuture<'static, ()>, Error=std::io::Error, ResBody=Body>);
 }
