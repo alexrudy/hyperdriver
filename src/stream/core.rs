@@ -11,16 +11,9 @@ use crate::stream::duplex::DuplexStream;
 use crate::stream::tcp::TcpStream;
 use crate::stream::unix::UnixStream;
 
-/// Dispatching wrapper for potential stream connection types
-///
-/// Effectively implements enum-dispatch for AsyncRead and AsyncWrite
-/// around the stream types which we might use in braid.
-///
-/// This core type is used in the server and client modules, and so is
-/// generic over the TLS stream type (which is different for client and server).
 #[derive(Debug)]
 #[pin_project(project = BraidCoreProjection)]
-pub enum Braid {
+enum BraidCore {
     /// A TCP stream
     Tcp(#[pin] TcpStream),
 
@@ -31,15 +24,29 @@ pub enum Braid {
     Unix(#[pin] UnixStream),
 }
 
+/// Dispatching wrapper for potential stream connection types
+///
+/// Effectively implements enum-dispatch for AsyncRead and AsyncWrite
+/// around the stream types which we might use in braid.
+///
+/// This core type is used in the server and client modules, and so is
+/// generic over the TLS stream type (which is different for client and server).
+#[derive(Debug)]
+#[pin_project]
+pub struct Braid {
+    #[pin]
+    inner: BraidCore,
+}
+
 impl HasConnectionInfo for Braid {
     type Addr = BraidAddr;
     fn info(&self) -> ConnectionInfo<BraidAddr> {
-        match self {
-            Braid::Tcp(stream) => stream.info().map(BraidAddr::Tcp),
-            Braid::Duplex(stream) => {
+        match &self.inner {
+            BraidCore::Tcp(stream) => stream.info().map(BraidAddr::Tcp),
+            BraidCore::Duplex(stream) => {
                 <DuplexStream as HasConnectionInfo>::info(stream).map(|_| BraidAddr::Duplex)
             }
-            Braid::Unix(stream) => stream.info().map(BraidAddr::Unix),
+            BraidCore::Unix(stream) => stream.info().map(BraidAddr::Unix),
         }
     }
 }
@@ -47,7 +54,7 @@ impl HasConnectionInfo for Braid {
 macro_rules! dispatch_core {
     ($driver:ident.$method:ident($($args:expr),+)) => {
 
-        match $driver.project() {
+        match $driver.project().inner.project() {
             BraidCoreProjection::Tcp(stream) => stream.$method($($args),+),
             BraidCoreProjection::Duplex(stream) => stream.$method($($args),+),
             BraidCoreProjection::Unix(stream) => stream.$method($($args),+),
@@ -91,18 +98,24 @@ impl AsyncWrite for Braid {
 
 impl From<TcpStream> for Braid {
     fn from(stream: TcpStream) -> Self {
-        Self::Tcp(stream)
+        Self {
+            inner: BraidCore::Tcp(stream),
+        }
     }
 }
 
 impl From<DuplexStream> for Braid {
     fn from(stream: DuplexStream) -> Self {
-        Self::Duplex(stream)
+        Self {
+            inner: BraidCore::Duplex(stream),
+        }
     }
 }
 
 impl From<UnixStream> for Braid {
     fn from(stream: UnixStream) -> Self {
-        Self::Unix(stream)
+        Self {
+            inner: BraidCore::Unix(stream),
+        }
     }
 }
