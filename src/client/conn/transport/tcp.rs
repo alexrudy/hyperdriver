@@ -437,6 +437,7 @@ impl fmt::Display for TcpConnectionError {
 
 /// Configuration for TCP connections.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TcpTransportConfig {
     /// The timeout for connecting to a remote address.
     pub connect_timeout: Option<Duration>,

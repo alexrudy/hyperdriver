@@ -328,6 +328,7 @@ impl<C: PoolableConnection> PoolInner<C> {
 
 /// Configuration for a connection pool.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Config {
     /// The maximum idle duration of a connection.
     pub idle_timeout: Option<Duration>,
