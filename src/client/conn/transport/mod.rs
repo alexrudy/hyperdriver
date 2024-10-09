@@ -155,6 +155,7 @@ impl<T> TransportExt for T where T: Transport {}
 /// An error returned when a TLS connection attempt fails
 #[cfg(feature = "tls")]
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TlsConnectionError<E> {
     /// An error occured while trying to connect via the underlying transport
     /// before any TLS handshake was attempted.

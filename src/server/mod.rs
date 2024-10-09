@@ -558,6 +558,7 @@ where
 /// errors are discarded and not returned. To handle an individual connection's
 /// error, apply a middleware which can process that error in the Service.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ServerError {
     /// Accept Error
     #[error("accept error: {0}")]

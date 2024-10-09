@@ -4,6 +4,7 @@ use super::{pool, BoxError};
 
 /// Client error type.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Error occured with the underlying connection.
     #[error("connection: {0}")]
