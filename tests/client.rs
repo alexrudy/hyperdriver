@@ -21,7 +21,7 @@ async fn client() -> Result<(), BoxError> {
     let server = tokio::spawn(serve_one_h1(acceptor));
 
     let mut client = hyperdriver::client::Client::builder()
-        .with_protocol(HttpConnectionBuilder::default())
+        .with_protocol(HttpConnectionBuilder::<_, TokioExecutor>::default())
         .with_transport(DuplexTransport::new(1024, tx.clone()))
         .with_default_pool()
         .build();
@@ -50,7 +50,7 @@ async fn client_h2() -> Result<(), BoxError> {
     let server = tokio::spawn(serve_one_h2(acceptor));
 
     let mut client = hyperdriver::client::Client::builder()
-        .with_protocol(HttpConnectionBuilder::default())
+        .with_protocol(HttpConnectionBuilder::<_, TokioExecutor>::default())
         .with_transport(DuplexTransport::new(1024, tx))
         .with_default_pool()
         .build();

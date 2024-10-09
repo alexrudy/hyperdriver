@@ -61,9 +61,7 @@ where
     type Connection: Connection<B>;
 
     /// The type of the handshake future
-    type Future: Future<Output = Result<Self::Connection, <Self as Protocol<IO, B>>::Error>>
-        + Send
-        + 'static;
+    type Future: Future<Output = Result<Self::Connection, <Self as Protocol<IO, B>>::Error>>;
 
     /// Connect to a remote server and return a connection.
     ///
@@ -84,9 +82,8 @@ where
 impl<T, C, IO, B> Protocol<IO, B> for T
 where
     IO: HasConnectionInfo,
-    T: Service<ProtocolRequest<IO, B>, Response = C> + Send + 'static,
+    T: Service<ProtocolRequest<IO, B>, Response = C>,
     T::Error: std::error::Error + Send + Sync + 'static,
-    T::Future: Send + 'static,
     C: Connection<B>,
 {
     type Error = T::Error;

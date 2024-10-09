@@ -122,7 +122,7 @@ where
 #[cfg(feature = "tls")]
 impl<IO> Stream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static,
     IO::Addr: Clone,
 {
     /// Add TLS to the underlying stream.
@@ -149,7 +149,7 @@ where
 #[cfg(feature = "tls")]
 impl<IO> TlsHandshakeStream for Stream<IO>
 where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static,
     IO::Addr: Send + Unpin + Clone,
 {
     #[inline]
@@ -197,7 +197,7 @@ where
 
 impl<IO> PoolableStream for Stream<IO>
 where
-    IO: HasConnectionInfo + Unpin + Send + 'static,
+    IO: HasConnectionInfo + Unpin + 'static,
     IO::Addr: Send + Unpin + Clone,
 {
     fn can_share(&self) -> bool {

@@ -490,7 +490,7 @@ impl Default for TcpTransportConfig {
 impl BuildTransport for TcpTransportConfig {
     type Target = TcpTransport;
 
-    fn build(self) -> Self::Target {
+    fn build_transport(self) -> Self::Target {
         TcpTransport::builder()
             .with_config(self)
             .with_gai_resolver()

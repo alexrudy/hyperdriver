@@ -42,15 +42,15 @@ pub mod tls;
 /// To implement a transport stream, implement a [`tower::Service`] which accepts a URI and returns
 /// an IO stream, which must be compatible with a [`super::Protocol`]. For example, HTTP protocols
 /// require an IO stream which implements [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`].
-pub trait Transport: Clone + Send {
+pub trait Transport: Clone {
     /// The type of IO stream used by this transport
-    type IO: HasConnectionInfo + Send + 'static;
+    type IO: HasConnectionInfo + 'static;
 
     /// Error returned when connection fails
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The future type returned by this service
-    type Future: Future<Output = Result<Self::IO, <Self as Transport>::Error>> + Send + 'static;
+    type Future: Future<Output = Result<Self::IO, <Self as Transport>::Error>> + 'static;
 
     /// Connect to a remote server and return a stream.
     fn connect(&mut self, uri: Uri) -> <Self as Transport>::Future;
@@ -65,10 +65,10 @@ pub trait Transport: Clone + Send {
 impl<T, IO> Transport for T
 where
     T: Service<Uri, Response = IO>,
-    T: Clone + Send + Sync + 'static,
+    T: Clone,
     T::Error: std::error::Error + Send + Sync + 'static,
-    T::Future: Send + 'static,
-    IO: HasConnectionInfo + Send + 'static,
+    T::Future: 'static,
+    IO: HasConnectionInfo + 'static,
     IO::Addr: Send,
 {
     type IO = IO;
@@ -93,7 +93,7 @@ pub trait TransportExt: Transport {
     /// Wrap the transport in a converter which produces a Stream
     fn into_stream(self) -> IntoStream<Self>
     where
-        Self::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        Self::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + 'static,
         <<Self as Transport>::IO as HasConnectionInfo>::Addr: Into<BraidAddr>,
     {
         IntoStream::new(self)
@@ -279,7 +279,7 @@ impl<T> TlsTransport<T> {
 
 impl<T> Service<Uri> for TlsTransport<T>
 where
-    T: Transport,
+    T: Transport + 'static,
     <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Unpin,
 {
@@ -302,7 +302,7 @@ where
             InnerBraid::Plain(inner) => {
                 inner.poll_ready(cx).map_err(TlsConnectionError::Connection)
             }
-            InnerBraid::Tls(inner) => inner.poll_ready(cx),
+            InnerBraid::Tls(inner) => Transport::poll_ready(inner, cx),
         }
 
         #[cfg(not(feature = "tls"))]

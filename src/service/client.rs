@@ -12,6 +12,7 @@ use std::task::Poll;
 
 use crate::BoxFuture;
 use http_body::Body;
+use hyper::rt::Executor;
 use tracing::Instrument;
 
 use crate::client::conn::Connection;
@@ -68,41 +69,41 @@ impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
 /// A service which executes a request on a `hyper` Connection as described
 /// by the `Connection` trait. This should be the innermost service
 /// for clients, as it is responsible for actually sending the request.
-pub struct RequestExecutor<C: Connection<B> + PoolableConnection, B> {
+pub struct RequestExecutor<C: Connection<B> + PoolableConnection, B, E> {
+    executor: E,
     _private: std::marker::PhantomData<fn(C, B) -> ()>,
 }
 
-impl<C: Connection<B> + PoolableConnection, B> Default for RequestExecutor<C, B> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<C: Connection<B> + PoolableConnection, B> fmt::Debug for RequestExecutor<C, B> {
+impl<C: Connection<B> + PoolableConnection, B, E> fmt::Debug for RequestExecutor<C, B, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestExecutor").finish()
     }
 }
 
-impl<C: Connection<B> + PoolableConnection, B> Clone for RequestExecutor<C, B> {
+impl<C: Connection<B> + PoolableConnection, B, E: Clone> Clone for RequestExecutor<C, B, E> {
     fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-impl<C: Connection<B> + PoolableConnection, B> RequestExecutor<C, B> {
-    /// Create a new `RequestExecutor`.
-    pub fn new() -> Self {
         Self {
+            executor: self.executor.clone(),
             _private: std::marker::PhantomData,
         }
     }
 }
 
-impl<C, B> tower::Service<ExecuteRequest<C, B>> for RequestExecutor<C, B>
+impl<C: Connection<B> + PoolableConnection, B, E> RequestExecutor<C, B, E> {
+    /// Create a new `RequestExecutor`.
+    pub fn new(executor: E) -> Self {
+        Self {
+            executor,
+            _private: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<C, B, E> tower::Service<ExecuteRequest<C, B>> for RequestExecutor<C, B, E>
 where
-    C: Connection<B> + PoolableConnection,
+    C: Connection<B> + PoolableConnection + Send + 'static,
     B: Body + Unpin + Send + 'static,
+    E: Executor<WhenReady<C, B>> + Clone + Send + 'static,
 {
     type Response = http::Response<C::ResBody>;
 
@@ -115,16 +116,18 @@ where
     }
 
     fn call(&mut self, req: ExecuteRequest<C, B>) -> Self::Future {
-        Box::pin(execute_request(req))
+        Box::pin(execute_request(req, self.executor.clone()))
     }
 }
 
-async fn execute_request<C, BIn, BOut>(
+async fn execute_request<C, BIn, BOut, E>(
     ExecuteRequest { request, mut conn }: ExecuteRequest<C, BIn>,
+    executor: E,
 ) -> Result<http::Response<BOut>, Error>
 where
     C: Connection<BIn, ResBody = BOut> + PoolableConnection,
     BIn: 'static,
+    E: Executor<WhenReady<C, BIn>>,
 {
     let span = tracing::trace_span!("send request", request.uri=%request.uri());
     tracing::trace!(parent: &span, request.uri=%request.uri(), conn.version=?conn.version(), req.version=?request.version(), "sending request");
@@ -139,7 +142,7 @@ where
     if !conn.can_share() {
         // Only re-insert the connection when it is ready again. Spawn
         // a task to wait for the connection to become ready before dropping.
-        tokio::spawn(WhenReady::new(conn));
+        executor.execute(WhenReady::new(conn));
     }
 
     Ok(response.map(Into::into))
@@ -176,32 +179,33 @@ impl<C: Connection<B> + PoolableConnection, B> Future for WhenReady<C, B> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mocks"))]
 mod tests {
 
-    #[cfg(feature = "mocks")]
     use crate::Body;
 
-    #[cfg(feature = "mocks")]
     use crate::client::conn::protocol::mock::MockProtocol;
-    #[cfg(feature = "mocks")]
     use crate::client::conn::transport::mock::{MockConnectionError, MockTransport};
-
     use crate::client::pool::Config as PoolConfig;
 
     use super::*;
 
-    #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn test_client_mock_transport() {
-        use crate::client::ConnectionPoolService;
+        use crate::client::{conn::transport::mock::MockExecutor, ConnectionPoolService};
 
         let transport = MockTransport::new(false);
         let protocol = MockProtocol::default();
         let pool = PoolConfig::default();
 
-        let client: ConnectionPoolService<MockTransport, MockProtocol, _, Body> =
-            ConnectionPoolService::new(transport, protocol, RequestExecutor::new(), pool);
+        let client: ConnectionPoolService<MockTransport, MockProtocol, _, Body, MockExecutor> =
+            ConnectionPoolService::new(
+                transport,
+                protocol,
+                RequestExecutor::new(MockExecutor),
+                pool,
+                MockExecutor,
+            );
 
         client
             .request(
@@ -214,17 +218,22 @@ mod tests {
             .unwrap();
     }
 
-    #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn test_client_mock_connection_error() {
-        use crate::client::ConnectionPoolService;
+        use crate::client::{conn::transport::mock::MockExecutor, ConnectionPoolService};
 
         let transport = MockTransport::error();
         let protocol = MockProtocol::default();
         let pool = PoolConfig::default();
 
-        let client: ConnectionPoolService<MockTransport, MockProtocol, _, Body> =
-            ConnectionPoolService::new(transport, protocol, RequestExecutor::new(), pool);
+        let client: ConnectionPoolService<MockTransport, MockProtocol, _, Body, MockExecutor> =
+            ConnectionPoolService::new(
+                transport,
+                protocol,
+                RequestExecutor::new(MockExecutor),
+                pool,
+                MockExecutor,
+            );
 
         let result = client
             .request(

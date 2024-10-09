@@ -11,6 +11,8 @@ use hyperdriver::client::conn::protocol::HttpProtocol;
 use hyperdriver::client::conn::Connection as _;
 use hyperdriver::client::conn::Stream;
 use hyperdriver::server::conn::Accept;
+use hyperdriver::server::GracefulServerExecutor;
+use hyperdriver::server::ServerExecutor;
 use hyperdriver::service::MakeServiceRef;
 use hyperdriver::Body;
 
@@ -43,13 +45,17 @@ fn hello_world() -> http::Request<Body> {
         .unwrap()
 }
 
-fn serve<A, P, S, BIn>(server: Server<A, P, S, BIn>) -> impl Future<Output = Result<(), BoxError>>
+fn serve<A, P, S, BIn, E>(
+    server: Server<A, P, S, BIn, E>,
+) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeServiceRef<A::Conn, BIn> + Send + 'static,
     S::Future: Send + 'static,
     P: Protocol<S::Service, A::Conn, BIn> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
+    A::Conn: Send + 'static,
     BIn: HttpBody + Send + 'static,
+    E: ServerExecutor<P, S, A, BIn> + Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -74,15 +80,17 @@ where
     }
 }
 
-fn serve_gracefully<A, P, S, B>(
-    server: Server<A, P, S, B>,
+fn serve_gracefully<A, P, S, B, E>(
+    server: Server<A, P, S, B, E>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeServiceRef<A::Conn, B> + Send + 'static,
     S::Future: Send + 'static,
     P: Protocol<S::Service, A::Conn, B> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
+    A::Conn: Send + 'static,
     B: HttpBody + Send + 'static,
+    E: GracefulServerExecutor<P, S, A, B> + Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(server.with_graceful_shutdown(async {
@@ -109,7 +117,8 @@ async fn echo_h1() {
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
         .with_http1()
-        .with_shared_service(tower::service_fn(echo));
+        .with_shared_service(tower::service_fn(echo))
+        .with_tokio();
 
     let handle = serve_gracefully(server);
 
@@ -137,7 +146,8 @@ async fn echo_h2() {
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
         .with_http2()
-        .with_shared_service(tower::service_fn(echo));
+        .with_shared_service(tower::service_fn(echo))
+        .with_tokio();
 
     let guard = serve_gracefully(server);
 
@@ -164,7 +174,8 @@ async fn echo_h1_early_disconnect() {
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
         .with_http1()
-        .with_shared_service(tower::service_fn(echo));
+        .with_shared_service(tower::service_fn(echo))
+        .with_tokio();
 
     let handle = serve(server);
 
@@ -192,7 +203,8 @@ async fn echo_auto_h1() {
     let server = hyperdriver::Server::builder()
         .with_incoming(incoming)
         .with_auto_http()
-        .with_shared_service(tower::service_fn(echo));
+        .with_shared_service(tower::service_fn(echo))
+        .with_tokio();
 
     let handle = serve_gracefully(server);
 
@@ -220,7 +232,8 @@ async fn echo_auto_h2() {
     let server = hyperdriver::Server::builder()
         .with_incoming(incoming)
         .with_auto_http()
-        .with_shared_service(tower::service_fn(echo));
+        .with_shared_service(tower::service_fn(echo))
+        .with_tokio();
     let handle = serve_gracefully(server);
 
     let mut conn = connection(

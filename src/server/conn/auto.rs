@@ -5,20 +5,26 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, future::Future, io};
 
-use crate::bridge::rt::TokioExecutor;
 use http_body::Body;
+use hyper::body::Incoming;
 use hyper::rt::bounds::Http2ServerConnExec;
 use hyper::rt::{ReadBuf, Write};
+use hyper::service::HttpService;
 use hyper::{body, rt::Read};
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::bridge::rt::TokioExecutor;
+use crate::bridge::service::TowerHyperService;
 use crate::rewind::Rewind;
 use crate::server::Protocol;
+use crate::service::IncomingRequestService;
 use crate::BoxError;
 
 use super::connecting::Connecting;
 use super::{http1, http2, Connection, ConnectionError};
+
+type Adapt<S, BIn, BOut> = TowerHyperService<IncomingRequestService<S, BIn, BOut>>;
 
 const HTTP2_PREFIX: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -90,19 +96,24 @@ impl<E> Builder<E> {
     }
 }
 
-impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for Builder<TokioExecutor>
+impl<S, IO, BIn, BOut, E> Protocol<S, IO, BIn> for Builder<E>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<BoxError>,
-    BIn: From<hyper::body::Incoming> + 'static,
+    BIn: http_body::Body + From<hyper::body::Incoming> + 'static,
     BOut: http_body::Body + Send + 'static,
     BOut::Data: Send + 'static,
     BOut::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    E: Http2ServerConnExec<<Adapt<S, BIn, BOut> as HttpService<Incoming>>::Future, BOut>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     type ResponseBody = BOut;
-    type Connection = Connecting<S, IO, BIn, BOut>;
+    type Connection = Connecting<S, IO, BIn, BOut, E>;
     type Error = ConnectionError;
 
     fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {

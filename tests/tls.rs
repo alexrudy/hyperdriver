@@ -2,11 +2,11 @@ use std::future::Future;
 
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
-use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::transport::TransportExt as _;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::service::MakeServiceRef;
 use hyperdriver::Body;
+use hyperdriver::{bridge::rt::TokioExecutor, server::GracefulServerExecutor};
 use rustls::ServerConfig;
 
 use hyperdriver::server::{Protocol, Server};
@@ -58,15 +58,17 @@ async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError
     )))
 }
 
-fn serve_gracefully<A, P, S, BIn>(
-    server: Server<A, P, S, BIn>,
+fn serve_gracefully<A, P, S, BIn, E>(
+    server: Server<A, P, S, BIn, E>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
     S: MakeServiceRef<A::Conn, BIn> + Send + 'static,
     S::Future: Send + 'static,
     P: Protocol<S::Service, A::Conn, BIn> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
+    A::Conn: Send + 'static,
     BIn: HttpBody + Send + 'static,
+    E: GracefulServerExecutor<P, S, A, BIn> + Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(server.with_graceful_shutdown(async {
@@ -100,7 +102,8 @@ async fn tls_echo_h1() {
     let server = hyperdriver::server::Server::builder()
         .with_acceptor(acceptor)
         .with_shared_service(tower::service_fn(echo))
-        .with_http1();
+        .with_http1()
+        .with_tokio();
 
     let handle = serve_gracefully(server);
 
@@ -152,7 +155,8 @@ async fn tls_echo_h2() {
     let server = hyperdriver::server::Server::builder()
         .with_acceptor(acceptor)
         .with_shared_service(tower::service_fn(echo))
-        .with_http2();
+        .with_http2()
+        .with_tokio();
 
     let guard = serve_gracefully(server);
 

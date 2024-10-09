@@ -34,7 +34,7 @@ use crate::stream::tls::TlsHandshakeStream;
 /// An async generator of new connections
 pub trait Accept {
     /// The connection type for this acceptor
-    type Conn: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static;
+    type Conn: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static;
 
     /// The error type for this acceptor
     type Error: Into<BoxError>;
