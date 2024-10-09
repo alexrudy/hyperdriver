@@ -68,7 +68,7 @@ optional = true
 [dev-dependencies]
 clap = { version = "4.5.19" }
 color-eyre = "0.6"
-opentelemetry = "0.25"
+opentelemetry = "0.26"
 opentelemetry-otlp = { version = "0.25" }
 opentelemetry-semantic-conventions = { version = "0.25" }
 opentelemetry_sdk = { version = "0.25", features = ["rt-tokio"] }
