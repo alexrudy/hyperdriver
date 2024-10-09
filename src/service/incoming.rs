@@ -197,7 +197,7 @@ where
 {
     type Response = http::Response<BOut>;
     type Error = T::Error;
-    type Future = future::AdaptIncomingFuture<T::Future, BOut, T::Error>;
+    type Future = future::IncomingResponseFuture<T::Future, BOut, T::Error>;
 
     fn poll_ready(
         &mut self,
@@ -207,7 +207,7 @@ where
     }
 
     fn call(&mut self, req: http::Request<BIn>) -> Self::Future {
-        future::AdaptIncomingFuture::new(self.inner.call(req))
+        future::IncomingResponseFuture::new(self.inner.call(req))
     }
 }
 
@@ -218,13 +218,13 @@ mod future {
 
     #[derive(Debug)]
     #[pin_project::pin_project]
-    pub struct AdaptIncomingFuture<F, BOut, Error> {
+    pub struct IncomingResponseFuture<F, BOut, Error> {
         #[pin]
         future: F,
         body: std::marker::PhantomData<fn() -> (BOut, Error)>,
     }
 
-    impl<F, BOut, Error> AdaptIncomingFuture<F, BOut, Error> {
+    impl<F, BOut, Error> IncomingResponseFuture<F, BOut, Error> {
         pub fn new(future: F) -> Self {
             Self {
                 future,
@@ -233,7 +233,7 @@ mod future {
         }
     }
 
-    impl<F, BOut, Error> Future for AdaptIncomingFuture<F, BOut, Error>
+    impl<F, BOut, Error> Future for IncomingResponseFuture<F, BOut, Error>
     where
         F: Future<Output = Result<http::Response<hyper::body::Incoming>, Error>>,
         BOut: From<hyper::body::Incoming>,
