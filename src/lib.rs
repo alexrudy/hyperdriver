@@ -164,7 +164,7 @@ pub(crate) fn polled_span(span: &tracing::Span) {
 pub(crate) mod private {
 
     #[allow(unused)]
-    pub trait Sealed {}
+    pub trait Sealed<T> {}
 }
 
 /// Test fixtures for the `hyperdriver` crate.
