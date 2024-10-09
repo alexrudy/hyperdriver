@@ -307,6 +307,8 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "stream")]
     async fn http_connector_request_h1() {
+        use crate::client::conn::connection::ConnectionExt as _;
+
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut builder = HttpConnectionBuilder::default();
@@ -353,6 +355,8 @@ mod tests {
     #[tokio::test]
     #[cfg(all(feature = "stream", feature = "tls"))]
     async fn http_connector_request_h2() {
+        use crate::client::conn::connection::ConnectionExt as _;
+
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut builder = HttpConnectionBuilder::default();
