@@ -49,6 +49,7 @@ impl fmt::Display for CheckoutId {
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error<Transport, Protocol> {
     #[error("creating connection")]
     Connecting(#[source] Transport),

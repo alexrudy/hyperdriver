@@ -34,6 +34,7 @@ pub mod tls;
 
 /// Errors that can occur when handling connections.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConnectionError {
     /// An error occurred while processing the connection in hyper.
     #[error(transparent)]

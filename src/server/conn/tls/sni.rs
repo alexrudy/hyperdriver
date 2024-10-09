@@ -15,6 +15,7 @@ use crate::info::TlsConnectionInfo;
 
 /// Error returned by the SNI Middleware.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SNIMiddlewareError<E>
 where
     E: std::error::Error,
@@ -39,6 +40,7 @@ where
 
 /// Error returned when validating the SNI from TLS connection information.
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ValidateSNIError {
     /// The SNI did not match the host header.
     #[error("TLS SNI \"{sni}\" does not match HOST header \"{host}\"")]

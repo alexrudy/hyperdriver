@@ -7,6 +7,7 @@ use thiserror::Error;
 /// Usually, this means that the URI is missing a scheme or authority,
 /// but it can also mean that the connection string could not be parsed.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum UriError {
     /// The connection string could not be parsed.
     #[error("invalid uri: {0}")]

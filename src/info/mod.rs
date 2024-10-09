@@ -30,6 +30,7 @@ pub use crate::stream::unix::UnixAddr;
 /// to select the appropriate transport when a transport should
 /// be pre-negotiated (e.g. ALPN or a Duplex socket).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Protocol {
     /// HTTP transports
     Http(http::Version),

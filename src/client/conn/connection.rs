@@ -162,6 +162,7 @@ where
 
 /// Error returned when a connection could not be established.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConnectionError {
     /// Error connecting to the remote host via the transport
     #[error(transparent)]
