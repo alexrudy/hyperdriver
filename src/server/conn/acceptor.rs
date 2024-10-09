@@ -61,15 +61,10 @@ enum AcceptorInner<A> {
     Tls(#[pin] RawTlsAcceptor<A>),
 }
 
-/// A stream of incoming connections.
-///
-/// This is a wrapper around hyper's `AddrIncoming`
-/// and `TlsAcceptor` types, using enum-dispatch,
-/// for compatibility with `Stream`.
 #[cfg(feature = "stream")]
 #[derive(Debug)]
-#[pin_project(project = AcceptorProj)]
-pub enum AcceptorCore {
+#[pin_project(project = AcceptorCoreProj)]
+enum AcceptorCoreInner {
     /// A TCP listener.
     Tcp(#[pin] TcpListener),
 
@@ -78,6 +73,19 @@ pub enum AcceptorCore {
 
     /// A Unix listener.
     Unix(#[pin] UnixListener),
+}
+
+/// A stream of incoming connections.
+///
+/// This is a wrapper around hyper's `AddrIncoming`
+/// and `TlsAcceptor` types, using enum-dispatch,
+/// for compatibility with `Stream`.
+#[cfg(feature = "stream")]
+#[derive(Debug)]
+#[pin_project]
+pub struct AcceptorCore {
+    #[pin]
+    inner: AcceptorCoreInner,
 }
 
 #[cfg(feature = "stream")]
@@ -117,21 +125,27 @@ impl<A> Acceptor<A> {
 #[cfg(feature = "stream")]
 impl From<TcpListener> for AcceptorCore {
     fn from(value: TcpListener) -> Self {
-        AcceptorCore::Tcp(value)
+        AcceptorCore {
+            inner: AcceptorCoreInner::Tcp(value),
+        }
     }
 }
 
 #[cfg(feature = "stream")]
 impl From<DuplexIncoming> for AcceptorCore {
     fn from(value: DuplexIncoming) -> Self {
-        AcceptorCore::Duplex(value)
+        AcceptorCore {
+            inner: AcceptorCoreInner::Duplex(value),
+        }
     }
 }
 
 #[cfg(feature = "stream")]
 impl From<UnixListener> for AcceptorCore {
     fn from(value: UnixListener) -> Self {
-        AcceptorCore::Unix(value)
+        AcceptorCore {
+            inner: AcceptorCoreInner::Unix(value),
+        }
     }
 }
 
@@ -156,16 +170,16 @@ impl Accept for AcceptorCore {
         self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Result<Self::Conn, Self::Error>> {
-        match self.project() {
-            AcceptorProj::Tcp(acceptor) => acceptor
+        match self.project().inner.project() {
+            AcceptorCoreProj::Tcp(acceptor) => acceptor
                 .poll_accept(cx)
-                .map(|stream| stream.map(Braid::Tcp)),
-            AcceptorProj::Duplex(acceptor) => {
+                .map(|stream| stream.map(Braid::from)),
+            AcceptorCoreProj::Duplex(acceptor) => {
                 acceptor.poll_accept(cx).map_ok(|stream| stream.into())
             }
-            AcceptorProj::Unix(acceptor) => acceptor
+            AcceptorCoreProj::Unix(acceptor) => acceptor
                 .poll_accept(cx)
-                .map(|stream| stream.map(Braid::Unix)),
+                .map(|stream| stream.map(Braid::from)),
         }
     }
 }
