@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GH_PAT_PR }}
 
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -27,5 +28,5 @@ jobs:
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_PR }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
