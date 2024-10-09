@@ -1,10 +1,9 @@
 //! Connections are responsible for sending and receiving HTTP requests and responses
 //! over an arbitrary two-way stream of bytes.
 
-use std::{fmt, future::Future};
+use std::{fmt, future::Future, pin::Pin, task::Poll};
 
 use crate::BoxFuture;
-use futures_util::FutureExt as _;
 use http_body::Body as HttpBody;
 use hyper::body::Incoming;
 use thiserror::Error;
@@ -38,15 +37,45 @@ pub trait Connection<B> {
     ) -> std::task::Poll<Result<(), Self::Error>>;
 
     /// Future which resolves when the connection is ready to accept a new request.
-    fn when_ready(&mut self) -> BoxFuture<'_, Result<(), Self::Error>>
-    where
-        Self: Send,
-    {
-        futures_util::future::poll_fn(|cx| self.poll_ready(cx)).boxed()
+    fn when_ready(&mut self) -> WhenReady<'_, Self, B> {
+        WhenReady::new(self)
     }
 
     /// What HTTP version is this connection using?
     fn version(&self) -> ::http::Version;
+}
+
+/// A future which resolves when the connection is ready again
+#[derive(Debug)]
+pub struct WhenReady<'a, C, B>
+where
+    C: Connection<B> + ?Sized,
+{
+    conn: &'a mut C,
+    _private: std::marker::PhantomData<fn(B)>,
+}
+
+impl<'a, C, B> WhenReady<'a, C, B>
+where
+    C: Connection<B> + ?Sized,
+{
+    pub(crate) fn new(conn: &'a mut C) -> Self {
+        Self {
+            conn,
+            _private: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, C, B> Future for WhenReady<'a, C, B>
+where
+    C: Connection<B> + ?Sized,
+{
+    type Output = Result<(), C::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        self.conn.poll_ready(cx)
+    }
 }
 
 /// An HTTP connection.
