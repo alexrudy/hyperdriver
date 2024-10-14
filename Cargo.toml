@@ -66,7 +66,7 @@ default-features = false
 optional = true
 
 [dev-dependencies]
-clap = { version = "4.5.19" }
+clap = { version = "4.5.20" }
 color-eyre = "0.6"
 opentelemetry = "0.25"
 opentelemetry-otlp = { version = "0.25" }
