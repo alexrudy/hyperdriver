@@ -75,7 +75,7 @@ opentelemetry_sdk = { version = "0.25", features = ["rt-tokio"] }
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 static-assertions = { version = "1", package = "static_assertions" }
 tempfile = "3"
-tracing-opentelemetry = "0.26"
+tracing-opentelemetry = "0.27"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 webpki-roots.version = "0.26"
 
