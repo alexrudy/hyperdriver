@@ -8,8 +8,8 @@ use http_body::Body as HttpBody;
 use hyper::body::Incoming;
 use thiserror::Error;
 
-pub use crate::client::pool::key::UriError;
 use crate::client::pool::PoolableConnection;
+pub use crate::client::pool::UriError;
 
 /// A connection to a remote server which can send and recieve HTTP requests/responses.
 ///
