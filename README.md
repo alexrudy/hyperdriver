@@ -21,7 +21,7 @@ then `hyperdriver` is for you.
 - A unifying Body type to make building small Clients and Servers easier.
 - Bridge between Tokio and Hyper, similar to `hyper-utils`.
 
-[crate-image]: https://buildstats.info/crate/hyperdriver
+[crate-image]: https://img.shields.io/crates/v/hyperdriver
 [crate-link]: https://crates.io/crates/hyperdriver
 [docs-image]: https://docs.rs/hyperdriver/badge.svg
 [docs-link]: https://docs.rs/hyperdriver/
