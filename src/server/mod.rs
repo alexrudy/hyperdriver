@@ -34,7 +34,8 @@
 //!    let server = hyperdriver::server::Server::builder()
 //!     .with_incoming(incoming)
 //!     .with_http1()
-//!     .with_shared_service(tower::service_fn(echo));
+//!     .with_shared_service(tower::service_fn(echo))
+//!     .with_tokio();
 //!
 //!     server.await.unwrap();
 //! }
@@ -47,14 +48,16 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
 use builder::{NeedsAcceptor, NeedsProtocol, NeedsService};
-use futures_util::future::FutureExt as _;
 use http_body::Body;
 #[cfg(feature = "stream")]
 use tokio::net::ToSocketAddrs;
 use tracing::instrument::Instrumented;
 use tracing::{debug, Instrument};
 
+use self::builder::NeedsExecutor;
 pub use self::conn::auto::Builder as AutoBuilder;
+use self::conn::drivers::{ConnectionDriver, GracefulConnectionDriver};
+pub use self::conn::drivers::{GracefulServerExecutor, ServerExecutor};
 pub use self::conn::Accept;
 #[cfg(feature = "stream")]
 use self::conn::Acceptor;
@@ -80,7 +83,7 @@ pub trait Protocol<S, IO, B> {
     type Error: Into<BoxError>;
 
     /// The connection future, used to drive a connection IO to completion.
-    type Connection: Connection + Future<Output = Result<(), Self::Error>> + Send + 'static;
+    type Connection: Connection + Future<Output = Result<(), Self::Error>> + 'static;
 
     /// Serve a connection with possible upgrades.
     ///
@@ -109,20 +112,23 @@ pub trait Protocol<S, IO, B> {
 ///   This must implement [`MakeServiceRef`], and will be passed a reference to the
 ///   connection stream (to facilitate connection information).
 /// - `B` is the body type for the service.
-pub struct Server<A, P, S, B> {
+/// - `E` is the executor to use for running the server. This is used to spawn the
+///    connection futures.
+pub struct Server<A, P, S, B, E> {
     acceptor: A,
     protocol: P,
     make_service: S,
+    executor: E,
     body: PhantomData<fn(B) -> ()>,
 }
 
-impl<A, P, S, B> fmt::Debug for Server<A, P, S, B> {
+impl<A, P, S, B, E> fmt::Debug for Server<A, P, S, B, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Server").finish()
     }
 }
 
-impl Server<(), (), (), ()> {
+impl Server<(), (), (), (), ()> {
     /// Create a new server builder.
     ///
     ///
@@ -151,31 +157,34 @@ impl Server<(), (), (), ()> {
     ///     .with_shared_service(service_fn(|req: http::Request<Body>| async move {
     ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
     ///    }))
-    ///    .with_auto_http();
+    ///    .with_auto_http()
+    ///    .with_tokio();
     ///
     /// server.await.unwrap();
     /// # }
     /// ```
-    pub fn builder<B>() -> Server<NeedsAcceptor, NeedsProtocol, NeedsService, B> {
+    pub fn builder<B>() -> Server<NeedsAcceptor, NeedsProtocol, NeedsService, B, NeedsExecutor> {
         Server {
             acceptor: Default::default(),
             protocol: Default::default(),
             make_service: Default::default(),
+            executor: Default::default(),
             body: Default::default(),
         }
     }
 }
 
-impl<A, P, S, B> Server<A, P, S, B> {
+impl<A, P, S, B, E> Server<A, P, S, B, E> {
     /// Create a new server with the given `MakeService` and `Acceptor`, and a custom [Protocol].
     ///
     /// The default protocol is [AutoBuilder], which can serve both HTTP/1 and HTTP/2 connections,
     /// and will automatically detect the protocol used by the client.
-    pub fn new(acceptor: A, protocol: P, make_service: S) -> Self {
+    pub fn new(acceptor: A, protocol: P, make_service: S, executor: E) -> Self {
         Self {
             acceptor,
             protocol,
             make_service,
+            executor,
             body: PhantomData,
         }
     }
@@ -209,23 +218,25 @@ impl<A, P, S, B> Server<A, P, S, B> {
     ///        Ok::<_, MyError>(http::Response::new(Body::empty()))
     ///    }))
     ///    .with_auto_http()
+    ///    .with_tokio()
     ///    .with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await.unwrap();
     /// # }
     /// ```
-    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<A, P, S, B, F>
+    pub fn with_graceful_shutdown<F>(self, signal: F) -> GracefulShutdown<A, P, S, B, E, F>
     where
         S: MakeServiceRef<A::Conn, B>,
         P: Protocol<S::Service, A::Conn, B>,
         A: Accept + Unpin,
         B: Body,
         F: Future<Output = ()> + Send + 'static,
+        E: ServerExecutor<P, S, A, B>,
     {
         GracefulShutdown::new(self, signal)
     }
 }
 
 #[cfg(feature = "stream")]
-impl<S, B> Server<Acceptor, AutoBuilder<TokioExecutor>, S, B> {
+impl<S, B> Server<Acceptor, AutoBuilder<TokioExecutor>, S, B, TokioExecutor> {
     /// Bind a new server to the given address.
     pub async fn bind<A: ToSocketAddrs>(addr: A, make_service: S) -> io::Result<Self> {
         let incoming = tokio::net::TcpListener::bind(addr).await?;
@@ -234,18 +245,20 @@ impl<S, B> Server<Acceptor, AutoBuilder<TokioExecutor>, S, B> {
         Ok(Server::builder()
             .with_acceptor(accept)
             .with_auto_http()
-            .with_make_service(make_service))
+            .with_make_service(make_service)
+            .with_tokio())
     }
 }
 
-impl<A, P, S, B> IntoFuture for Server<A, P, S, B>
+impl<A, P, S, B, E> IntoFuture for Server<A, P, S, B, E>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     B: Body,
+    E: ServerExecutor<P, S, A, B>,
 {
-    type IntoFuture = Serving<A, P, S, B>;
+    type IntoFuture = Serving<A, P, S, B, E>;
     type Output = Result<(), ServerError>;
 
     fn into_future(self) -> Self::IntoFuture {
@@ -261,12 +274,12 @@ where
 #[derive(Debug)]
 #[pin_project::pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Serving<A, P, S, B>
+pub struct Serving<A, P, S, B, E>
 where
     S: MakeServiceRef<A::Conn, B>,
     A: Accept,
 {
-    server: Server<A, P, S, B>,
+    server: Server<A, P, S, B, E>,
 
     span: tracing::Span,
 
@@ -286,7 +299,7 @@ enum State<S, F> {
     },
 }
 
-impl<A, P, S, B> Serving<A, P, S, B>
+impl<A, P, S, B, E> Serving<A, P, S, B, E>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn, B>,
@@ -343,12 +356,13 @@ where
     }
 }
 
-impl<A, P, S, B> Future for Serving<A, P, S, B>
+impl<A, P, S, B, E> Future for Serving<A, P, S, B, E>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     B: Body,
+    E: ServerExecutor<P, S, A, B>,
 {
     type Output = Result<(), ServerError>;
 
@@ -356,15 +370,11 @@ where
         loop {
             match self.as_mut().poll_once(cx) {
                 Poll::Ready(Ok(Some(conn))) => {
-                    let span = conn.span().clone();
-                    tokio::spawn(
-                        async move {
-                            if let Err(error) = conn.await {
-                                debug!("connection error: {:?}", error.into());
-                            }
-                        }
-                        .instrument(span),
-                    );
+                    self.as_mut()
+                        .project()
+                        .server
+                        .executor
+                        .execute(ConnectionDriver::new(conn));
                 }
                 Poll::Ready(Ok(None)) => {}
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -419,13 +429,13 @@ fn close() -> (CloseSender, CloseReciever) {
 ///
 /// See [`Server::with_graceful_shutdown`] for more details.
 #[pin_project::pin_project]
-pub struct GracefulShutdown<A, P, S, B, F>
+pub struct GracefulShutdown<A, P, S, B, E, F>
 where
     S: MakeServiceRef<A::Conn, B>,
     A: Accept,
 {
     #[pin]
-    server: Serving<A, P, S, B>,
+    server: Serving<A, P, S, B, E>,
 
     #[pin]
     signal: F,
@@ -438,15 +448,16 @@ where
     connection: CloseSender,
 }
 
-impl<A, P, S, B, F> GracefulShutdown<A, P, S, B, F>
+impl<A, P, S, B, E, F> GracefulShutdown<A, P, S, B, E, F>
 where
     S: MakeServiceRef<A::Conn, B>,
     P: Protocol<S::Service, A::Conn, B>,
     A: Accept + Unpin,
     B: Body,
     F: Future<Output = ()>,
+    E: ServerExecutor<P, S, A, B>,
 {
-    fn new(server: Server<A, P, S, B>, signal: F) -> Self {
+    fn new(server: Server<A, P, S, B, E>, signal: F) -> Self {
         let (tx, rx) = close();
         let (tx2, rx2) = close();
         Self {
@@ -460,7 +471,7 @@ where
     }
 }
 
-impl<A, P, S, B, F> fmt::Debug for GracefulShutdown<A, P, S, B, F>
+impl<A, P, S, B, E, F> fmt::Debug for GracefulShutdown<A, P, S, B, E, F>
 where
     S: MakeServiceRef<A::Conn, B>,
     A: Accept,
@@ -470,13 +481,14 @@ where
     }
 }
 
-impl<A, P, S, Body, F> Future for GracefulShutdown<A, P, S, Body, F>
+impl<A, P, S, Body, E, F> Future for GracefulShutdown<A, P, S, Body, E, F>
 where
     S: MakeServiceRef<A::Conn, Body>,
     P: Protocol<S::Service, A::Conn, Body>,
     A: Accept + Unpin,
     A::Conn: HasConnectionInfo,
     F: Future<Output = ()>,
+    E: GracefulServerExecutor<P, S, A, Body>,
 {
     type Output = Result<(), ServerError>;
 
@@ -509,38 +521,19 @@ where
             match this.server.as_mut().poll_once(cx) {
                 Poll::Ready(Ok(Some(conn))) => {
                     let shutdown_rx = this.channel.clone();
-                    let mut finished_tx = this.connection.clone();
+                    let finished_tx = this.connection.clone();
 
                     let span = conn.span().clone();
 
-                    tokio::spawn(
-                        async move {
-                            let mut shutdown = pin!(shutdown_rx
-                                .into_future()
-                                .fuse()
-                                .instrument(conn.span().clone()));
-                            let mut conn = pin!(conn);
-                            loop {
-                                tokio::select! {
-                                    rv = conn.as_mut() => {
-                                        if let Err(error) = rv {
-                                            debug!("connection error: {}", error.into());
-                                        } else {
-                                            debug!("connection finished");
-                                        }
-                                        break;
-                                    },
-                                    _ = &mut shutdown => {
-                                        debug!("connection received shutdown signal");
-                                        conn.as_mut().inner_pin_mut().graceful_shutdown();
-                                    },
-                                }
-                            }
-                            finished_tx.send();
-                            tracing::trace!("finished serving connection");
-                        }
-                        .instrument(span),
-                    );
+                    this.server
+                        .server
+                        .executor
+                        .execute(GracefulConnectionDriver::new(
+                            conn,
+                            shutdown_rx,
+                            finished_tx,
+                            span,
+                        ));
                 }
                 Poll::Ready(Ok(None)) => {}
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -632,7 +625,8 @@ mod tests {
         let server = Server::builder()
             .with_acceptor(incoming)
             .with_make_service(svc)
-            .with_auto_http();
+            .with_auto_http()
+            .with_tokio();
 
         server.into_future();
     }

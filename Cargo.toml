@@ -125,6 +125,12 @@ name = "h2-server"
 path = "examples/server/h2.rs"
 required-features = ["server", "tls", "tls-ring"]
 
+[[example]]
+name = "single-threaded"
+path = "examples/single_threaded.rs"
+required-features = ["server", "client"]
+
+
 [[test]]
 name = "stream-duplex"
 path = "tests/stream/duplex.rs"
