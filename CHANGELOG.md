@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/alexrudy/hyperdriver/compare/v0.7.0...v0.8.0) - 2024-10-21
+
+### <!-- 0 -->⛰️ Features
+
+- Make connection pool generic over the key type
+- Client pool can delay drop for checkout
+- Client now uses Body type instead of Incoming for response bodies
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- make connection trait object safe
+- AcceptorCore and Braid should be opaque
+- Mark errors as non_exhaustive
+- Ensure that feature combinations compile in —test mode
+
+### <!-- 2 -->🚜 Refactor
+
+- consolidate BoxError and BoxFuture into common type aliases
+
 ## [0.7.0](https://github.com/alexrudy/hyperdriver/compare/v0.6.0...v0.7.0) - 2024-10-01
 
 ### <!-- 0 -->⛰️ Features
