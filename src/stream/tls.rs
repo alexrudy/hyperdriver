@@ -29,7 +29,7 @@ impl<'a, T: ?Sized> Handshaking<'a, T> {
     }
 }
 
-impl<'a, T> Future for Handshaking<'a, T>
+impl<T> Future for Handshaking<'_, T>
 where
     T: TlsHandshakeStream + ?Sized,
 {
@@ -200,7 +200,7 @@ impl<'s, S> TlsHandshakeFuture<'s, S> {
     }
 }
 
-impl<'s, S> Future for TlsHandshakeFuture<'s, S>
+impl<S> Future for TlsHandshakeFuture<'_, S>
 where
     S: TlsHandshakeStream,
 {

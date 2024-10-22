@@ -211,6 +211,7 @@ where
 }
 
 #[cfg(feature = "stream")]
+#[allow(clippy::useless_conversion)]
 impl From<TcpStream> for Stream {
     fn from(stream: TcpStream) -> Self {
         Stream {
@@ -220,6 +221,7 @@ impl From<TcpStream> for Stream {
 }
 
 #[cfg(feature = "stream")]
+#[allow(clippy::useless_conversion)]
 impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
@@ -229,6 +231,7 @@ impl From<DuplexStream> for Stream {
 }
 
 #[cfg(feature = "stream")]
+#[allow(clippy::useless_conversion)]
 impl From<UnixStream> for Stream {
     fn from(stream: UnixStream) -> Self {
         Stream {

@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<'a, C, B> Future for WhenReady<'a, C, B>
+impl<C, B> Future for WhenReady<'_, C, B>
 where
     C: Connection<B> + ?Sized,
 {
