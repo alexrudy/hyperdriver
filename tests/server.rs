@@ -1,3 +1,4 @@
+//! Test a hyperdriver::Server with a hyper::client in various configurations.
 use std::future::Future;
 use std::future::IntoFuture;
 use std::pin::pin;

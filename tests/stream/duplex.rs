@@ -1,3 +1,5 @@
+//! Test the duplex stream.
+
 #[tokio::test]
 async fn braided_duplex() {
     use futures_util::StreamExt;
