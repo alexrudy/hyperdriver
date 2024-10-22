@@ -132,7 +132,7 @@ where
     state: ConnectionState<'b, I, S, E>,
 }
 
-impl<'b, I, S, Executor, B> Connection for UpgradableConnection<'b, I, S, Executor>
+impl<I, S, Executor, B> Connection for UpgradableConnection<'_, I, S, Executor>
 where
     S: hyper::service::HttpService<hyper::body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
@@ -154,7 +154,7 @@ where
     }
 }
 
-impl<'b, I, S, E, B> Future for UpgradableConnection<'b, I, S, E>
+impl<I, S, E, B> Future for UpgradableConnection<'_, I, S, E>
 where
     S: hyper::service::HttpService<hyper::body::Incoming, ResBody = B> + Clone,
     S::Future: 'static,
@@ -218,7 +218,7 @@ where
     Http2(#[pin] http2::Connection<Rewind<I>, S, E>),
 }
 
-impl<'b, I, S, E> fmt::Debug for ConnectionState<'b, I, S, E>
+impl<I, S, E> fmt::Debug for ConnectionState<'_, I, S, E>
 where
     S: hyper::service::HttpService<body::Incoming>,
     I: fmt::Debug,
