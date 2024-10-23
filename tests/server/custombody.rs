@@ -1,3 +1,5 @@
+//! Test that a custom body type can be used with the server.
+
 use bytes::Bytes;
 use futures_util::FutureExt;
 use http_body::Body;

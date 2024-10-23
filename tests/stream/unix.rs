@@ -1,3 +1,5 @@
+//! Test unix domain sockets
+
 #[tokio::test]
 async fn braided_unix() {
     use futures_util::StreamExt;

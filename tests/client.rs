@@ -1,3 +1,4 @@
+//! Test hyperdriver client with hyper server implementation
 use futures_util::StreamExt;
 use http::StatusCode;
 use hyperdriver::bridge::io::TokioIo;

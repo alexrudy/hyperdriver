@@ -1,3 +1,4 @@
+//! Test a server/client pair with TLS.
 use std::future::Future;
 
 use http_body::Body as HttpBody;

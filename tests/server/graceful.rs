@@ -1,3 +1,5 @@
+//! Test server graceful shutdown
+
 use std::future::Future;
 use std::pin::{pin, Pin};
 use std::task::Context;

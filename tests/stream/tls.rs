@@ -1,3 +1,5 @@
+//! Test TLS support in braided streams.
+
 use std::{net::Ipv4Addr, sync::Arc};
 
 use rustls::ServerConfig;
