@@ -40,35 +40,16 @@ pub(crate) use self::checkout::Connector;
 pub(crate) use self::checkout::Error;
 use self::idle::IdleConnections;
 pub use self::key::UriKey;
+use self::key::{Token, TokenMap};
 use self::weakopt::WeakOpt;
 
 use super::conn::Protocol;
 use super::conn::Transport;
 
 /// Key which links a URI to a connection.
-pub trait Key:
-    Clone
-    + Eq
-    + std::hash::Hash
-    + fmt::Debug
-    + TryFrom<http::Uri, Error = UriError>
-    + Unpin
-    + Send
-    + 'static
-{
-}
+pub trait Key: Eq + std::hash::Hash + fmt::Debug + TryFrom<http::Uri, Error = UriError> {}
 
-impl<K> Key for K where
-    K: Clone
-        + Eq
-        + std::hash::Hash
-        + fmt::Debug
-        + TryFrom<http::Uri, Error = UriError>
-        + Unpin
-        + Send
-        + 'static
-{
-}
+impl<K> Key for K where K: Eq + std::hash::Hash + fmt::Debug + TryFrom<http::Uri, Error = UriError> {}
 
 /// The URI used for connecting to a server is invalid.
 ///
@@ -98,13 +79,15 @@ pub enum UriError {
 /// are always kept in the pool - there is no need to return dropped copies).
 #[derive(Debug)]
 pub(crate) struct Pool<C: PoolableConnection, K: Key> {
-    inner: Arc<Mutex<PoolInner<C, K>>>,
+    inner: Arc<Mutex<PoolInner<C>>>,
+    keys: Arc<Mutex<TokenMap<K>>>,
 }
 
 impl<C: PoolableConnection, K: Key> Clone for Pool<C, K> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            keys: self.keys.clone(),
         }
     }
 }
@@ -113,10 +96,11 @@ impl<C: PoolableConnection, K: Key> Pool<C, K> {
     pub(crate) fn new(config: Config) -> Self {
         Self {
             inner: Arc::new(Mutex::new(PoolInner::new(config))),
+            keys: Arc::new(Mutex::new(TokenMap::default())),
         }
     }
 
-    fn as_ref(&self) -> PoolRef<C, K> {
+    fn as_ref(&self) -> PoolRef<C> {
         PoolRef {
             inner: WeakOpt::downgrade(&self.inner),
         }
@@ -148,7 +132,7 @@ impl<C: PoolableConnection, K: Key> Pool<C, K> {
         key: K,
         multiplex: bool,
         connector: Connector<T, P, B>,
-    ) -> Checkout<T, P, B, K>
+    ) -> Checkout<T, P, B>
     where
         T: Transport,
         P: Protocol<T::IO, B, Connection = C> + Send + 'static,
@@ -158,54 +142,59 @@ impl<C: PoolableConnection, K: Key> Pool<C, K> {
         let mut inner = self.inner.lock();
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut connector: Option<Connector<T, P, B>> = Some(connector);
+        let token = self.keys.lock().insert(key);
 
-        if let Some(connection) = inner.pop(&key) {
+        if let Some(connection) = inner.pop(token) {
             trace!("connection found in pool");
             connector = None;
-            return Checkout::new(key, self, rx, connector, Some(connection), &inner.config);
+            return Checkout::new(
+                token,
+                self.as_ref(),
+                rx,
+                connector,
+                Some(connection),
+                &inner.config,
+            );
         }
 
         trace!("checkout interested in pooled connections");
-        inner.waiting.entry(key.clone()).or_default().push_back(tx);
+        inner.waiting.entry(token).or_default().push_back(tx);
 
-        if inner.connecting.contains(&key) {
+        if inner.connecting.contains(&token) {
             trace!("connection in progress elsewhere, will wait");
             connector = None;
-            Checkout::new(key, self, rx, connector, None, &inner.config)
+            Checkout::new(token, self.as_ref(), rx, connector, None, &inner.config)
         } else {
             if multiplex {
                 // Only block new connection attempts if we can multiplex on this one.
                 trace!("checkout of multiplexed connection, other connections should wait");
-                inner.connecting.insert(key.clone());
+                inner.connecting.insert(token);
             }
             trace!("connecting to host");
-            Checkout::new(key, self, rx, connector, None, &inner.config)
+            Checkout::new(token, self.as_ref(), rx, connector, None, &inner.config)
         }
     }
 }
 
-struct PoolRef<C, K>
+struct PoolRef<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
-    inner: WeakOpt<Mutex<PoolInner<C, K>>>,
+    inner: WeakOpt<Mutex<PoolInner<C>>>,
 }
 
-impl<C, K> fmt::Debug for PoolRef<C, K>
+impl<C> fmt::Debug for PoolRef<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("PoolRef").field(&self.inner).finish()
     }
 }
 
-impl<C, K> PoolRef<C, K>
+impl<C> PoolRef<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn none() -> Self {
         Self {
@@ -214,13 +203,13 @@ where
     }
 
     #[allow(dead_code)]
-    fn try_lock(&self) -> Option<PoolGuard<C, K>> {
+    fn try_lock(&self) -> Option<PoolGuard<C>> {
         self.inner
             .upgrade()
             .and_then(|inner| inner.try_lock_arc().map(PoolGuard))
     }
 
-    fn lock(&self) -> Option<PoolGuard<C, K>> {
+    fn lock(&self) -> Option<PoolGuard<C>> {
         self.inner
             .upgrade()
             .map(|inner| PoolGuard(inner.lock_arc()))
@@ -232,10 +221,9 @@ where
     }
 }
 
-impl<C, K> Clone for PoolRef<C, K>
+impl<C> Clone for PoolRef<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn clone(&self) -> Self {
         Self {
@@ -244,26 +232,22 @@ where
     }
 }
 
-struct PoolGuard<C: PoolableConnection, K: Key>(
-    ArcMutexGuard<parking_lot::RawMutex, PoolInner<C, K>>,
-);
+struct PoolGuard<C: PoolableConnection>(ArcMutexGuard<parking_lot::RawMutex, PoolInner<C>>);
 
-impl<C, K> Deref for PoolGuard<C, K>
+impl<C> Deref for PoolGuard<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
-    type Target = PoolInner<C, K>;
+    type Target = PoolInner<C>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<C, K> DerefMut for PoolGuard<C, K>
+impl<C> DerefMut for PoolGuard<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
@@ -271,23 +255,21 @@ where
 }
 
 #[derive(Debug)]
-struct PoolInner<C, K>
+struct PoolInner<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     config: Config,
 
-    connecting: HashSet<K>,
-    waiting: HashMap<K, VecDeque<Sender<Pooled<C, K>>>>,
+    connecting: HashSet<Token>,
+    waiting: HashMap<Token, VecDeque<Sender<Pooled<C>>>>,
 
-    idle: HashMap<K, IdleConnections<C>>,
+    idle: HashMap<Token, IdleConnections<C>>,
 }
 
-impl<C, K> PoolInner<C, K>
+impl<C> PoolInner<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn new(config: Config) -> Self {
         Self {
@@ -298,38 +280,36 @@ where
         }
     }
 
-    fn cancel_connection(&mut self, key: &K) {
-        let existed = self.connecting.remove(key);
+    fn cancel_connection(&mut self, token: Token) {
+        let existed = self.connecting.remove(&token);
         if existed {
-            trace!(?key, "pending connection cancelled");
+            trace!("pending connection cancelled");
         }
     }
 }
 
-impl<C, K> PoolInner<C, K>
+impl<C> PoolInner<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     /// Mark a connection as connected, but not done with the handshake.
     ///
     /// New connection attempts will wait for this connection to complete the
     /// handshake and re-use it if possible.
-    fn connected_in_handshake(&mut self, key: &K) {
-        self.connecting.insert(key.clone());
+    fn connected_in_handshake(&mut self, token: Token) {
+        self.connecting.insert(token);
     }
 }
 
-impl<C, K> PoolInner<C, K>
+impl<C> PoolInner<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
-    fn push(&mut self, key: K, mut connection: C, pool_ref: PoolRef<C, K>) {
-        self.connecting.remove(&key);
+    fn push(&mut self, token: Token, mut connection: C, pool_ref: PoolRef<C>) {
+        self.connecting.remove(&token);
 
-        if let Some(waiters) = self.waiting.get_mut(&key) {
-            trace!(waiters=%waiters.len(), "walking waiters");
+        if let Some(waiters) = self.waiting.get_mut(&token) {
+            trace!(waiters=%waiters.len(), ?token, "walking waiters");
 
             while let Some(waiter) = waiters.pop_front() {
                 if waiter.is_closed() {
@@ -342,7 +322,7 @@ where
                     let pooled = Pooled {
                         connection: Some(conn),
                         is_reused: true,
-                        key: key.clone(),
+                        token,
                         pool: pool_ref.clone(),
                     };
 
@@ -351,11 +331,14 @@ where
                         continue;
                     };
                 } else {
-                    trace!("connection not re-usable, but will be sent to waiter");
+                    trace!(
+                        ?token,
+                        "connection not re-usable, but will be sent to waiter"
+                    );
                     let pooled = Pooled {
                         connection: Some(connection),
                         is_reused: false,
-                        key: key.clone(),
+                        token,
                         pool: pool_ref.clone(),
                     };
 
@@ -370,23 +353,23 @@ where
             }
         }
 
-        self.idle.entry(key).or_default().push(connection);
+        self.idle.entry(token).or_default().push(connection);
     }
 
-    fn pop(&mut self, key: &K) -> Option<C> {
+    fn pop(&mut self, token: Token) -> Option<C> {
         let mut empty = false;
         let mut idle_entry = None;
 
-        tracing::trace!(?key, "pop");
+        tracing::trace!(?token, "pop");
 
-        if let Some(idle) = self.idle.get_mut(key) {
+        if let Some(idle) = self.idle.get_mut(&token) {
             idle_entry = idle.pop(self.config.idle_timeout);
             empty = idle.is_empty();
         }
 
         if empty && !idle_entry.as_ref().map(|i| i.can_share()).unwrap_or(false) {
-            trace!(?key, "removing empty idle list");
-            self.idle.remove(key);
+            trace!(?token, "removing empty idle list");
+            self.idle.remove(&token);
         }
 
         idle_entry
@@ -464,41 +447,37 @@ pub trait PoolableConnection: Unpin + Send + Sized + 'static {
 /// This type is used outside of the Pool to ensure that dropped
 /// connections are returned to the pool. The underlying connection
 /// is available via `Deref` and `DerefMut`.
-pub struct Pooled<C, K>
+pub struct Pooled<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     connection: Option<C>,
     is_reused: bool,
-    key: K,
-    pool: PoolRef<C, K>,
+    token: Token,
+    pool: PoolRef<C>,
 }
 
-impl<C, K> Pooled<C, K>
+impl<C> Pooled<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn take(mut self) -> Option<C> {
         self.connection.take()
     }
 }
 
-impl<C, K> fmt::Debug for Pooled<C, K>
+impl<C> fmt::Debug for Pooled<C>
 where
     C: fmt::Debug + PoolableConnection,
-    K: Key,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Pooled").field(&self.connection).finish()
     }
 }
 
-impl<C, K> Deref for Pooled<C, K>
+impl<C> Deref for Pooled<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     type Target = C;
 
@@ -509,10 +488,9 @@ where
     }
 }
 
-impl<C, K> DerefMut for Pooled<C, K>
+impl<C> DerefMut for Pooled<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.connection
@@ -521,17 +499,16 @@ where
     }
 }
 
-impl<C, K> Drop for Pooled<C, K>
+impl<C> Drop for Pooled<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
             if connection.is_open() && !self.is_reused {
                 if let Some(mut pool) = self.pool.lock() {
-                    trace!(key=?self.key, "open connection returned to pool");
-                    pool.push(self.key.clone(), connection, self.pool.clone());
+                    trace!("open connection returned to pool");
+                    pool.push(self.token, connection, self.pool.clone());
                 }
             }
         }
@@ -747,10 +724,12 @@ mod tests {
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
         );
 
+        let token = checkout.token();
+
         // Return the connection to the pool, sending it out to the new checkout
         // that is waiting, cancelling the checkout connect.
 
-        pool.inner.lock().push(key.clone(), conn, pool.as_ref());
+        pool.inner.lock().push(token, conn, pool.as_ref());
 
         let conn = checkout.now_or_never().unwrap().unwrap();
 
@@ -783,6 +762,8 @@ mod tests {
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
         );
 
+        let token = checkout.token();
+
         tracing::debug!("Checking interest");
 
         // At least one connection should be happening / waiting.
@@ -790,7 +771,7 @@ mod tests {
             .inner
             .lock()
             .waiting
-            .get(&key)
+            .get(&token)
             .expect("no waiting connections in pool")
             .is_empty());
 
@@ -801,9 +782,7 @@ mod tests {
         tracing::debug!("Inserting original connection");
         // Return the connection to the pool, sending it out to the new checkout
         // that is waiting, cancelling the checkout connect.
-        pool.inner
-            .lock()
-            .push(key.clone(), conn_first, pool.as_ref());
+        pool.inner.lock().push(token, conn_first, pool.as_ref());
 
         assert!(conn.is_open());
         assert_ne!(conn.id(), first_id, "connection should not be re-used");
@@ -890,7 +869,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn checkout_simple_cloned() {
+    async fn checkout_pool_cloned() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let pool = Pool::new(Config {
@@ -977,13 +956,15 @@ mod tests {
                 .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
         );
 
+        let token = checkout.token();
+
         drop(conn);
         let conn = checkout.await.unwrap();
         assert!(conn.is_open());
         assert_eq!(cid, conn.id());
 
         let inner = pool.inner.lock();
-        let idles = inner.idle.get(&key).unwrap();
+        let idles = inner.idle.get(&token).unwrap();
         assert_eq!(idles.len(), 1);
     }
 }

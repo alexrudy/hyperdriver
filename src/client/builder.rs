@@ -18,7 +18,7 @@ use super::conn::transport::TransportExt;
 use super::conn::Connection;
 use super::conn::Protocol;
 use super::conn::Transport;
-use super::pool::{self, PoolableConnection, PoolableStream};
+use super::pool::{PoolableConnection, PoolableStream, UriKey};
 use super::ConnectionPoolLayer;
 use crate::service::RequestExecutor;
 use crate::service::{Http1ChecksLayer, Http2ChecksLayer, SetHostHeaderLayer};
@@ -459,11 +459,11 @@ where
             ))
             .layer(IncomingResponseLayer::new())
             .layer(
-                ConnectionPoolLayer::new(transport, self.protocol.build())
+                ConnectionPoolLayer::<_, _, _, UriKey>::new(transport, self.protocol.build())
                     .with_optional_pool(self.pool.clone()),
             )
             .layer(SetHostHeaderLayer::new())
-            .layer(Http2ChecksLayer::<_, _, pool::UriKey>::new())
+            .layer(Http2ChecksLayer::new())
             .layer(Http1ChecksLayer::new())
             .service(RequestExecutor::new());
 

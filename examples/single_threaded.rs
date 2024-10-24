@@ -295,13 +295,13 @@ async fn http2_client(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = tower::ServiceBuilder::new()
         .layer(
-            ConnectionPoolLayer::new(
+            ConnectionPoolLayer::<_, _, _, UriKey>::new(
                 TcpTransport::<_, TcpStream>::default().without_tls(),
                 auto::HttpConnectionBuilder::<Body>::default(),
             )
             .with_optional_pool(Some(Default::default())),
         )
-        .service(RequestExecutor::<HttpConnection<Body>, _, UriKey>::new());
+        .service(RequestExecutor::<HttpConnection<Body>, _>::new());
 
     let authority = url.authority().unwrap().clone();
 

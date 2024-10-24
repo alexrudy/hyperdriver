@@ -141,6 +141,9 @@ httpbin:
 hurl *args='':
     cargo +{{rust}} run --features client,tls,tls-ring --example hurl -- {{args}}
 
+profile:
+    cargo +{{rust}} run --release --features client,tls,tls-ring --example profile
+
 # Launch jaeger
 jaeger:
     docker run -d -p16686:16686 -p4317:4317 -e COLLECTOR_OTLP_ENABLED=true jaegertracing/all-in-one:latest

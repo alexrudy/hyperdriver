@@ -59,31 +59,28 @@ pub(super) mod http1 {
     use http::Uri;
 
     use crate::client::conn::Connection;
-    use crate::client::pool::{Key, PoolableConnection};
+    use crate::client::pool::PoolableConnection;
     use crate::client::Error;
     use crate::service::client::ExecuteRequest;
     use crate::service::error::MaybeErrorFuture;
     use crate::service::error::PreprocessService;
 
-    type PreprocessFn<C, B, K, E> =
-        fn(ExecuteRequest<C, B, K>) -> Result<ExecuteRequest<C, B, K>, E>;
+    type PreprocessFn<C, B, E> = fn(ExecuteRequest<C, B>) -> Result<ExecuteRequest<C, B>, E>;
 
     /// A service that checks if the request is HTTP/1.1 compatible.
     #[derive(Debug)]
-    pub struct Http1ChecksService<S, C, B, K>
+    pub struct Http1ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
-        inner: PreprocessService<S, PreprocessFn<C, B, K, S::Error>>,
+        inner: PreprocessService<S, PreprocessFn<C, B, S::Error>>,
     }
 
-    impl<S, C, B, K> tower::Service<ExecuteRequest<C, B, K>> for Http1ChecksService<S, C, B, K>
+    impl<S, C, B> tower::Service<ExecuteRequest<C, B>> for Http1ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         type Response = S::Response;
 
@@ -95,16 +92,15 @@ pub(super) mod http1 {
             self.inner.poll_ready(cx)
         }
 
-        fn call(&mut self, req: ExecuteRequest<C, B, K>) -> Self::Future {
+        fn call(&mut self, req: ExecuteRequest<C, B>) -> Self::Future {
             self.inner.call(req)
         }
     }
 
-    impl<S, C, B, K> Clone for Http1ChecksService<S, C, B, K>
+    impl<S, C, B> Clone for Http1ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error> + Clone,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error> + Clone,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         fn clone(&self) -> Self {
             Self {
@@ -113,11 +109,10 @@ pub(super) mod http1 {
         }
     }
 
-    impl<S, C, B, K> Http1ChecksService<S, C, B, K>
+    impl<S, C, B> Http1ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         /// Create a new `Http1ChecksService`.
         pub fn new(service: S) -> Self {
@@ -128,11 +123,11 @@ pub(super) mod http1 {
     }
 
     /// A layer that checks if the request is HTTP/1.1 compatible.
-    pub struct Http1ChecksLayer<C, B, K> {
-        processor: std::marker::PhantomData<fn(C, B, K)>,
+    pub struct Http1ChecksLayer<C, B> {
+        processor: std::marker::PhantomData<fn(C, B)>,
     }
 
-    impl<C, B, K> Http1ChecksLayer<C, B, K> {
+    impl<C, B> Http1ChecksLayer<C, B> {
         /// Create a new `Http1ChecksLayer`.
         pub fn new() -> Self {
             Self {
@@ -141,43 +136,41 @@ pub(super) mod http1 {
         }
     }
 
-    impl<C, B, K> Default for Http1ChecksLayer<C, B, K> {
+    impl<C, B> Default for Http1ChecksLayer<C, B> {
         fn default() -> Self {
             Self::new()
         }
     }
 
-    impl<C, B, K> Clone for Http1ChecksLayer<C, B, K> {
+    impl<C, B> Clone for Http1ChecksLayer<C, B> {
         fn clone(&self) -> Self {
             Self::new()
         }
     }
 
-    impl<C, B, K> fmt::Debug for Http1ChecksLayer<C, B, K> {
+    impl<C, B> fmt::Debug for Http1ChecksLayer<C, B> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("Http1ChecksLayer").finish()
         }
     }
 
-    impl<C, B, K, S> tower::layer::Layer<S> for Http1ChecksLayer<C, B, K>
+    impl<C, B, S> tower::layer::Layer<S> for Http1ChecksLayer<C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
-        type Service = Http1ChecksService<S, C, B, K>;
+        type Service = Http1ChecksService<S, C, B>;
 
         fn layer(&self, service: S) -> Self::Service {
             Http1ChecksService::new(service)
         }
     }
 
-    fn check_http1_request<C, B, K>(
-        mut req: ExecuteRequest<C, B, K>,
-    ) -> Result<ExecuteRequest<C, B, K>, Error>
+    fn check_http1_request<C, B>(
+        mut req: ExecuteRequest<C, B>,
+    ) -> Result<ExecuteRequest<C, B>, Error>
     where
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         if req.connection().version() >= http::Version::HTTP_2 {
             return Ok(req);
@@ -310,7 +303,7 @@ pub(super) mod http2 {
     use ::http;
 
     use crate::client::conn::Connection;
-    use crate::client::pool::{Key, PoolableConnection};
+    use crate::client::pool::PoolableConnection;
     use crate::client::Error;
     use crate::service::client::ExecuteRequest;
     use crate::service::error::{MaybeErrorFuture, PreprocessService};
@@ -323,36 +316,32 @@ pub(super) mod http2 {
         http::header::UPGRADE,
     ];
 
-    type PreprocessFn<C, B, K, E> =
-        fn(ExecuteRequest<C, B, K>) -> Result<ExecuteRequest<C, B, K>, E>;
+    type PreprocessFn<C, B, E> = fn(ExecuteRequest<C, B>) -> Result<ExecuteRequest<C, B>, E>;
 
     /// A service that checks if the request is HTTP/2 compatible.
     #[derive(Debug)]
-    pub struct Http2ChecksService<S, C, B, K>
+    pub struct Http2ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
-        inner: PreprocessService<S, PreprocessFn<C, B, K, S::Error>>,
+        inner: PreprocessService<S, PreprocessFn<C, B, S::Error>>,
     }
 
-    impl<S, C, B, K> Clone for Http2ChecksService<S, C, B, K>
+    impl<S, C, B> Clone for Http2ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error> + Clone,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error> + Clone,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         fn clone(&self) -> Self {
             Self::new(self.inner.service().clone())
         }
     }
 
-    impl<S, C, B, K> Http2ChecksService<S, C, B, K>
+    impl<S, C, B> Http2ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         /// Create a new `Http2ChecksService`.
         pub fn new(inner: S) -> Self {
@@ -362,12 +351,11 @@ pub(super) mod http2 {
         }
     }
 
-    fn check_http2_request<C, B, K>(
-        mut req: ExecuteRequest<C, B, K>,
-    ) -> Result<ExecuteRequest<C, B, K>, Error>
+    fn check_http2_request<C, B>(
+        mut req: ExecuteRequest<C, B>,
+    ) -> Result<ExecuteRequest<C, B>, Error>
     where
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         if req.connection().version() == http::Version::HTTP_2 {
             if req.request().method() == http::Method::CONNECT {
@@ -402,11 +390,10 @@ pub(super) mod http2 {
         Ok(req)
     }
 
-    impl<S, C, B, K> tower::Service<ExecuteRequest<C, B, K>> for Http2ChecksService<S, C, B, K>
+    impl<S, C, B> tower::Service<ExecuteRequest<C, B>> for Http2ChecksService<S, C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
         type Response = S::Response;
 
@@ -420,17 +407,17 @@ pub(super) mod http2 {
         }
 
         #[inline]
-        fn call(&mut self, req: ExecuteRequest<C, B, K>) -> Self::Future {
+        fn call(&mut self, req: ExecuteRequest<C, B>) -> Self::Future {
             self.inner.call(req)
         }
     }
 
     /// A `Layer` that applies HTTP/2 checks to requests.
-    pub struct Http2ChecksLayer<C, B, K> {
-        _marker: std::marker::PhantomData<fn(C, B, K)>,
+    pub struct Http2ChecksLayer<C, B> {
+        _marker: std::marker::PhantomData<fn(C, B)>,
     }
 
-    impl<C, B, K> Http2ChecksLayer<C, B, K> {
+    impl<C, B> Http2ChecksLayer<C, B> {
         /// Create a new `Http2ChecksLayer`.
         pub fn new() -> Self {
             Self {
@@ -439,31 +426,30 @@ pub(super) mod http2 {
         }
     }
 
-    impl<C, B, K> Default for Http2ChecksLayer<C, B, K> {
+    impl<C, B> Default for Http2ChecksLayer<C, B> {
         fn default() -> Self {
             Self::new()
         }
     }
 
-    impl<C, B, K> fmt::Debug for Http2ChecksLayer<C, B, K> {
+    impl<C, B> fmt::Debug for Http2ChecksLayer<C, B> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.debug_struct("Http2ChecksLayer").finish()
         }
     }
 
-    impl<C, B, K> Clone for Http2ChecksLayer<C, B, K> {
+    impl<C, B> Clone for Http2ChecksLayer<C, B> {
         fn clone(&self) -> Self {
             Self::new()
         }
     }
 
-    impl<S, C, B, K> tower::layer::Layer<S> for Http2ChecksLayer<C, B, K>
+    impl<S, C, B> tower::layer::Layer<S> for Http2ChecksLayer<C, B>
     where
-        S: tower::Service<ExecuteRequest<C, B, K>, Error = Error>,
+        S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
         C: Connection<B> + PoolableConnection,
-        K: Key,
     {
-        type Service = Http2ChecksService<S, C, B, K>;
+        type Service = Http2ChecksService<S, C, B>;
 
         fn layer(&self, inner: S) -> Self::Service {
             Http2ChecksService::new(inner)

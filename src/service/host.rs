@@ -91,11 +91,10 @@ where
     }
 }
 
-impl<S, B, C, K> tower::Service<ExecuteRequest<C, B, K>> for SetHostHeader<S>
+impl<S, B, C> tower::Service<ExecuteRequest<C, B>> for SetHostHeader<S>
 where
-    S: tower::Service<ExecuteRequest<C, B, K>>,
+    S: tower::Service<ExecuteRequest<C, B>>,
     C: Connection<B> + PoolableConnection,
-    K: crate::client::pool::Key,
 {
     type Response = S::Response;
 
@@ -110,7 +109,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: ExecuteRequest<C, B, K>) -> Self::Future {
+    fn call(&mut self, mut req: ExecuteRequest<C, B>) -> Self::Future {
         if req.connection().version() < http::Version::HTTP_2 {
             set_host_header(req.request_mut());
         }
