@@ -112,7 +112,6 @@ impl FromStr for UriKey {
 
 #[cfg(test)]
 pub(crate) mod test_key {
-    use std::usize;
 
     use super::*;
 
@@ -164,8 +163,10 @@ pub(crate) mod test_key {
 
     #[test]
     fn token_wrap() {
-        let mut map = TokenMap::default();
-        map.counter = NonZeroUsize::new(usize::MAX).unwrap();
+        let mut map = TokenMap {
+            counter: NonZeroUsize::new(usize::MAX).unwrap(),
+            ..Default::default()
+        };
         let token = map.insert("key");
         assert_eq!(token.0, Some(NonZeroUsize::new(usize::MAX).unwrap()));
 
