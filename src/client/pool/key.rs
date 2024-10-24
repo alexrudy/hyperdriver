@@ -1,6 +1,68 @@
-use std::{fmt, str::FromStr};
+use std::{collections::HashMap, fmt, num::NonZeroUsize, str::FromStr};
 
 use super::UriError;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Token(Option<NonZeroUsize>);
+
+impl Token {
+    pub fn zero() -> Self {
+        Token(None)
+    }
+
+    #[allow(dead_code)]
+    pub fn is_zero(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
+impl fmt::Debug for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(value) => write!(f, "Token({})", value),
+            None => write!(f, "Token(0)"),
+        }
+    }
+}
+
+pub(crate) struct TokenMap<K> {
+    counter: NonZeroUsize,
+    map: HashMap<K, Token>,
+}
+
+impl<K> fmt::Debug for TokenMap<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TokenMap")
+            .field("counter", &self.counter)
+            .finish()
+    }
+}
+
+impl<K> Default for TokenMap<K> {
+    fn default() -> Self {
+        Self {
+            counter: NonZeroUsize::new(1).unwrap(),
+            map: HashMap::new(),
+        }
+    }
+}
+
+impl<K> TokenMap<K>
+where
+    K: Eq + std::hash::Hash,
+{
+    pub fn insert(&mut self, key: K) -> Token {
+        *self.map.entry(key).or_insert_with(|| {
+            let token = Token(Some(self.counter));
+            self.counter = self
+                .counter
+                .checked_add(1)
+                .or(NonZeroUsize::new(1))
+                .unwrap();
+            token
+        })
+    }
+}
 
 /// Pool key which is used to identify a connection - using scheme
 /// and authority.
@@ -50,6 +112,7 @@ impl FromStr for UriKey {
 
 #[cfg(test)]
 pub(crate) mod test_key {
+
     use super::*;
 
     #[test]
@@ -96,5 +159,21 @@ pub(crate) mod test_key {
             format!("{:?}", key),
             "UriKey(\"http\", Some(localhost:8080))"
         );
+    }
+
+    #[test]
+    fn token_wrap() {
+        let mut map = TokenMap {
+            counter: NonZeroUsize::new(usize::MAX).unwrap(),
+            ..Default::default()
+        };
+        let token = map.insert("key");
+        assert_eq!(token.0, Some(NonZeroUsize::new(usize::MAX).unwrap()));
+
+        let token = map.insert("bar");
+        assert_eq!(token.0, Some(NonZeroUsize::new(1).unwrap()));
+
+        assert_eq!(map.insert("bar"), token);
+        assert_ne!(map.insert("key"), token);
     }
 }

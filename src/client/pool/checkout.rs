@@ -20,9 +20,8 @@ use crate::client::conn::Transport;
 use crate::info::ConnectionInfo;
 use crate::info::HasConnectionInfo;
 
+use super::key::Token;
 use super::Config;
-use super::Key;
-use super::Pool;
 use super::PoolRef;
 use super::PoolableConnection;
 use super::Pooled;
@@ -62,21 +61,21 @@ pub enum Error<Transport, Protocol> {
 }
 
 #[pin_project(project = WaitingProjected)]
-pub(crate) enum Waiting<C: PoolableConnection, K: Key> {
+pub(crate) enum Waiting<C: PoolableConnection> {
     /// The checkout is waiting on an idle connection, and should
     /// attempt its own connection in the interim as well.
-    Idle(#[pin] Receiver<Pooled<C, K>>),
+    Idle(#[pin] Receiver<Pooled<C>>),
 
     /// The checkout is waiting on a connection currently in the process
     /// of connecting, and should wait for that connection to complete,
     /// not starting its own connection.
-    Connecting(#[pin] Receiver<Pooled<C, K>>),
+    Connecting(#[pin] Receiver<Pooled<C>>),
 
     /// There is no pool for connections to wait for.
     NoPool,
 }
 
-impl<C: PoolableConnection, K: Key> Waiting<C, K> {
+impl<C: PoolableConnection> Waiting<C> {
     fn close(&mut self) {
         match self {
             Waiting::Idle(rx) => {
@@ -92,7 +91,7 @@ impl<C: PoolableConnection, K: Key> Waiting<C, K> {
     }
 }
 
-impl<C: PoolableConnection, K: Key> fmt::Debug for Waiting<C, K> {
+impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Waiting::Idle(_) => f.debug_tuple("Idle").finish(),
@@ -102,14 +101,14 @@ impl<C: PoolableConnection, K: Key> fmt::Debug for Waiting<C, K> {
     }
 }
 
-pub(crate) enum WaitingPoll<C: PoolableConnection, K: Key> {
-    Connected(Pooled<C, K>),
+pub(crate) enum WaitingPoll<C: PoolableConnection> {
+    Connected(Pooled<C>),
     Closed,
     NotReady,
 }
 
-impl<C: PoolableConnection, K: Key> Future for Waiting<C, K> {
-    type Output = WaitingPoll<C, K>;
+impl<C: PoolableConnection> Future for Waiting<C> {
+    type Output = WaitingPoll<C>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -239,10 +238,10 @@ where
     P: Protocol<T::IO, B>,
     P::Connection: PoolableConnection,
 {
-    fn poll_connector<K: Key>(
+    fn poll_connector(
         self: Pin<&mut Self>,
-        pool: &PoolRef<P::Connection, K>,
-        key: &K,
+        pool: &PoolRef<P::Connection>,
+        token: Token,
         meta: &mut CheckoutMeta,
         cx: &mut Context<'_>,
     ) -> Poll<Result<P::Connection, ConnectionError<T, P, B>>> {
@@ -322,11 +321,11 @@ where
                         // This can happen if we connect expecting an HTTP/1.1 connection, but during the TLS
                         // handshake we discover that the connection is actually an HTTP/2 connection.
                         trace!(
-                            ?key,
+                            ?token,
                             "connection can be shared, telling pool to wait for handshake"
                         );
                         if let Some(mut pool) = pool.lock() {
-                            pool.connected_in_handshake(key);
+                            pool.connected_in_handshake(token);
                         }
                     }
 
@@ -420,18 +419,17 @@ impl CheckoutMeta {
 }
 
 #[pin_project(PinnedDrop)]
-pub(crate) struct Checkout<T, P, B, K>
+pub(crate) struct Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
     B: 'static,
-    K: Key,
 {
-    key: K,
-    pool: PoolRef<P::Connection, K>,
+    token: Token,
+    pool: PoolRef<P::Connection>,
     #[pin]
-    waiter: Waiting<P::Connection, K>,
+    waiter: Waiting<P::Connection>,
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
@@ -440,17 +438,16 @@ where
     id: CheckoutId,
 }
 
-impl<T, P, B, K> fmt::Debug for Checkout<T, P, B, K>
+impl<T, P, B> fmt::Debug for Checkout<T, P, B>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
     B: 'static,
-    K: Key,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Checkout")
-            .field("key", &self.key)
+            .field("token", &self.token)
             .field("pool", &self.pool)
             .field("waiter", &self.waiter)
             .field("inner", &self.inner)
@@ -458,13 +455,12 @@ where
     }
 }
 
-impl<T, P, B, K, C> Checkout<T, P, B, K>
+impl<T, P, B, C> Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B, Connection = C> + Send + 'static,
     P::Connection: PoolableConnection,
     B: 'static,
-    K: Key,
 {
     /// Converts this checkout into a "delayed drop" checkout.
     fn as_delayed(self: Pin<&mut Self>) -> Option<Self> {
@@ -474,7 +470,7 @@ where
             CheckoutConnectingProj::ConnectingWithDelayDrop(connector) if connector.is_some() => {
                 tracing::trace!("converting checkout to delayed drop");
                 Some(Checkout {
-                    key: this.key.clone(),
+                    token: *this.token,
                     pool: this.pool.clone(),
                     waiter: Waiting::NoPool,
                     inner: InnerCheckoutConnecting::ConnectingDelayed(connector.take().unwrap()),
@@ -488,6 +484,11 @@ where
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn token(&self) -> Token {
+        self.token
+    }
+
     /// Constructs a checkout which does not hold a reference to the pool
     /// and so is only waiting on the connector.
     ///
@@ -498,15 +499,15 @@ where
     /// This is useful when using a checkout to poll a connection to readiness
     /// without a pool, or in a context in which the associated connection cannot
     /// or should not be shared with the pool.
-    pub(crate) fn detached(key: K, connector: Connector<T, P, B>) -> Self {
+    pub(crate) fn detached(connector: Connector<T, P, B>) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
 
         #[cfg(debug_assertions)]
-        tracing::trace!(?key, %id, "creating detached checkout");
+        tracing::trace!(%id, "creating detached checkout");
 
         Self {
-            key,
+            token: Token::zero(),
             pool: PoolRef::none(),
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
@@ -518,9 +519,9 @@ where
     }
 
     pub(super) fn new(
-        key: K,
-        pool: &Pool<P::Connection, K>,
-        waiter: Receiver<Pooled<P::Connection, K>>,
+        token: Token,
+        pool: PoolRef<P::Connection>,
+        waiter: Receiver<Pooled<P::Connection>>,
         connect: Option<Connector<T, P, B>>,
         connection: Option<P::Connection>,
         config: &Config,
@@ -530,13 +531,13 @@ where
         let meta = CheckoutMeta::new();
 
         #[cfg(debug_assertions)]
-        tracing::trace!(?key, %id, "creating new checkout");
+        tracing::trace!(?token, %id, "creating new checkout");
 
         if connection.is_some() {
-            tracing::trace!(?key, "connection recieved from pool");
+            tracing::trace!(?token, "connection recieved from pool");
             Self {
-                key,
-                pool: pool.as_ref(),
+                token,
+                pool,
                 waiter: Waiting::Idle(waiter),
                 inner: InnerCheckoutConnecting::Connected,
                 connection,
@@ -545,7 +546,7 @@ where
                 id,
             }
         } else if let Some(connector) = connect {
-            tracing::trace!(?key, "connecting to pool");
+            tracing::trace!(?token, "connecting to pool");
 
             let inner = if config.continue_after_preemption {
                 InnerCheckoutConnecting::ConnectingWithDelayDrop(Some(Box::pin(connector)))
@@ -554,8 +555,8 @@ where
             };
 
             Self {
-                key,
-                pool: pool.as_ref(),
+                token,
+                pool,
                 waiter: Waiting::Idle(waiter),
                 inner,
                 connection,
@@ -564,10 +565,10 @@ where
                 id,
             }
         } else {
-            tracing::trace!(?key, "waiting for connection");
+            tracing::trace!(?token, "waiting for connection");
             Self {
-                key,
-                pool: pool.as_ref(),
+                token,
+                pool,
                 waiter: Waiting::Connecting(waiter),
                 inner: InnerCheckoutConnecting::Waiting,
                 connection,
@@ -579,16 +580,15 @@ where
     }
 }
 
-impl<T, P, B, K> Future for Checkout<T, P, B, K>
+impl<T, P, B> Future for Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
     B: 'static,
-    K: Key,
 {
     type Output = Result<
-        Pooled<P::Connection, K>,
+        Pooled<P::Connection>,
         Error<<T as Transport>::Error, <P as Protocol<T::IO, B>>::Error>,
     >;
 
@@ -606,13 +606,13 @@ where
             // waiter is pending? Probably not, ideally our semantics should keep the pool
             // from containing multiple connections if they can be multiplexed.
             if let WaitingPoll::Connected(connection) = ready!(this.waiter.as_mut().poll(cx)) {
-                debug!(key=?this.key, "connection recieved from waiter");
+                debug!(token=?this.token, "connection recieved from waiter");
 
                 return Poll::Ready(Ok(connection));
             }
         }
 
-        trace!(key=?this.key, "polling for new connection");
+        trace!(token=?this.token, "polling for new connection");
         // Try to connect while we also wait for a checkout to be ready.
 
         match this.inner.as_mut().project() {
@@ -631,33 +631,37 @@ where
 
                 this.waiter.close();
                 this.inner.set(InnerCheckoutConnecting::Connected);
-                Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
+                Poll::Ready(Ok(register_connected(this.pool, *this.token, connection)))
             }
             CheckoutConnectingProj::Connecting(connector) => {
-                let result = ready!(connector.poll_connector(this.pool, this.key, this.meta, cx));
+                let result =
+                    ready!(connector.poll_connector(this.pool, *this.token, this.meta, cx));
 
                 this.waiter.close();
                 this.inner.set(InnerCheckoutConnecting::Connected);
 
                 match result {
                     Ok(connection) => {
-                        Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
+                        Poll::Ready(Ok(register_connected(this.pool, *this.token, connection)))
                     }
                     Err(e) => Poll::Ready(Err(e)),
                 }
             }
             CheckoutConnectingProj::ConnectingWithDelayDrop(Some(connector))
             | CheckoutConnectingProj::ConnectingDelayed(connector) => {
-                let result = ready!(connector
-                    .as_mut()
-                    .poll_connector(this.pool, this.key, this.meta, cx));
+                let result = ready!(connector.as_mut().poll_connector(
+                    this.pool,
+                    *this.token,
+                    this.meta,
+                    cx
+                ));
 
                 this.waiter.close();
                 this.inner.set(InnerCheckoutConnecting::Connected);
 
                 match result {
                     Ok(connection) => {
-                        Poll::Ready(Ok(register_connected(this.pool, this.key, connection)))
+                        Poll::Ready(Ok(register_connected(this.pool, *this.token, connection)))
                     }
                     Err(e) => Poll::Ready(Err(e)),
                 }
@@ -671,25 +675,24 @@ where
 }
 
 /// Register a connection with the pool referenced here.
-fn register_connected<C, K>(poolref: &PoolRef<C, K>, key: &K, mut connection: C) -> Pooled<C, K>
+fn register_connected<C>(poolref: &PoolRef<C>, token: Token, mut connection: C) -> Pooled<C>
 where
     C: PoolableConnection,
-    K: Key,
 {
     if let Some(mut pool) = poolref.lock() {
         if let Some(reused) = connection.reuse() {
-            pool.push(key.clone(), reused, poolref.clone());
+            pool.push(token, reused, poolref.clone());
             return Pooled {
                 connection: Some(connection),
                 is_reused: true,
-                key: key.clone(),
+                token,
                 pool: PoolRef::none(),
             };
         } else {
             return Pooled {
                 connection: Some(connection),
                 is_reused: false,
-                key: key.clone(),
+                token,
                 pool: poolref.clone(),
             };
         }
@@ -699,19 +702,18 @@ where
     Pooled {
         connection: Some(connection),
         is_reused: false,
-        key: key.clone(),
+        token,
         pool: PoolRef::none(),
     }
 }
 
 #[pinned_drop]
-impl<T, P, B, K> PinnedDrop for Checkout<T, P, B, K>
+impl<T, P, B> PinnedDrop for Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
     P::Connection: PoolableConnection,
     B: 'static,
-    K: Key,
 {
     fn drop(mut self: Pin<&mut Self>) {
         #[cfg(debug_assertions)]
@@ -725,7 +727,7 @@ where
             });
         } else if let Some(mut pool) = self.pool.lock() {
             // Connection is only cancled when no delayed drop occurs.
-            pool.cancel_connection(&self.key);
+            pool.cancel_connection(self.token);
         }
     }
 }
@@ -733,9 +735,6 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[cfg(feature = "mocks")]
-    use crate::client::pool::UriKey;
 
     use static_assertions::assert_impl_all;
 
@@ -757,16 +756,13 @@ mod test {
     #[cfg(feature = "mocks")]
     #[tokio::test]
     async fn detatched_checkout() {
-        let key: UriKey = "http://localhost:8080".parse().unwrap();
-
         let transport = MockTransport::single();
 
         let checkout = Checkout::detached(
-            key.clone(),
             transport.connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
         );
 
-        assert_eq!(checkout.key, key);
+        assert!(checkout.token.is_zero());
         assert!(checkout.pool.is_none());
         assert!(matches!(
             checkout.inner,

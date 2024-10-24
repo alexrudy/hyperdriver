@@ -165,11 +165,7 @@ impl
     ConnectionPoolService<
         TlsTransport<TcpTransport>,
         HttpConnectionBuilder<crate::Body>,
-        crate::service::client::RequestExecutor<
-            HttpConnection<crate::Body>,
-            crate::Body,
-            crate::client::pool::UriKey,
-        >,
+        crate::service::client::RequestExecutor<HttpConnection<crate::Body>, crate::Body>,
         crate::Body,
     >
 {
@@ -231,7 +227,7 @@ where
         &self,
         uri: http::Uri,
         http_protocol: HttpProtocol,
-    ) -> Result<Checkout<T, P, BIn, K>, ConnectionError> {
+    ) -> Result<Checkout<T, P, BIn>, ConnectionError> {
         let key: K = K::try_from(uri.clone())?;
         let protocol = self.protocol.clone();
         let transport = self.transport.clone();
@@ -243,7 +239,7 @@ where
             Ok(pool.checkout(key, http_protocol.multiplex(), connector))
         } else {
             tracing::trace!(?key, "detatched connection");
-            Ok(Checkout::detached(key, connector))
+            Ok(Checkout::detached(connector))
         }
     }
 }
@@ -260,7 +256,7 @@ where
     T: Transport + Send + 'static,
     T::IO: PoolableStream + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>>
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>>
         + Clone
         + Send
         + 'static,
@@ -273,7 +269,7 @@ where
 {
     type Response = http::Response<BOut>;
     type Error = Error;
-    type Future = ResponseFuture<T, P, C, S, K, BIn, BOut>;
+    type Future = ResponseFuture<T, P, C, S, BIn, BOut>;
 
     fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -301,7 +297,7 @@ where
         + 'static,
     T: Transport + 'static,
     T::IO: PoolableStream + Unpin,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>>
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>>
         + Clone
         + Send
         + 'static,
@@ -321,44 +317,41 @@ where
 
 /// A future that resolves to an HTTP response.
 #[pin_project]
-pub struct ResponseFuture<T, P, C, S, K, BIn, BOut>
+pub struct ResponseFuture<T, P, C, S, BIn, BOut>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
     BIn: 'static,
-    K: pool::Key,
 {
     #[pin]
-    inner: ResponseFutureState<T, P, C, S, K, BIn, BOut>,
+    inner: ResponseFutureState<T, P, C, S, BIn, BOut>,
     _body: std::marker::PhantomData<fn(BIn) -> BOut>,
 }
 
-impl<T, P, C, S, K, BIn, BOut> fmt::Debug for ResponseFuture<T, P, C, S, K, BIn, BOut>
+impl<T, P, C, S, BIn, BOut> fmt::Debug for ResponseFuture<T, P, C, S, BIn, BOut>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
     BIn: 'static,
-    K: pool::Key,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResponseFuture").finish()
     }
 }
 
-impl<T, P, C, S, K, BIn, BOut> ResponseFuture<T, P, C, S, K, BIn, BOut>
+impl<T, P, C, S, BIn, BOut> ResponseFuture<T, P, C, S, BIn, BOut>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
     BIn: 'static,
-    K: pool::Key,
 {
-    fn new(checkout: Checkout<T, P, BIn, K>, request: http::Request<BIn>, service: S) -> Self {
+    fn new(checkout: Checkout<T, P, BIn>, request: http::Request<BIn>, service: S) -> Self {
         Self {
             inner: ResponseFutureState::Checkout {
                 checkout,
@@ -377,20 +370,19 @@ where
     }
 }
 
-impl<T, P, C, S, K, BIn, BOut> Future for ResponseFuture<T, P, C, S, K, BIn, BOut>
+impl<T, P, C, S, BIn, BOut> Future for ResponseFuture<T, P, C, S, BIn, BOut>
 where
     T: Transport + Send + 'static,
     <T as Transport>::Error: Into<BoxError>,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     <P as Protocol<T::IO, BIn>>::Error: Into<BoxError>,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
     S::Error: Into<crate::client::Error>,
     BOut: Body + Unpin + 'static,
     BIn: Body + Unpin + Send + 'static,
     <BIn as Body>::Data: Send,
     <BIn as Body>::Error: Into<BoxError>,
-    K: pool::Key,
 {
     type Output = Result<http::Response<BOut>, Error>;
 
@@ -439,18 +431,17 @@ where
 }
 
 #[pin_project(project=ResponseFutureStateProj)]
-enum ResponseFutureState<T, P, C, S, K, BIn, BOut>
+enum ResponseFutureState<T, P, C, S, BIn, BOut>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn, K>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
     BIn: 'static,
-    K: pool::Key,
 {
     Checkout {
         #[pin]
-        checkout: Checkout<T, P, BIn, K>,
+        checkout: Checkout<T, P, BIn>,
         request: Option<http::Request<BIn>>,
         service: S,
     },
