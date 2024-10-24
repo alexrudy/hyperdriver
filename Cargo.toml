@@ -60,7 +60,7 @@ features = ["make", "util"]
 default-features = false
 
 [dependencies.tower-http]
-version = "0.5.2"
+version = "0.6.1"
 features = ["follow-redirect", "set-header", "trace"]
 default-features = false
 optional = true
