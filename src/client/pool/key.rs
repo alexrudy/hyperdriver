@@ -89,14 +89,28 @@ impl From<(http::uri::Scheme, http::uri::Authority)> for UriKey {
 impl TryFrom<http::Uri> for UriKey {
     type Error = UriError;
 
-    fn try_from(value: http::Uri) -> Result<Self, Self::Error> {
-        let parts = value.clone().into_parts();
+    fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
+        let parts = uri.into_parts();
+        let authority = parts.authority.clone();
+        let scheme = parts
+            .scheme
+            .clone()
+            .ok_or_else(|| UriError::MissingScheme(http::Uri::from_parts(parts).unwrap()))?;
+        Ok::<_, UriError>(Self(scheme, authority))
+    }
+}
 
+impl TryFrom<&http::request::Parts> for UriKey {
+    type Error = UriError;
+
+    fn try_from(parts: &http::request::Parts) -> Result<Self, Self::Error> {
         Ok::<_, UriError>(Self(
             parts
-                .scheme
-                .ok_or_else(|| UriError::MissingScheme(value.clone()))?,
-            parts.authority,
+                .uri
+                .scheme()
+                .ok_or_else(|| UriError::MissingScheme(parts.uri.clone()))?
+                .clone(),
+            parts.uri.authority().cloned(),
         ))
     }
 }
