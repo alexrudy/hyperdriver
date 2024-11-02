@@ -47,9 +47,18 @@ use super::conn::Protocol;
 use super::conn::Transport;
 
 /// Key which links a URI to a connection.
-pub trait Key: Eq + std::hash::Hash + fmt::Debug + TryFrom<http::Uri, Error = UriError> {}
+pub trait Key:
+    Eq + std::hash::Hash + fmt::Debug + for<'a> TryFrom<&'a http::request::Parts, Error = UriError>
+{
+}
 
-impl<K> Key for K where K: Eq + std::hash::Hash + fmt::Debug + TryFrom<http::Uri, Error = UriError> {}
+impl<K> Key for K where
+    K: Eq
+        + std::hash::Hash
+        + fmt::Debug
+        + for<'a> TryFrom<&'a http::request::Parts, Error = UriError>
+{
+}
 
 /// The URI used for connecting to a server is invalid.
 ///

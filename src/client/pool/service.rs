@@ -10,7 +10,6 @@ use tower::ServiceExt;
 use crate::client::conn::connection::ConnectionError;
 use crate::client::conn::connection::HttpConnection;
 use crate::client::conn::protocol::auto::HttpConnectionBuilder;
-use crate::client::conn::protocol::HttpProtocol;
 use crate::client::conn::transport::tcp::TcpTransport;
 use crate::client::conn::Connection;
 use crate::client::conn::Protocol;
@@ -225,14 +224,19 @@ where
     #[allow(clippy::type_complexity)]
     fn connect_to(
         &self,
-        uri: http::Uri,
-        http_protocol: HttpProtocol,
+        request_parts: &http::request::Parts,
     ) -> Result<Checkout<T, P, BIn>, ConnectionError> {
-        let key: K = K::try_from(uri.clone())?;
+        let key: K = K::try_from(request_parts)?;
         let protocol = self.protocol.clone();
         let transport = self.transport.clone();
+        let http_protocol = request_parts.version.into();
 
-        let connector = Connector::new(transport, protocol, uri, http_protocol);
+        let connector = Connector::new(
+            transport,
+            protocol,
+            request_parts.uri.clone(),
+            http_protocol,
+        );
 
         if let Some(pool) = self.pool.as_ref() {
             tracing::trace!(?key, "checking out connection");
@@ -276,12 +280,14 @@ where
     }
 
     fn call(&mut self, request: http::Request<BIn>) -> Self::Future {
-        let uri = request.uri().clone();
+        let (parts, body) = request.into_parts();
 
-        let protocol: HttpProtocol = request.version().into();
-
-        match self.connect_to(uri, protocol) {
-            Ok(checkout) => ResponseFuture::new(checkout, request, self.service.clone()),
+        match self.connect_to(&parts) {
+            Ok(checkout) => ResponseFuture::new(
+                checkout,
+                http::Request::from_parts(parts, body),
+                self.service.clone(),
+            ),
             Err(error) => ResponseFuture::error(error),
         }
     }
