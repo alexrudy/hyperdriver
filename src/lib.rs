@@ -136,7 +136,7 @@ pub use client::Client;
 pub use server::Server;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Utility struct for formatting a `Display` type in a `Debug` context.
 #[allow(unused)]
