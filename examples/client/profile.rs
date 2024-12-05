@@ -188,15 +188,15 @@ fn resource() -> Resource {
 }
 
 fn otel() -> Result<(Tracer, OtelGuard), BoxError> {
-    let provider = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_trace_config(opentelemetry_sdk::trace::Config::default().with_resource(resource()))
-        .with_exporter(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
-                .with_endpoint("http://localhost:4317"),
-        )
-        .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint("http://localhost:4317")
+        .build()?;
+
+    let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_resource(resource())
+        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        .build();
 
     opentelemetry::global::set_tracer_provider(provider.clone());
     let tracer = provider.tracer("tracing-otel-subscriber");
