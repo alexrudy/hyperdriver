@@ -714,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "hyperdriver"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "axum",
  "bytes",
