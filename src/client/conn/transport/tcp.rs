@@ -345,7 +345,7 @@ struct TcpConnectionAttempt<'c> {
     config: &'c TcpTransportConfig,
 }
 
-impl<'c> TcpConnectionAttempt<'c> {
+impl TcpConnectionAttempt<'_> {
     /// Make a single connection attempt.
     async fn connect(self) -> Result<TcpStream, TcpConnectionError> {
         let connect = connect(&self.address, self.config.connect_timeout, self.config)?;

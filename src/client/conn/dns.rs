@@ -53,7 +53,7 @@ impl SocketAddrs {
 
         let v4: Option<SocketAddr>;
         let v6: Option<SocketAddr>;
-        if v4_idx.zip(v6_idx).map_or(false, |(v4, v6)| v4 > v6) {
+        if v4_idx.zip(v6_idx).is_some_and(|(v4, v6)| v4 > v6) {
             v4 = v4_idx.and_then(|idx| self.0.remove(idx));
             v6 = v6_idx.and_then(|idx| self.0.remove(idx));
         } else {
