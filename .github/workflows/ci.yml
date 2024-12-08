@@ -1,8 +1,9 @@
 on:
-  pull_request:
   merge_group:
+  pull_request:
+    branches: [main, backports/*]
   push:
-    branches: [main]
+    branches: [main, backports/*]
 
 name: CI
 
