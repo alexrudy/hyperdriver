@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 #[tokio::test]
 async fn braided_duplex() {
     use futures_util::StreamExt;

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 #[tokio::test]
 async fn braided_unix() {
     use futures_util::StreamExt;

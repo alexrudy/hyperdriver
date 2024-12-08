@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use futures_util::StreamExt;
 use http::StatusCode;
 use hyperdriver::body::Response;

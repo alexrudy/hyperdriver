@@ -22,6 +22,8 @@ missing_docs = "warn"
 missing_debug_implementations = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 
+[lints.clippy]
+needless_lifetimes = "allow"
 
 [dependencies]
 axum = { version = "0.7", optional = true }

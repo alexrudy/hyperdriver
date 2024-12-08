@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use bytes::Bytes;
 use futures_util::FutureExt;
 use http_body::Body;

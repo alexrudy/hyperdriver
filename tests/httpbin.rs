@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::time::Duration;
 
 use http_body_util::BodyExt as _;

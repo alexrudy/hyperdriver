@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::{net::Ipv4Addr, sync::Arc};
 
 use rustls::ServerConfig;
