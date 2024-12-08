@@ -190,7 +190,7 @@ where
                 .map_err(|err| ConnectionError::Handshake(err.into()))?;
 
             tokio::spawn(async {
-                if let Err(err) = conn.await {
+                if let Err(err) = conn.with_upgrades().await {
                     if err.is_user() {
                         tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
                     } else {
