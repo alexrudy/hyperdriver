@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4](https://github.com/alexrudy/hyperdriver/compare/v0.8.3...v0.8.4) - 2024-12-10
+
+### <!-- 0 -->⛰️ Features
+
+- Client connection upgrade support
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- upgrades test doesn’t require TLS
+
 ## [0.8.0](https://github.com/alexrudy/hyperdriver/compare/v0.7.0...v0.8.0) - 2024-10-21
 
 ### <!-- 0 -->⛰️ Features
