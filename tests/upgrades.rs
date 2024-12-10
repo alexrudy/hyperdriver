@@ -104,7 +104,6 @@ async fn client_auto() {
     let mut client = hyperdriver::Client::builder()
         .with_auto_http()
         .with_default_pool()
-        .with_default_tls()
         .with_transport(transport)
         .build();
 
@@ -124,7 +123,6 @@ async fn client_http1() {
     let mut client = hyperdriver::Client::builder()
         .with_protocol(hyper::client::conn::http1::Builder::new())
         .with_default_pool()
-        .with_default_tls()
         .with_transport(transport)
         .build();
 

@@ -178,6 +178,11 @@ name = "tls"
 path = "tests/tls.rs"
 required-features = ["client", "server", "tls", "tls-ring"]
 
+[[test]]
+name = "upgrades"
+path = "tests/upgrades.rs"
+required-features = ["server", "client", "stream"]
+
 [package.metadata.cargo-udeps.ignore]
 normal = ["rustls-native-certs", "rustls", "tokio-rustls"]
 
