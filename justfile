@@ -1,7 +1,7 @@
 #!/usr/bin/env just --justfile
 
 
-nightly := "nightly-2024-04-16"
+nightly := "nightly-2024-12-04"
 msrv := "1.74"
 rust := env("RUSTUP_TOOLCHAIN", "stable")
 
