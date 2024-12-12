@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use http::Uri;
 use rustls::ClientConfig as TlsClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -46,7 +45,7 @@ impl<T> TlsTransportWrapper<T> {
     }
 }
 
-impl<T> tower::Service<Uri> for TlsTransportWrapper<T>
+impl<T> tower::Service<http::request::Parts> for TlsTransportWrapper<T>
 where
     T: Transport,
     <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
@@ -62,9 +61,9 @@ where
             .map_err(TlsConnectionError::Connection)
     }
 
-    fn call(&mut self, req: Uri) -> Self::Future {
+    fn call(&mut self, req: http::request::Parts) -> Self::Future {
         let config = self.config.clone();
-        let Some(host) = req.host().map(String::from) else {
+        let Some(host) = req.uri.host().map(String::from) else {
             return future::TlsConnectionFuture::error(TlsConnectionError::NoDomain);
         };
 
@@ -230,6 +229,7 @@ mod tests {
 
     use crate::{
         fixtures,
+        helpers::IntoRequestParts,
         info::HasTlsConnectionInfo as _,
         server::conn::AcceptExt,
         stream::tls::{TlsHandshakeExt, TlsHandshakeStream as _},
@@ -252,11 +252,10 @@ mod tests {
         config.alpn_protocols.push(b"h2".to_vec());
         let accept = crate::server::conn::Acceptor::new(server).with_tls(config.into());
 
-        let uri = "https://example.com/".parse().unwrap();
-
+        let parts = "https://example.com/".into_request_parts();
         let (stream, _) = tokio::join!(
             async {
-                let mut stream = transport.oneshot(uri).await.unwrap();
+                let mut stream = transport.oneshot(parts).await.unwrap();
                 stream.finish_handshake().await.unwrap();
                 stream
             },

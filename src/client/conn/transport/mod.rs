@@ -6,7 +6,6 @@ use std::future::Future;
 #[cfg(feature = "tls")]
 use std::sync::Arc;
 
-use ::http::Uri;
 #[cfg(feature = "tls")]
 use rustls::client::ClientConfig;
 #[cfg(feature = "tls")]
@@ -26,6 +25,7 @@ use crate::client::default_tls_config;
 #[cfg(feature = "stream")]
 use crate::info::BraidAddr;
 use crate::info::HasConnectionInfo;
+use crate::IntoRequestParts;
 
 #[cfg(feature = "stream")]
 pub mod duplex;
@@ -53,7 +53,9 @@ pub trait Transport: Clone + Send {
     type Future: Future<Output = Result<Self::IO, <Self as Transport>::Error>> + Send + 'static;
 
     /// Connect to a remote server and return a stream.
-    fn connect(&mut self, uri: Uri) -> <Self as Transport>::Future;
+    fn connect<R>(&mut self, req: R) -> <Self as Transport>::Future
+    where
+        R: IntoRequestParts;
 
     /// Poll the transport to see if it is ready to accept a new connection.
     fn poll_ready(
@@ -64,7 +66,7 @@ pub trait Transport: Clone + Send {
 
 impl<T, IO> Transport for T
 where
-    T: Service<Uri, Response = IO>,
+    T: Service<http::request::Parts, Response = IO>,
     T: Clone + Send + Sync + 'static,
     T::Error: std::error::Error + Send + Sync + 'static,
     T::Future: Send + 'static,
@@ -75,8 +77,11 @@ where
     type Error = T::Error;
     type Future = T::Future;
 
-    fn connect(&mut self, uri: Uri) -> <Self as Service<Uri>>::Future {
-        self.call(uri)
+    fn connect<R>(&mut self, req: R) -> <Self as Service<http::request::Parts>>::Future
+    where
+        R: IntoRequestParts,
+    {
+        self.call(req.into_request_parts())
     }
 
     fn poll_ready(
@@ -84,6 +89,42 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), <Self as Transport>::Error>> {
         Service::poll_ready(self, cx)
+    }
+}
+
+/// A wrapper type which converts any service that accepts a URI
+/// into a `hyperdriver` tranport type. Hyperdriver uses http::request::Parts
+/// for transports, but many implementations only require the http::Uri
+/// in order to function.
+#[derive(Debug, Clone)]
+pub struct UriTransport<T>(T);
+
+impl<T, IO> Transport for UriTransport<T>
+where
+    T: Service<http::Uri, Response = IO>,
+    T: Clone + Send + Sync + 'static,
+    T::Error: std::error::Error + Send + Sync + 'static,
+    T::Future: Send + 'static,
+    IO: HasConnectionInfo + Send + 'static,
+    IO::Addr: Send,
+{
+    type IO = IO;
+    type Error = T::Error;
+    type Future = T::Future;
+
+    fn connect<R>(&mut self, req: R) -> <Self as Transport>::Future
+    where
+        R: IntoRequestParts,
+    {
+        let parts = req.into_request_parts();
+        self.0.call(parts.uri)
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), <Self as Transport>::Error>> {
+        Service::poll_ready(&mut self.0, cx)
     }
 }
 
@@ -277,7 +318,7 @@ impl<T> TlsTransport<T> {
     }
 }
 
-impl<T> Service<Uri> for TlsTransport<T>
+impl<T> Service<http::request::Parts> for TlsTransport<T>
 where
     T: Transport,
     <T as Transport>::IO: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
@@ -311,26 +352,27 @@ where
         }
     }
 
-    fn call(&mut self, req: Uri) -> Self::Future {
+    fn call(&mut self, parts: http::request::Parts) -> Self::Future {
         #[cfg_attr(not(feature = "tls"), allow(unused_variables))]
-        let use_tls = req
+        let use_tls = parts
+            .uri
             .scheme_str()
             .is_some_and(|s| matches!(s, "https" | "wss"));
 
         match &mut self.braid {
             InnerBraid::Plain(inner) => {
-                tracing::trace!(scheme=?req.scheme_str(), "connecting without TLS");
-                self::future::TransportBraidFuture::from_plain(inner.connect(req))
+                tracing::trace!(scheme=?parts.uri.scheme_str(), "connecting without TLS");
+                self::future::TransportBraidFuture::from_plain(inner.connect(parts))
             }
             #[cfg(feature = "tls")]
             InnerBraid::Tls(inner) if use_tls => {
-                tracing::trace!(scheme=?req.scheme_str(), "connecting with TLS");
-                self::future::TransportBraidFuture::from_tls(inner.call(req))
+                tracing::trace!(scheme=?parts.uri.scheme_str(), "connecting with TLS");
+                self::future::TransportBraidFuture::from_tls(inner.call(parts))
             }
             #[cfg(feature = "tls")]
             InnerBraid::Tls(inner) => {
-                tracing::trace!(scheme=?req.scheme_str(), "connecting without TLS");
-                self::future::TransportBraidFuture::from_plain(inner.transport_mut().connect(req))
+                tracing::trace!(scheme=?parts.uri.scheme_str(), "connecting without TLS");
+                self::future::TransportBraidFuture::from_plain(inner.transport_mut().connect(parts))
             }
         }
     }

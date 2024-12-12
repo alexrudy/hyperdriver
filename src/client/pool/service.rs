@@ -231,12 +231,7 @@ where
         let transport = self.transport.clone();
         let http_protocol = request_parts.version.into();
 
-        let connector = Connector::new(
-            transport,
-            protocol,
-            request_parts.uri.clone(),
-            http_protocol,
-        );
+        let connector = Connector::new(transport, protocol, request_parts.clone(), http_protocol);
 
         if let Some(pool) = self.pool.as_ref() {
             tracing::trace!(?key, "checking out connection");

@@ -532,6 +532,7 @@ mod tests {
 
     use crate::client::conn::protocol::HttpProtocol;
     use crate::client::conn::transport::mock::MockConnectionError;
+    use crate::helpers::IntoRequestParts;
 
     use super::*;
     use crate::client::conn::protocol::mock::MockSender;
@@ -577,7 +578,7 @@ mod tests {
                 key.clone(),
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -591,7 +592,7 @@ mod tests {
                 key.clone(),
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -606,7 +607,7 @@ mod tests {
                 key,
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -632,7 +633,7 @@ mod tests {
                 key.clone(),
                 true,
                 MockTransport::reusable()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -646,7 +647,7 @@ mod tests {
                 key.clone(),
                 true,
                 MockTransport::reusable()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -661,7 +662,7 @@ mod tests {
                 key.clone(),
                 true,
                 MockTransport::reusable()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -686,7 +687,7 @@ mod tests {
             key.clone(),
             true,
             MockTransport::channel(rx)
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1)
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1)
         ));
 
         assert!(futures_util::poll!(&mut checkout_a).is_pending());
@@ -695,7 +696,7 @@ mod tests {
             key.clone(),
             true,
             MockTransport::reusable()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         ));
 
         assert!(futures_util::poll!(&mut checkout_b).is_pending());
@@ -730,7 +731,7 @@ mod tests {
             key.clone(),
             false,
             MockTransport::single()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         let token = checkout.token();
@@ -768,7 +769,7 @@ mod tests {
             key.clone(),
             false,
             MockTransport::single()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         let token = checkout.token();
@@ -813,14 +814,14 @@ mod tests {
             key.clone(),
             true,
             MockTransport::reusable()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         let checkout = pool.checkout(
             key.clone(),
             true,
             MockTransport::reusable()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         drop(start);
@@ -845,7 +846,7 @@ mod tests {
             key.clone(),
             true,
             MockTransport::reusable()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         drop(pool);
@@ -869,7 +870,7 @@ mod tests {
             key.clone(),
             true,
             MockTransport::error()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         let outcome = checkout.now_or_never().unwrap();
@@ -895,7 +896,7 @@ mod tests {
                 key.clone(),
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -909,7 +910,7 @@ mod tests {
                 key.clone(),
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -924,7 +925,7 @@ mod tests {
                 key,
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -950,7 +951,7 @@ mod tests {
                 key.clone(),
                 false,
                 MockTransport::single()
-                    .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                    .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
             )
             .await
             .unwrap();
@@ -962,7 +963,7 @@ mod tests {
             key.clone(),
             false,
             MockTransport::single()
-                .connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+                .connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         let token = checkout.token();

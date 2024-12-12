@@ -135,6 +135,8 @@ pub use client::Client;
 #[cfg(feature = "server")]
 pub use server::Server;
 
+pub use helpers::IntoRequestParts;
+
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -165,6 +167,34 @@ pub(crate) mod private {
 
     #[allow(unused)]
     pub trait Sealed<T> {}
+}
+
+/// Helpers to turn URI-like items into empty request parts
+pub(crate) mod helpers {
+
+    /// Turn the item into http::request::Parts infallibly
+    pub trait IntoRequestParts {
+        /// Produce http::request::Parts
+        fn into_request_parts(self) -> http::request::Parts;
+    }
+
+    impl IntoRequestParts for &str {
+        fn into_request_parts(self) -> http::request::Parts {
+            http::Request::get(self).body(()).unwrap().into_parts().0
+        }
+    }
+
+    impl IntoRequestParts for http::Uri {
+        fn into_request_parts(self) -> http::request::Parts {
+            http::Request::get(self).body(()).unwrap().into_parts().0
+        }
+    }
+
+    impl IntoRequestParts for http::request::Parts {
+        fn into_request_parts(self) -> http::request::Parts {
+            self
+        }
+    }
 }
 
 /// Test fixtures for the `hyperdriver` crate.

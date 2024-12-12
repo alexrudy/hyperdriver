@@ -185,7 +185,7 @@ mod tests {
     use tower::make::Shared;
     use tower::Service;
 
-    use crate::fixtures;
+    use crate::{fixtures, IntoRequestParts};
 
     use crate::client::conn::transport::duplex::DuplexTransport;
     use crate::client::conn::transport::TransportExt as _;
@@ -218,15 +218,11 @@ mod tests {
             .with_tls(crate::fixtures::tls_client_config().into());
 
         let client = async move {
-            let mut stream = client
-                .connect("https://example.com".parse().unwrap())
-                .await
-                .unwrap();
+            let parts = "https://example.com".into_request_parts();
+            let mut stream = client.connect(parts).await.unwrap();
 
             tracing::debug!("client connected");
-
             stream.finish_handshake().await.unwrap();
-
             tracing::debug!("client handshake finished");
 
             stream
@@ -237,25 +233,25 @@ mod tests {
             let mut conn = acceptor.accept().await.unwrap();
 
             tracing::debug!("server accepted");
-
             let mut make_service = TlsConnectionInfoLayer::new().layer(Shared::new(service));
-
             conn.finish_handshake().await.unwrap();
             tracing::debug!("server handshake finished");
 
             let mut svc = Service::call(&mut make_service, &conn).await.unwrap();
             tracing::debug!("server created");
-
             let _ = tower::Service::call(&mut svc, http::Request::new(crate::Body::empty()))
                 .await
                 .unwrap();
-
             tracing::debug!("server request handled");
             conn
         }
         .instrument(tracing::info_span!("server"));
 
-        let (stream, conn) = tokio::join!(client, server);
+        let (stream, conn) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            tokio::join!(client, server)
+        })
+        .await
+        .unwrap();
         drop((stream, conn));
     }
 }

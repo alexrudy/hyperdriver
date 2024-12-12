@@ -58,12 +58,13 @@ use crate::BoxError;
 /// # use hyperdriver::client::conn::transport::tcp::TcpTransport;
 /// # use hyperdriver::client::conn::dns::GaiResolver;
 /// # use hyperdriver::stream::tcp::TcpStream;
+/// # use hyperdriver::IntoRequestParts;
 /// # use tower::ServiceExt as _;
 ///
 /// # async fn run() {
 /// let transport: TcpTransport<GaiResolver, TcpStream> = TcpTransport::default();
 ///
-/// let uri = "http://example.com".parse().unwrap();
+/// let uri = "http://example.com".into_request_parts();
 /// let stream = transport.oneshot(uri).await.unwrap();
 /// # }
 /// ```
@@ -169,7 +170,7 @@ impl<R, IO> TcpTransport<R, IO> {
 
 type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
-impl<R, IO> tower::Service<Uri> for TcpTransport<R, IO>
+impl<R, IO> tower::Service<http::request::Parts> for TcpTransport<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error>
         + Clone
@@ -191,8 +192,8 @@ where
             .map_err(TcpConnectionError::msg("dns poll_ready"))
     }
 
-    fn call(&mut self, req: Uri) -> Self::Future {
-        let (host, port) = match get_host_and_port(&req) {
+    fn call(&mut self, req: http::request::Parts) -> Self::Future {
+        let (host, port) = match get_host_and_port(&req.uri) {
             Ok((host, port)) => (host, port),
             Err(e) => return Box::pin(std::future::ready(Err(e))),
         };
@@ -623,7 +624,7 @@ mod test {
     use tokio::net::TcpListener;
     use tower::Service;
 
-    use crate::client::conn::Transport;
+    use crate::{client::conn::Transport, IntoRequestParts};
 
     use super::*;
 
@@ -720,13 +721,16 @@ mod test {
         listener: TcpListener,
     ) -> (T::IO, TcpStream)
     where
-        T: Transport + Service<Uri, Response = T::IO>,
-        <T as Service<Uri>>::Error: std::fmt::Debug,
+        T: Transport + Service<http::request::Parts, Response = T::IO>,
+        <T as Service<http::request::Parts>>::Error: std::fmt::Debug,
     {
-        tokio::join!(async { transport.oneshot(uri).await.unwrap() }, async {
-            let (stream, addr) = listener.accept().await.unwrap();
-            TcpStream::server(stream, addr)
-        })
+        tokio::join!(
+            async { transport.oneshot(uri.into_request_parts()).await.unwrap() },
+            async {
+                let (stream, addr) = listener.accept().await.unwrap();
+                TcpStream::server(stream, addr)
+            }
+        )
     }
 
     #[tokio::test]
@@ -742,7 +746,7 @@ mod test {
             .with_resolver(Resolver(0))
             .build::<TcpStream>();
 
-        let result = transport.oneshot(uri).await;
+        let result = transport.oneshot(uri.into_request_parts()).await;
         assert!(result.is_err());
     }
 
@@ -784,7 +788,7 @@ mod test {
             .with_resolver(EmptyResolver)
             .build::<TcpStream>();
 
-        let result = transport.oneshot(uri).await;
+        let result = transport.oneshot(uri.into_request_parts()).await;
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -796,7 +800,7 @@ mod test {
     async fn test_transport_error() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let uri: Uri = "http://example.com".parse().unwrap();
+        let parts = "http://example.com".into_request_parts();
 
         let config = TcpTransportConfig::default();
 
@@ -805,7 +809,7 @@ mod test {
             .with_resolver(ErrorResolver)
             .build::<TcpStream>();
 
-        let result = transport.oneshot(uri).await;
+        let result = transport.oneshot(parts).await;
         assert!(result.is_err());
 
         let err = result.unwrap_err();
