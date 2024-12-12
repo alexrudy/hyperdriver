@@ -2,7 +2,6 @@
 
 use std::future::ready;
 
-use http::Uri;
 use thiserror::Error;
 
 use crate::client::conn::protocol::mock::MockProtocol;
@@ -81,14 +80,14 @@ impl MockTransport {
     /// Create a new connector for the transport.
     pub fn connector(
         self,
-        uri: Uri,
+        parts: http::request::Parts,
         version: HttpProtocol,
     ) -> pool::Connector<Self, MockProtocol, crate::Body> {
-        pool::Connector::new(self, MockProtocol::default(), uri, version)
+        pool::Connector::new(self, MockProtocol::default(), parts, version)
     }
 }
 
-impl tower::Service<http::Uri> for MockTransport {
+impl tower::Service<http::request::Parts> for MockTransport {
     type Response = MockStream;
 
     type Error = MockConnectionError;
@@ -102,7 +101,7 @@ impl tower::Service<http::Uri> for MockTransport {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, _req: http::Uri) -> Self::Future {
+    fn call(&mut self, _req: http::request::Parts) -> Self::Future {
         let reuse = match &mut self.mode {
             TransportMode::SingleUse => false,
             TransportMode::Reusable => true,

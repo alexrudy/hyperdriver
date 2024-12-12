@@ -4,7 +4,6 @@ use std::io;
 use std::task::{Context, Poll};
 
 use crate::BoxFuture;
-use http::Uri;
 
 use crate::stream::duplex::DuplexStream as Stream;
 
@@ -25,7 +24,7 @@ impl DuplexTransport {
     }
 }
 
-impl tower::Service<Uri> for DuplexTransport {
+impl tower::Service<http::request::Parts> for DuplexTransport {
     type Response = Stream;
 
     type Error = io::Error;
@@ -36,7 +35,7 @@ impl tower::Service<Uri> for DuplexTransport {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, _req: Uri) -> Self::Future {
+    fn call(&mut self, _req: http::request::Parts) -> Self::Future {
         let client = self.client.clone();
         let max_buf_size = self.max_buf_size;
         let fut = async move {
@@ -66,7 +65,13 @@ mod tests {
         let (io, _) = tokio::join!(
             async {
                 transport
-                    .oneshot("https://example.com".parse().unwrap())
+                    .oneshot(
+                        http::Request::get("https://example.com")
+                            .body(())
+                            .unwrap()
+                            .into_parts()
+                            .0,
+                    )
                     .await
                     .unwrap()
             },

@@ -193,7 +193,7 @@ mod tests {
 
     use tracing::Instrument as _;
 
-    use crate::fixtures;
+    use crate::{fixtures, IntoRequestParts};
 
     use crate::client::conn::transport::duplex::DuplexTransport;
     use crate::client::conn::transport::TransportExt as _;
@@ -223,7 +223,7 @@ mod tests {
 
         let client = async move {
             let mut stream = client
-                .connect("https://example.com".parse().unwrap())
+                .connect("https://example.com".into_request_parts())
                 .await
                 .unwrap();
 

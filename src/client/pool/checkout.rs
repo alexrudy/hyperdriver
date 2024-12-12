@@ -6,7 +6,6 @@ use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
 
-use http::Uri;
 use pin_project::pin_project;
 use pin_project::pinned_drop;
 use thiserror::Error;
@@ -135,7 +134,7 @@ where
     P::Connection: PoolableConnection,
 {
     PollReadyTransport {
-        address: Uri,
+        parts: http::request::Parts,
         transport: Option<T>,
         protocol: Option<P>,
     },
@@ -163,9 +162,9 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConnectorState::PollReadyTransport { address, .. } => f
+            ConnectorState::PollReadyTransport { parts, .. } => f
                 .debug_struct("PollReadyTransport")
-                .field("address", address)
+                .field("address", &parts.uri)
                 .finish(),
             ConnectorState::Connect { .. } => f.debug_tuple("Connect").finish(),
             ConnectorState::PollReadyHandshake { .. } => {
@@ -212,13 +211,18 @@ where
     P::Connection: PoolableConnection,
 {
     /// Create a new connection from a transport connector and a handshake function.
-    pub fn new(transport: T, protocol: P, address: Uri, version: HttpProtocol) -> Self {
+    pub fn new(
+        transport: T,
+        protocol: P,
+        parts: http::request::Parts,
+        version: HttpProtocol,
+    ) -> Self {
         //TODO: Fix this
         let shareable = false;
 
         Self {
             state: ConnectorState::PollReadyTransport {
-                address,
+                parts,
                 transport: Some(transport),
                 protocol: Some(protocol),
             },
@@ -250,7 +254,7 @@ where
         loop {
             match connector_projected.state.as_mut().project() {
                 ConnectorStateProjected::PollReadyTransport {
-                    address,
+                    parts,
                     transport,
                     protocol,
                 } => {
@@ -265,7 +269,7 @@ where
                     let mut transport = transport
                         .take()
                         .expect("future polled in invalid state: transport is None");
-                    let future = transport.connect(address.clone());
+                    let future = transport.connect(parts.clone());
                     let protocol = protocol.take();
 
                     tracing::trace!("transport ready");
@@ -736,6 +740,9 @@ where
 mod test {
     use super::*;
 
+    #[cfg(feature = "mocks")]
+    use crate::IntoRequestParts;
+
     use static_assertions::assert_impl_all;
 
     assert_impl_all!(Error<std::io::Error, std::io::Error>: std::error::Error, Send, Sync, Into<BoxError>);
@@ -759,7 +766,7 @@ mod test {
         let transport = MockTransport::single();
 
         let checkout = Checkout::detached(
-            transport.connector("mock://address".parse().unwrap(), HttpProtocol::Http1),
+            transport.connector("mock://address".into_request_parts(), HttpProtocol::Http1),
         );
 
         assert!(checkout.token.is_zero());

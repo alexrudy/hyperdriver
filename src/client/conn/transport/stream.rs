@@ -1,4 +1,3 @@
-use ::http::Uri;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
@@ -23,7 +22,7 @@ impl<T> IntoStream<T> {
     }
 }
 
-impl<T> Service<Uri> for IntoStream<T>
+impl<T> Service<http::request::Parts> for IntoStream<T>
 where
     T: Transport,
     T::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -40,7 +39,7 @@ where
         self.transport.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Uri) -> Self::Future {
+    fn call(&mut self, req: http::request::Parts) -> Self::Future {
         fut::ConnectFuture::new(self.transport.connect(req))
     }
 }
@@ -97,6 +96,7 @@ mod tests {
     use crate::client::conn::transport::duplex::DuplexTransport;
     use crate::client::conn::transport::TransportExt as _;
     use crate::server::conn::AcceptExt as _;
+    use crate::IntoRequestParts;
     use tower::ServiceExt as _;
 
     #[tokio::test]
@@ -108,7 +108,7 @@ mod tests {
         let (io, _) = tokio::join!(
             async {
                 transport
-                    .oneshot("https://example.com".parse().unwrap())
+                    .oneshot("https://example.com".into_request_parts())
                     .await
                     .unwrap()
             },
