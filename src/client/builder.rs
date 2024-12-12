@@ -363,6 +363,24 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
 
 impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     /// Add a layer to the service under construction
+    pub fn with_body<B2In, B2Out>(self) -> Builder<T, P, RP, S, B2In, B2Out> {
+        Builder {
+            transport: self.transport,
+            protocol: self.protocol,
+            builder: self.builder,
+            user_agent: self.user_agent,
+            redirect: self.redirect,
+            timeout: self.timeout,
+            #[cfg(feature = "tls")]
+            tls: self.tls,
+            pool: self.pool,
+            body: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
+    /// Add a layer to the service under construction
     pub fn layer<L>(self, layer: L) -> Builder<T, P, RP, Stack<L, S>, BIn, BOut> {
         Builder {
             transport: self.transport,

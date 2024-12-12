@@ -31,7 +31,7 @@ repos:
         pass_filenames: false
         language: rust
         additional_dependencies:
-          - "cli:cargo-machete:0.5.0"
+          - "cli:cargo-machete:0.7.0"
       - id: prevent-dbg
         name: prevent dbg!(..) in rust code
         language: pygrep
