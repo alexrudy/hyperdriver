@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5](https://github.com/alexrudy/hyperdriver/compare/v0.8.4...v0.8.5) - 2024-12-12
+
+### <!-- 0 -->⛰️ Features
+
+- client Transport trait now accepts http::request::Parts
+- Allow client services to support a custom body type
+
 ## [0.8.4](https://github.com/alexrudy/hyperdriver/compare/v0.8.3...v0.8.4) - 2024-12-10
 
 ### <!-- 0 -->⛰️ Features
