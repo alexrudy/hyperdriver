@@ -688,14 +688,12 @@ where
             pool.push(token, reused, poolref.clone());
             return Pooled {
                 connection: Some(connection),
-                is_reused: true,
-                token,
+                token: Token::zero(),
                 pool: PoolRef::none(),
             };
         } else {
             return Pooled {
                 connection: Some(connection),
-                is_reused: false,
                 token,
                 pool: poolref.clone(),
             };
@@ -703,11 +701,13 @@ where
     }
 
     // No pool or lock was available, so we can't add the connection to the pool.
+    //
+    // Returning the original poolref + token means that if this was temporary,
+    // and we can grab the pool later, we will do so.
     Pooled {
         connection: Some(connection),
-        is_reused: false,
         token,
-        pool: PoolRef::none(),
+        pool: poolref.clone(),
     }
 }
 

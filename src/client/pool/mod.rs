@@ -89,6 +89,9 @@ pub enum UriError {
 #[derive(Debug)]
 pub(crate) struct Pool<C: PoolableConnection, K: Key> {
     inner: Arc<Mutex<PoolInner<C>>>,
+
+    // NOTE: The token map is stored on the Pool, not the PoolInner so that the generic K argument doesn't
+    // propogate into the pool inner and reference, only the connection type propogates.
     keys: Arc<Mutex<TokenMap<K>>>,
 }
 
@@ -330,8 +333,7 @@ where
                     trace!("re-usable connection will be sent to waiter");
                     let pooled = Pooled {
                         connection: Some(conn),
-                        is_reused: true,
-                        token,
+                        token: Token::zero(),
                         pool: pool_ref.clone(),
                     };
 
@@ -346,7 +348,6 @@ where
                     );
                     let pooled = Pooled {
                         connection: Some(connection),
-                        is_reused: false,
                         token,
                         pool: pool_ref.clone(),
                     };
@@ -461,7 +462,6 @@ where
     C: PoolableConnection,
 {
     connection: Option<C>,
-    is_reused: bool,
     token: Token,
     pool: PoolRef<C>,
 }
@@ -472,6 +472,12 @@ where
 {
     fn take(mut self) -> Option<C> {
         self.connection.take()
+    }
+
+    /// Checks if this connection is being re-used
+    /// by the pool (implying that it is multiplexed)
+    pub fn is_reused(&self) -> bool {
+        self.token.is_zero()
     }
 }
 
@@ -514,7 +520,7 @@ where
 {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
-            if connection.is_open() && !self.is_reused {
+            if connection.is_open() && !self.token.is_zero() {
                 if let Some(mut pool) = self.pool.lock() {
                     trace!("open connection returned to pool");
                     pool.push(self.token, connection, self.pool.clone());
