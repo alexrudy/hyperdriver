@@ -14,6 +14,7 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tower::Service;
 
+use self::oneshot::Oneshot;
 #[cfg(feature = "stream")]
 pub use self::stream::IntoStream;
 #[cfg(feature = "tls")]
@@ -188,6 +189,15 @@ pub trait TransportExt: Transport {
     {
         debug_assert!(config.is_none(), "TLS is not enabled");
         self.without_tls()
+    }
+
+    /// Create a future which uses the given transport to connect after calling poll_ready.
+    fn oneshot<R>(self, request: R) -> Oneshot<Self, R>
+    where
+        Self: Sized,
+        R: IntoRequestParts,
+    {
+        Oneshot::new(self, request)
     }
 }
 
@@ -468,6 +478,77 @@ mod future {
             #[cfg(not(feature = "tls"))]
             match self.project().inner.project() {
                 InnerBraidFutureProj::Plain(fut) => fut.poll(cx).map_ok(super::Stream::new),
+            }
+        }
+    }
+}
+
+mod oneshot {
+    use std::{fmt, future::Future, task::ready};
+
+    use crate::IntoRequestParts;
+
+    use super::Transport;
+
+    #[pin_project::pin_project(project=OneshotStateProj)]
+    enum OneshotState<T: Transport, R> {
+        Pending { transport: T, request: Option<R> },
+        Ready(#[pin] T::Future),
+    }
+
+    impl<T: Transport, R> fmt::Debug for OneshotState<T, R> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                OneshotState::Pending { .. } => f.debug_struct("OneshotState::Pending").finish(),
+                OneshotState::Ready(_) => f.debug_struct("OneshotState::Ready").finish(),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    #[pin_project::pin_project]
+    pub struct Oneshot<T: Transport, R> {
+        #[pin]
+        state: OneshotState<T, R>,
+    }
+
+    impl<T, R> Oneshot<T, R>
+    where
+        T: Transport,
+    {
+        pub fn new(transport: T, request: R) -> Self {
+            Self {
+                state: OneshotState::Pending {
+                    transport,
+                    request: Some(request),
+                },
+            }
+        }
+    }
+
+    impl<T, R> Future for Oneshot<T, R>
+    where
+        T: Transport,
+        R: IntoRequestParts,
+    {
+        type Output = Result<T::IO, T::Error>;
+
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            let mut this = self.project();
+            loop {
+                match this.state.as_mut().project() {
+                    OneshotStateProj::Pending { transport, request } => {
+                        ready!(transport.poll_ready(cx))?;
+                        let fut = transport.connect(request.take().unwrap());
+                        this.state.set(OneshotState::Ready(fut));
+                    }
+                    OneshotStateProj::Ready(fut) => {
+                        return fut.poll(cx);
+                    }
+                }
             }
         }
     }

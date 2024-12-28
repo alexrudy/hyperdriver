@@ -10,6 +10,8 @@
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
+#[cfg(feature = "client")]
+use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::pin::Pin;
@@ -18,8 +20,9 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "server")]
 pub use tokio::net::TcpListener;
-use tokio::net::ToSocketAddrs;
 
+#[cfg(feature = "client")]
+use crate::client::conn::transport::tcp::TcpTransportConfig;
 use crate::info::HasConnectionInfo;
 #[cfg(feature = "server")]
 use crate::server::Accept;
@@ -56,13 +59,54 @@ impl fmt::Debug for TcpStream {
 
 impl TcpStream {
     /// Connect to a remote address. See `tokio::net::TcpStream::connect`.
-    pub async fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        let stream = tokio::net::TcpStream::connect(addr).await?;
-        Ok(Self::client(stream))
+    #[cfg(feature = "client")]
+    pub async fn connect<A: ToSocketAddrs + Send + 'static>(addr: A) -> io::Result<Self> {
+        let config = TcpTransportConfig::default();
+        Self::connect_with_configuration(addr, &config).await
+    }
+
+    /// Connect to a remote address with a specific TCP configuration.
+    #[cfg(feature = "client")]
+    pub async fn connect_with_configuration<A: ToSocketAddrs + Send + 'static>(
+        addr: A,
+        config: &TcpTransportConfig,
+    ) -> io::Result<Self> {
+        let mut error = None;
+        let addrs = crate::client::conn::dns::resolve(addr).await?;
+        for addr in &addrs {
+            let cr = match crate::client::conn::transport::tcp::connect(addr, None, config) {
+                Ok(stream) => stream,
+                Err(err) => {
+                    error = Some(err);
+                    continue;
+                }
+            }
+            .await;
+
+            match cr {
+                Ok(stream) => return Ok(stream),
+                Err(err) => error = Some(err),
+            }
+        }
+
+        if let Some(err) = error {
+            Err(err.into())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "no addresses available",
+            ))
+        }
     }
 
     /// Create a new `TcpStream` from an existing `tokio::net::TcpStream` for a client
     /// connection. Client connections should have valid `peer_addr` and `local_addr`.
+    ///
+    /// Note: Ensure that the TcpStream is set up correctly for your use case - for example, if you
+    /// want keep-alive support you may need to set the `TCP_KEEPALIVE` socket option.
+    ///
+    /// If you want an easier wrapper, use `TcpStream::connect` instead, or use `TcpStream::connect_with_configuration`
+    /// to explicitly set a configuration the way the TCP transport does in the client implementation.
     pub fn client(inner: tokio::net::TcpStream) -> Self {
         Self {
             stream: inner,
@@ -194,7 +238,7 @@ impl Accept for TcpListener {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client"))]
 mod tests {
     use crate::info::HasConnectionInfo as _;
 

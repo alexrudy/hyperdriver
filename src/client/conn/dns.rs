@@ -1,7 +1,7 @@
 //! DNS resolution utilities.
 
 use std::collections::VecDeque;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
@@ -89,6 +89,15 @@ impl SocketAddrs {
 impl FromIterator<SocketAddr> for SocketAddrs {
     fn from_iter<T: IntoIterator<Item = SocketAddr>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
+    }
+}
+
+impl IntoIterator for SocketAddrs {
+    type Item = SocketAddr;
+    type IntoIter = std::collections::vec_deque::IntoIter<SocketAddr>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -188,7 +197,6 @@ impl tower::Service<Box<str>> for GaiResolver {
     }
 
     fn call(&mut self, host: Box<str>) -> Self::Future {
-        use std::net::ToSocketAddrs;
         let span = tracing::Span::current();
         GaiFuture {
             handle: tokio::task::spawn_blocking(move || {
@@ -200,6 +208,18 @@ impl tower::Service<Box<str>> for GaiResolver {
                 })
             }),
         }
+    }
+}
+
+pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> GaiFuture {
+    let span = tracing::Span::current();
+    GaiFuture {
+        handle: tokio::task::spawn_blocking(move || {
+            tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
+                tracing::trace!("dns resolution starting");
+                addr.to_socket_addrs().map(SocketAddrs::from_iter)
+            })
+        }),
     }
 }
 

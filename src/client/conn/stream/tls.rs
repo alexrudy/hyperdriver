@@ -8,8 +8,8 @@ use std::{fmt, io};
 use std::{future::Future, pin::Pin};
 
 use rustls::ClientConfig;
+use std::net::ToSocketAddrs;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::ToSocketAddrs;
 
 use crate::client::pool::PoolableStream;
 use crate::info::tls::HasTlsConnectionInfo;
@@ -115,8 +115,8 @@ where
 
 impl TlsStream<TcpStream> {
     /// Connect to the given tcp address, using the given domain name and TLS configuration.
-    pub async fn connect(
-        addr: impl ToSocketAddrs,
+    pub async fn connect<A: ToSocketAddrs + Send + 'static>(
+        addr: A,
         domain: &str,
         config: Arc<ClientConfig>,
     ) -> io::Result<Self> {
