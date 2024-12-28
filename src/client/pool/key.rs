@@ -181,13 +181,13 @@ pub(crate) mod test_key {
             counter: NonZeroUsize::new(usize::MAX).unwrap(),
             ..Default::default()
         };
-        let token = map.insert("key");
-        assert_eq!(token.0, Some(NonZeroUsize::new(usize::MAX).unwrap()));
+        let foo = map.insert("key");
+        assert_eq!(foo.0, Some(NonZeroUsize::new(usize::MAX).unwrap()));
 
-        let token = map.insert("bar");
-        assert_eq!(token.0, Some(NonZeroUsize::new(1).unwrap()));
+        let bar = map.insert("bar");
+        assert_eq!(bar.0, Some(NonZeroUsize::new(1).unwrap()));
 
-        assert_eq!(map.insert("bar"), token);
-        assert_ne!(map.insert("key"), token);
+        assert_eq!(map.insert("bar"), bar);
+        assert_ne!(map.insert("key"), bar);
     }
 }
