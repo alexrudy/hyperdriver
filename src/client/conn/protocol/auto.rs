@@ -122,10 +122,7 @@ where
             HttpProtocol::Http2 => self.handshake_h2(transport).await,
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
-                if transport
-                    .tls_info()
-                    .as_ref()
-                    .and_then(|tls| tls.alpn.as_ref())
+                if transport.tls_info().and_then(|tls| tls.alpn.as_ref())
                     == Some(&crate::info::Protocol::Http(http::Version::HTTP_2))
                 {
                     trace!("alpn h2 switching");
