@@ -49,9 +49,9 @@ impl tower::Service<http::request::Parts> for DuplexTransport {
 
 #[cfg(all(test, feature = "server"))]
 mod tests {
-    use tower::ServiceExt;
 
     use super::*;
+    use crate::client::conn::transport::TransportExt as _;
     use crate::info::DuplexAddr;
     use crate::info::HasConnectionInfo as _;
     use crate::server::conn::AcceptExt as _;
@@ -63,18 +63,7 @@ mod tests {
         let transport = DuplexTransport::new(1024, client);
 
         let (io, _) = tokio::join!(
-            async {
-                transport
-                    .oneshot(
-                        http::Request::get("https://example.com")
-                            .body(())
-                            .unwrap()
-                            .into_parts()
-                            .0,
-                    )
-                    .await
-                    .unwrap()
-            },
+            async { transport.oneshot("https://example.com").await.unwrap() },
             async { srv.accept().await.unwrap() }
         );
         let info = io.info();

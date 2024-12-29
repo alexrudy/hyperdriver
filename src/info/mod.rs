@@ -310,12 +310,18 @@ impl<T> HasTlsConnectionInfo for T where T: HasConnectionInfo {}
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(feature = "client")]
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use http::Version;
-    use tokio::net::{TcpListener, UnixListener};
+    #[cfg(feature = "client")]
+    use tokio::net::TcpListener;
+    use tokio::net::UnixListener;
 
-    use crate::stream::{tcp::TcpStream, unix::UnixStream};
+    #[cfg(feature = "client")]
+    use crate::stream::tcp::TcpStream;
+    use crate::stream::unix::UnixStream;
 
     use super::*;
 
@@ -429,6 +435,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "client")]
     async fn tcp_connection_info() {
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
             .await

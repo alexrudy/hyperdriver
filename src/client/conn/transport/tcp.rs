@@ -278,6 +278,19 @@ where
 
         TcpConnecting::new(addrs, &self.config)
     }
+
+    /// Connect to a set of remote addresses using the transport's configured settings and happy eyeballs algorithm.
+    ///
+    /// This is useful when you have a set of addresses to connect to, and you want to use the happy eyeballs algorithm
+    /// but you don't want to do address resolution again (or you have a static list of addresses to try).
+    pub async fn connect_to_addrs<A>(&self, addrs: A) -> Result<TcpStream, TcpConnectionError>
+    where
+        A: IntoIterator<Item = SocketAddr>,
+    {
+        let addrs = SocketAddrs::from_iter(addrs);
+        let connecting = self.connecting(addrs);
+        connecting.connect().await
+    }
 }
 
 /// Future which implements the happy eyeballs algorithm for connecting to a remote address.
@@ -436,6 +449,20 @@ impl fmt::Display for TcpConnectionError {
     }
 }
 
+impl From<TcpConnectionError> for io::Error {
+    fn from(value: TcpConnectionError) -> Self {
+        if let Some(original) = value
+            .source
+            .as_ref()
+            .and_then(|r| r.downcast_ref::<io::Error>())
+        {
+            io::Error::new(original.kind(), original.to_string())
+        } else {
+            io::Error::other(value)
+        }
+    }
+}
+
 /// Configuration for TCP connections.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -533,7 +560,7 @@ fn bind_local_address(
     Ok(())
 }
 
-fn connect(
+pub(crate) fn connect(
     addr: &SocketAddr,
     connect_timeout: Option<Duration>,
     config: &TcpTransportConfig,
@@ -815,5 +842,38 @@ mod test {
         let err = result.unwrap_err();
 
         assert!(err.to_string().contains("no address found"))
+    }
+
+    #[tokio::test]
+    async fn test_transport_connect_to_addrs() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let bind = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = bind.local_addr().unwrap().port();
+
+        let config = TcpTransportConfig::default();
+        let transport = TcpTransport::builder()
+            .with_config(config)
+            .with_resolver(Resolver(port))
+            .build::<TcpStream>();
+
+        let addrs = vec![
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port + 1),
+        ];
+
+        let (conn, _) = tokio::join!(
+            async { transport.connect_to_addrs(addrs).await.unwrap() },
+            async {
+                let (stream, addr) = bind.accept().await.unwrap();
+                TcpStream::server(stream, addr)
+            }
+        );
+
+        let info = conn.info();
+        assert_eq!(
+            *info.remote_addr(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+        );
     }
 }

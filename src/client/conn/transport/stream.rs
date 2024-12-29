@@ -97,7 +97,6 @@ mod tests {
     use crate::client::conn::transport::TransportExt as _;
     use crate::server::conn::AcceptExt as _;
     use crate::IntoRequestParts;
-    use tower::ServiceExt as _;
 
     #[tokio::test]
     async fn transport_into_stream() {
