@@ -23,7 +23,7 @@ use hyperdriver::client::conn::protocol::auto;
 use hyperdriver::client::conn::transport::tcp::{TcpConnectionError, TcpTransport};
 use hyperdriver::client::conn::transport::TransportExt;
 use hyperdriver::client::conn::Transport;
-use hyperdriver::client::pool::UriKey;
+use hyperdriver::client::pool::{Pooled, UriKey};
 use hyperdriver::client::ConnectionPoolLayer;
 use hyperdriver::info::HasConnectionInfo;
 use hyperdriver::server::Accept;
@@ -302,7 +302,7 @@ async fn http2_client(
             )
             .with_optional_pool(Some(Default::default())),
         )
-        .service(RequestExecutor::<HttpConnection<Body>, _>::new());
+        .service(RequestExecutor::<Pooled<HttpConnection<Body>>, _>::new());
 
     let authority = url.authority().unwrap().clone();
 

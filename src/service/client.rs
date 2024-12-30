@@ -6,8 +6,6 @@
 //! request to execute.
 
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::task::Poll;
 
 use crate::BoxFuture;
@@ -15,8 +13,6 @@ use http_body::Body;
 use tracing::Instrument;
 
 use crate::client::conn::Connection;
-use crate::client::pool::PoolableConnection;
-use crate::client::pool::Pooled;
 use crate::client::Error;
 
 /// Couples the connection with the http request.
@@ -29,21 +25,21 @@ use crate::client::Error;
 /// See [`crate::service::SetHostHeader`] for an example of a middleware that modifies
 /// the request before it is sent in the context of the connection.
 #[derive(Debug)]
-pub struct ExecuteRequest<C: Connection<B> + PoolableConnection, B> {
+pub struct ExecuteRequest<C: Connection<B>, B> {
     /// The connection to use for the request.
-    conn: Pooled<C>,
+    conn: C,
     /// The request to execute.
     request: http::Request<B>,
 }
 
-impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
+impl<C: Connection<B>, B> ExecuteRequest<C, B> {
     /// Create a new request
-    pub fn new(conn: Pooled<C>, request: http::Request<B>) -> Self {
+    pub fn new(conn: C, request: http::Request<B>) -> Self {
         Self { conn, request }
     }
 
     /// Split the request into its parts.
-    pub fn into_parts(self) -> (Pooled<C>, http::Request<B>) {
+    pub fn into_parts(self) -> (C, http::Request<B>) {
         (self.conn, self.request)
     }
 
@@ -68,29 +64,29 @@ impl<C: Connection<B> + PoolableConnection, B> ExecuteRequest<C, B> {
 /// A service which executes a request on a `hyper` Connection as described
 /// by the `Connection` trait. This should be the innermost service
 /// for clients, as it is responsible for actually sending the request.
-pub struct RequestExecutor<C: Connection<B> + PoolableConnection, B> {
+pub struct RequestExecutor<C: Connection<B>, B> {
     _private: std::marker::PhantomData<fn(C, B) -> ()>,
 }
 
-impl<C: Connection<B> + PoolableConnection, B> Default for RequestExecutor<C, B> {
+impl<C: Connection<B>, B> Default for RequestExecutor<C, B> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: Connection<B> + PoolableConnection, B> fmt::Debug for RequestExecutor<C, B> {
+impl<C: Connection<B>, B> fmt::Debug for RequestExecutor<C, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestExecutor").finish()
     }
 }
 
-impl<C: Connection<B> + PoolableConnection, B> Clone for RequestExecutor<C, B> {
+impl<C: Connection<B>, B> Clone for RequestExecutor<C, B> {
     fn clone(&self) -> Self {
         Self::new()
     }
 }
 
-impl<C: Connection<B> + PoolableConnection, B> RequestExecutor<C, B> {
+impl<C: Connection<B>, B> RequestExecutor<C, B> {
     /// Create a new `RequestExecutor`.
     pub fn new() -> Self {
         Self {
@@ -101,7 +97,7 @@ impl<C: Connection<B> + PoolableConnection, B> RequestExecutor<C, B> {
 
 impl<C, B> tower::Service<ExecuteRequest<C, B>> for RequestExecutor<C, B>
 where
-    C: Connection<B> + PoolableConnection,
+    C: Connection<B> + Send + 'static,
     B: Body + Unpin + Send + 'static,
 {
     type Response = http::Response<C::ResBody>;
@@ -123,7 +119,7 @@ async fn execute_request<C, BIn, BOut>(
     ExecuteRequest { request, mut conn }: ExecuteRequest<C, BIn>,
 ) -> Result<http::Response<BOut>, Error>
 where
-    C: Connection<BIn, ResBody = BOut> + PoolableConnection,
+    C: Connection<BIn, ResBody = BOut> + Send,
     BIn: 'static,
 {
     let span = tracing::trace_span!("send request", request.uri=%request.uri());
@@ -135,48 +131,7 @@ where
         .await
         .map_err(|error| Error::Connection(error.into()))?;
 
-    // Shared connections are already in the pool, no need to do this.
-    if !conn.can_share() {
-        // Only re-insert the connection when it is ready again. Spawn
-        // a task to wait for the connection to become ready before dropping.
-        tokio::spawn(WhenReady::new(conn));
-    }
-
     Ok(response.map(Into::into))
-}
-
-/// A future which resolves when the connection is ready again
-#[derive(Debug)]
-pub struct WhenReady<C: Connection<B> + PoolableConnection, B> {
-    conn: Pooled<C>,
-    _private: std::marker::PhantomData<fn(B)>,
-}
-
-impl<C: Connection<B> + PoolableConnection, B> WhenReady<C, B> {
-    pub(crate) fn new(conn: Pooled<C>) -> Self {
-        Self {
-            conn,
-            _private: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<C, B> Future for WhenReady<C, B>
-where
-    C: Connection<B> + PoolableConnection,
-{
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        match self.conn.poll_ready(cx) {
-            Poll::Ready(Ok(())) => Poll::Ready(()),
-            Poll::Ready(Err(err)) => {
-                tracing::trace!(error = %err, "Connection errored while polling for readiness");
-                Poll::Ready(())
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
 }
 
 #[cfg(all(test, feature = "mocks"))]

@@ -164,6 +164,11 @@ path = "tests/client.rs"
 required-features = ["server", "client", "stream"]
 
 [[test]]
+name = "client-connector"
+path = "tests/client/connector.rs"
+required-features = ["server", "client", "stream"]
+
+[[test]]
 name = "client-custom-body"
 path = "tests/client/custombody.rs"
 required-features = ["server", "client", "stream"]

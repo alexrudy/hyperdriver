@@ -19,6 +19,15 @@ use super::HttpProtocol;
 use super::ProtocolRequest;
 
 /// A builder for configuring and starting HTTP connections.
+///
+/// This builder allows configuring the HTTP/1 and HTTP/2 settings for the connection,
+/// and will pick the protocol based on the ALPN negotiation or the request's version
+/// if ALPN is not available.
+///
+/// Since it takes advantage of ALPN, this protocol requires that the underlying IO
+/// implements `HasTlsConnectionInfo` to provide the ALPN negotiation result. This can
+/// be done by calling `TransportExt::with_tls` or `TransportExt::without_tls` on the
+/// transport.
 #[derive(Debug)]
 pub struct HttpConnectionBuilder<B> {
     http1: hyper::client::conn::http1::Builder,

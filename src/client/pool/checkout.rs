@@ -13,7 +13,7 @@ use tracing::debug;
 use tracing::trace;
 
 use crate::client::conn::connector::Error as ConnectorError;
-use crate::client::conn::connector::{CheckoutMeta, Connector};
+use crate::client::conn::connector::{Connector, ConnectorMeta};
 use crate::client::conn::Protocol;
 use crate::client::conn::Transport;
 
@@ -164,7 +164,7 @@ where
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
-    meta: CheckoutMeta,
+    meta: ConnectorMeta,
     #[cfg(debug_assertions)]
     id: CheckoutId,
 }
@@ -206,7 +206,7 @@ where
                     waiter: Waiting::NoPool,
                     inner: InnerCheckoutConnecting::ConnectingDelayed(connector.take().unwrap()),
                     connection: None,
-                    meta: CheckoutMeta::new(), // New meta to avoid holding spans in the spawned task
+                    meta: ConnectorMeta::new(), // New meta to avoid holding spans in the spawned task
                     #[cfg(debug_assertions)]
                     id: *this.id,
                 })
@@ -243,7 +243,7 @@ where
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
             connection: None,
-            meta: CheckoutMeta::new(),
+            meta: ConnectorMeta::new(),
             #[cfg(debug_assertions)]
             id,
         }
@@ -259,7 +259,7 @@ where
     ) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
-        let meta = CheckoutMeta::new();
+        let meta = ConnectorMeta::new();
 
         #[cfg(debug_assertions)]
         tracing::trace!(?token, %id, "creating new checkout");
@@ -365,8 +365,23 @@ where
                 Poll::Ready(Ok(register_connected(this.pool, *this.token, connection)))
             }
             CheckoutConnectingProj::Connecting(connector) => {
-                let result =
-                    ready!(connector.poll_connector(this.pool, *this.token, this.meta, cx));
+                let result = ready!(connector.poll_connector(
+                    {
+                        let pool = this.pool.clone();
+                        let token = *this.token;
+                        move || {
+                            trace!(
+                                ?token,
+                                "connection can be shared, telling pool to wait for handshake"
+                            );
+                            if let Some(mut pool) = pool.lock() {
+                                pool.connected_in_handshake(token);
+                            }
+                        }
+                    },
+                    this.meta,
+                    cx
+                ));
 
                 this.waiter.close();
                 this.inner.set(InnerCheckoutConnecting::Connected);
@@ -381,8 +396,19 @@ where
             CheckoutConnectingProj::ConnectingWithDelayDrop(Some(connector))
             | CheckoutConnectingProj::ConnectingDelayed(connector) => {
                 let result = ready!(connector.as_mut().poll_connector(
-                    this.pool,
-                    *this.token,
+                    {
+                        let pool = this.pool.clone();
+                        let token = *this.token;
+                        move || {
+                            trace!(
+                                ?token,
+                                "connection can be shared, telling pool to wait for handshake"
+                            );
+                            if let Some(mut pool) = pool.lock() {
+                                pool.connected_in_handshake(token);
+                            }
+                        }
+                    },
                     this.meta,
                     cx
                 ));
@@ -474,6 +500,7 @@ mod test {
 
     assert_impl_all!(ConnectorError<std::io::Error, std::io::Error>: std::error::Error, Send, Sync, Into<BoxError>);
 
+    #[cfg(feature = "mocks")]
     use crate::client::conn::protocol::HttpProtocol;
     #[cfg(feature = "mocks")]
     use crate::client::conn::transport::mock::MockTransport;

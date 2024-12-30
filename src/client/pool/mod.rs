@@ -20,6 +20,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use std::time::Duration;
@@ -42,6 +43,7 @@ use self::key::TokenMap;
 pub use self::key::UriKey;
 use self::weakopt::WeakOpt;
 
+use super::conn::Connection;
 use super::conn::Connector;
 use super::conn::Protocol;
 use super::conn::Transport;
@@ -440,6 +442,9 @@ pub trait PoolableStream: Unpin + Send + Sized + 'static {
 /// to return to the pool, which will multiplex against this one. If multiplexing
 /// is not possible, then `None` should be returned.
 pub trait PoolableConnection: Unpin + Send + Sized + 'static {
+    /// Error returned by poll_ready
+    type Error: std::fmt::Display;
+
     /// Returns `true` if the connection is open.
     fn is_open(&self) -> bool;
 
@@ -452,6 +457,12 @@ pub trait PoolableConnection: Unpin + Send + Sized + 'static {
     /// Returns a new connection to return to the pool, which will multiplex
     /// against this one if possible.
     fn reuse(&mut self) -> Option<Self>;
+
+    /// Poll to see if the connection is ready to immediately send a request.
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>>;
 }
 
 /// Wrapper type for a connection which is managed by a pool.
@@ -516,7 +527,123 @@ where
     }
 }
 
+impl<C, B> Connection<B> for Pooled<C>
+where
+    C: Connection<B> + PoolableConnection,
+{
+    type ResBody = C::ResBody;
+    type Error = <C as Connection<B>>::Error;
+    type Future = C::Future;
+
+    fn send_request(&mut self, request: http::Request<B>) -> Self::Future {
+        self.connection
+            .as_mut()
+            .expect("connection only taken on Drop")
+            .send_request(request)
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        <C as Connection<B>>::poll_ready(
+            self.connection
+                .as_mut()
+                .expect("connection only taken on Drop"),
+            cx,
+        )
+    }
+
+    fn version(&self) -> http::Version {
+        self.connection
+            .as_ref()
+            .expect("connection only taken on Drop")
+            .version()
+    }
+}
+
+impl<C> PoolableConnection for Pooled<C>
+where
+    C: PoolableConnection,
+{
+    type Error = C::Error;
+
+    fn reuse(&mut self) -> Option<Self> {
+        self.connection.as_mut().unwrap().reuse().map(|c| Pooled {
+            connection: Some(c),
+            token: self.token,
+            pool: self.pool.clone(),
+        })
+    }
+
+    fn is_open(&self) -> bool {
+        self.connection.as_ref().unwrap().is_open()
+    }
+
+    fn can_share(&self) -> bool {
+        self.connection.as_ref().unwrap().can_share()
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.connection.as_mut().unwrap().poll_ready(cx)
+    }
+}
+
 impl<C> Drop for Pooled<C>
+where
+    C: PoolableConnection,
+{
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            if !connection.can_share() {
+                tokio::spawn(WhenReady {
+                    connection: Some(connection),
+                    token: self.token,
+                    pool: self.pool.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// A future which resolves when the connection is ready again
+#[derive(Debug)]
+struct WhenReady<C>
+where
+    C: PoolableConnection,
+{
+    connection: Option<C>,
+    token: Token,
+    pool: PoolRef<C>,
+}
+
+impl<C> std::future::Future for WhenReady<C>
+where
+    C: PoolableConnection,
+{
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        match self
+            .connection
+            .as_mut()
+            .expect("connection polled after drop")
+            .poll_ready(cx)
+        {
+            std::task::Poll::Ready(Ok(())) => std::task::Poll::Ready(()),
+            std::task::Poll::Ready(Err(err)) => {
+                tracing::trace!(error = %err, "Connection errored while polling for readiness");
+                std::task::Poll::Ready(())
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl<C> Drop for WhenReady<C>
 where
     C: PoolableConnection,
 {

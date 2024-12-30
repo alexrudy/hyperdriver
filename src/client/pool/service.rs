@@ -19,6 +19,7 @@ use crate::client::pool;
 use crate::client::pool::Checkout;
 use crate::client::pool::Connector;
 use crate::client::pool::PoolableConnection;
+use crate::client::pool::Pooled;
 use crate::client::Error;
 use crate::info::HasConnectionInfo;
 use crate::service::client::ExecuteRequest;
@@ -255,7 +256,7 @@ where
     T: Transport + Send + 'static,
     T::IO: PoolableStream + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>>
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
         + Clone
         + Send
         + 'static,
@@ -298,7 +299,7 @@ where
         + 'static,
     T: Transport + 'static,
     T::IO: PoolableStream + Unpin,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>>
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
         + Clone
         + Send
         + 'static,
@@ -323,7 +324,9 @@ where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
+        + Send
+        + 'static,
     BIn: 'static,
 {
     #[pin]
@@ -336,7 +339,9 @@ where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
+        + Send
+        + 'static,
     BIn: 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -349,7 +354,9 @@ where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
+        + Send
+        + 'static,
     BIn: 'static,
 {
     fn new(checkout: Checkout<T, P, BIn>, request: http::Request<BIn>, service: S) -> Self {
@@ -378,7 +385,9 @@ where
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     <P as Protocol<T::IO, BIn>>::Error: Into<BoxError>,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
+        + Send
+        + 'static,
     S::Error: Into<crate::client::Error>,
     BOut: Body + Unpin + 'static,
     BIn: Body + Unpin + Send + 'static,
@@ -437,7 +446,9 @@ where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, BIn, Connection = C> + Send + 'static,
     C: Connection<BIn> + PoolableConnection,
-    S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>> + Send + 'static,
+    S: tower::Service<ExecuteRequest<Pooled<C>, BIn>, Response = http::Response<BOut>>
+        + Send
+        + 'static,
     BIn: 'static,
 {
     Checkout {
