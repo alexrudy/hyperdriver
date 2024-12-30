@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::client::conn::protocol::mock::MockProtocol;
 use crate::client::conn::protocol::HttpProtocol;
 use crate::client::conn::stream::mock::MockStream;
-use crate::client::pool::{self};
+use crate::client::conn::Connector;
 use crate::BoxFuture;
 
 /// An error that can occur when creating a mock transport.
@@ -82,8 +82,8 @@ impl MockTransport {
         self,
         parts: http::request::Parts,
         version: HttpProtocol,
-    ) -> pool::Connector<Self, MockProtocol, crate::Body> {
-        pool::Connector::new(self, MockProtocol::default(), parts, version)
+    ) -> Connector<Self, MockProtocol, crate::Body> {
+        Connector::new(self, MockProtocol::default(), parts, version)
     }
 }
 

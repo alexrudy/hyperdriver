@@ -35,14 +35,14 @@ mod key;
 pub(super) mod service;
 mod weakopt;
 
-pub(crate) use self::checkout::Checkout;
-pub(crate) use self::checkout::Connector;
-pub(crate) use self::checkout::Error;
+pub(super) use self::checkout::Checkout;
 use self::idle::IdleConnections;
+pub(super) use self::key::Token;
+use self::key::TokenMap;
 pub use self::key::UriKey;
-use self::key::{Token, TokenMap};
 use self::weakopt::WeakOpt;
 
+use super::conn::Connector;
 use super::conn::Protocol;
 use super::conn::Transport;
 
@@ -112,7 +112,7 @@ impl<C: PoolableConnection, K: Key> Pool<C, K> {
         }
     }
 
-    fn as_ref(&self) -> PoolRef<C> {
+    pub(in crate::client) fn as_ref(&self) -> PoolRef<C> {
         PoolRef {
             inner: WeakOpt::downgrade(&self.inner),
         }
@@ -188,7 +188,7 @@ impl<C: PoolableConnection, K: Key> Pool<C, K> {
     }
 }
 
-struct PoolRef<C>
+pub(in crate::client) struct PoolRef<C>
 where
     C: PoolableConnection,
 {
@@ -208,27 +208,27 @@ impl<C> PoolRef<C>
 where
     C: PoolableConnection,
 {
-    fn none() -> Self {
+    pub(in crate::client) fn none() -> Self {
         Self {
             inner: WeakOpt::none(),
         }
     }
 
     #[allow(dead_code)]
-    fn try_lock(&self) -> Option<PoolGuard<C>> {
+    pub(in crate::client) fn try_lock(&self) -> Option<PoolGuard<C>> {
         self.inner
             .upgrade()
             .and_then(|inner| inner.try_lock_arc().map(PoolGuard))
     }
 
-    fn lock(&self) -> Option<PoolGuard<C>> {
+    pub(in crate::client) fn lock(&self) -> Option<PoolGuard<C>> {
         self.inner
             .upgrade()
             .map(|inner| PoolGuard(inner.lock_arc()))
     }
 
     #[allow(dead_code)]
-    fn is_none(&self) -> bool {
+    pub(in crate::client) fn is_none(&self) -> bool {
         self.inner.is_none()
     }
 }
@@ -244,7 +244,9 @@ where
     }
 }
 
-struct PoolGuard<C: PoolableConnection>(ArcMutexGuard<parking_lot::RawMutex, PoolInner<C>>);
+pub(in crate::client) struct PoolGuard<C: PoolableConnection>(
+    ArcMutexGuard<parking_lot::RawMutex, PoolInner<C>>,
+);
 
 impl<C> Deref for PoolGuard<C>
 where
@@ -267,7 +269,7 @@ where
 }
 
 #[derive(Debug)]
-struct PoolInner<C>
+pub(in crate::client) struct PoolInner<C>
 where
     C: PoolableConnection,
 {
@@ -292,7 +294,7 @@ where
         }
     }
 
-    fn cancel_connection(&mut self, token: Token) {
+    pub(in crate::client) fn cancel_connection(&mut self, token: Token) {
         let existed = self.connecting.remove(&token);
         if existed {
             trace!("pending connection cancelled");
@@ -308,7 +310,7 @@ where
     ///
     /// New connection attempts will wait for this connection to complete the
     /// handshake and re-use it if possible.
-    fn connected_in_handshake(&mut self, token: Token) {
+    pub(in crate::client) fn connected_in_handshake(&mut self, token: Token) {
         self.connecting.insert(token);
     }
 }
@@ -541,6 +543,7 @@ mod tests {
     use crate::helpers::IntoRequestParts;
 
     use super::*;
+    use crate::client::conn::connector::Error;
     use crate::client::conn::protocol::mock::MockSender;
     use crate::client::conn::stream::mock::MockStream;
     use crate::client::conn::transport::mock::MockTransport;
