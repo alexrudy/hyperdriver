@@ -59,7 +59,6 @@ pub(super) mod http1 {
     use http::Uri;
 
     use crate::client::conn::Connection;
-    use crate::client::pool::PoolableConnection;
     use crate::client::Error;
     use crate::service::client::ExecuteRequest;
     use crate::service::error::MaybeErrorFuture;
@@ -72,7 +71,7 @@ pub(super) mod http1 {
     pub struct Http1ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         inner: PreprocessService<S, PreprocessFn<C, B, S::Error>>,
     }
@@ -80,7 +79,7 @@ pub(super) mod http1 {
     impl<S, C, B> tower::Service<ExecuteRequest<C, B>> for Http1ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         type Response = S::Response;
 
@@ -100,7 +99,7 @@ pub(super) mod http1 {
     impl<S, C, B> Clone for Http1ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error> + Clone,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         fn clone(&self) -> Self {
             Self {
@@ -112,7 +111,7 @@ pub(super) mod http1 {
     impl<S, C, B> Http1ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         /// Create a new `Http1ChecksService`.
         pub fn new(service: S) -> Self {
@@ -157,7 +156,7 @@ pub(super) mod http1 {
     impl<C, B, S> tower::layer::Layer<S> for Http1ChecksLayer<C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         type Service = Http1ChecksService<S, C, B>;
 
@@ -170,7 +169,7 @@ pub(super) mod http1 {
         mut req: ExecuteRequest<C, B>,
     ) -> Result<ExecuteRequest<C, B>, Error>
     where
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         if req.connection().version() >= http::Version::HTTP_2 {
             return Ok(req);
@@ -303,7 +302,6 @@ pub(super) mod http2 {
     use ::http;
 
     use crate::client::conn::Connection;
-    use crate::client::pool::PoolableConnection;
     use crate::client::Error;
     use crate::service::client::ExecuteRequest;
     use crate::service::error::{MaybeErrorFuture, PreprocessService};
@@ -323,7 +321,7 @@ pub(super) mod http2 {
     pub struct Http2ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         inner: PreprocessService<S, PreprocessFn<C, B, S::Error>>,
     }
@@ -331,7 +329,7 @@ pub(super) mod http2 {
     impl<S, C, B> Clone for Http2ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error> + Clone,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         fn clone(&self) -> Self {
             Self::new(self.inner.service().clone())
@@ -341,7 +339,7 @@ pub(super) mod http2 {
     impl<S, C, B> Http2ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         /// Create a new `Http2ChecksService`.
         pub fn new(inner: S) -> Self {
@@ -355,7 +353,7 @@ pub(super) mod http2 {
         mut req: ExecuteRequest<C, B>,
     ) -> Result<ExecuteRequest<C, B>, Error>
     where
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         if req.connection().version() == http::Version::HTTP_2 {
             if req.request().method() == http::Method::CONNECT {
@@ -393,7 +391,7 @@ pub(super) mod http2 {
     impl<S, C, B> tower::Service<ExecuteRequest<C, B>> for Http2ChecksService<S, C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         type Response = S::Response;
 
@@ -447,7 +445,7 @@ pub(super) mod http2 {
     impl<S, C, B> tower::layer::Layer<S> for Http2ChecksLayer<C, B>
     where
         S: tower::Service<ExecuteRequest<C, B>, Error = Error>,
-        C: Connection<B> + PoolableConnection,
+        C: Connection<B>,
     {
         type Service = Http2ChecksService<S, C, B>;
 

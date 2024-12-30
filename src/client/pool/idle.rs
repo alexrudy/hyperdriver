@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    marker::PhantomData,
+    time::{Duration, Instant},
+};
 
 use tracing::trace;
 
@@ -20,24 +23,29 @@ impl<T> Idle<T> {
 }
 
 #[derive(Debug)]
-pub(super) struct IdleConnections<T> {
+pub(super) struct IdleConnections<T, B> {
     inner: Vec<Idle<T>>,
+    _marker: PhantomData<fn(B)>,
 }
 
-impl<T> Default for IdleConnections<T> {
+impl<T, B> Default for IdleConnections<T, B> {
     fn default() -> Self {
-        Self { inner: Vec::new() }
+        Self {
+            inner: Vec::new(),
+            _marker: PhantomData,
+        }
     }
 }
 
-impl<T> IdleConnections<T> {
+impl<T, B> IdleConnections<T, B> {
     pub(super) fn push(&mut self, inner: T) {
         self.inner.push(Idle::new(inner));
     }
 
     pub(super) fn pop(&mut self, idle_timeout: Option<Duration>) -> Option<T>
     where
-        T: PoolableConnection,
+        T: PoolableConnection<B>,
+        B: Send + 'static,
     {
         let mut empty = false;
         let mut idle_entry = None;
@@ -112,8 +120,6 @@ mod test {
         let mut idle = IdleConnections::default();
         assert_eq!(idle.len(), 0);
         assert!(idle.is_empty());
-
-        assert_eq!(format!("{:?}", idle), "IdleConnections { inner: [] }");
 
         let conn = MockSender::single();
         idle.push(conn);

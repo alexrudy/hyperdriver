@@ -8,7 +8,6 @@ use crate::client::conn::connection::ConnectionError;
 use crate::client::conn::stream::mock::{MockStream, StreamID};
 use crate::client::conn::Connection;
 use crate::client::pool::{PoolableConnection, PoolableStream};
-use crate::BoxError;
 
 use super::ProtocolRequest;
 
@@ -81,9 +80,7 @@ impl Connection<crate::Body> for MockSender {
     }
 }
 
-impl PoolableConnection for MockSender {
-    type Error = BoxError;
-
+impl PoolableConnection<crate::Body> for MockSender {
     fn is_open(&self) -> bool {
         self.stream.is_open()
     }
@@ -94,13 +91,6 @@ impl PoolableConnection for MockSender {
 
     fn reuse(&mut self) -> Option<Self> {
         Some(self.clone())
-    }
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
     }
 }
 
@@ -146,6 +136,6 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(MockSender: Connection<crate::Body>, PoolableConnection);
+    assert_impl_all!(MockSender: Connection<crate::Body>, PoolableConnection<crate::Body>);
     assert_impl_all!(MockProtocol: Protocol<MockStream, crate::Body>);
 }

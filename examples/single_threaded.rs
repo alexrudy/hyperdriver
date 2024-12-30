@@ -302,7 +302,7 @@ async fn http2_client(
             )
             .with_optional_pool(Some(Default::default())),
         )
-        .service(RequestExecutor::<Pooled<HttpConnection<Body>>, _>::new());
+        .service(RequestExecutor::<Pooled<HttpConnection<Body>, Body>, _>::new());
 
     let authority = url.authority().unwrap().clone();
 

@@ -161,22 +161,10 @@ where
     }
 }
 
-impl<B> PoolableConnection for HttpConnection<B>
+impl<B> PoolableConnection<B> for HttpConnection<B>
 where
-    B: Send + 'static,
+    B: HttpBody + Send + 'static,
 {
-    type Error = hyper::Error;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        match &mut self.inner {
-            InnerConnection::H2(conn) => conn.poll_ready(cx),
-            InnerConnection::H1(conn) => conn.poll_ready(cx),
-        }
-    }
-
     /// Checks for the connection being open by checking if the underlying connection is ready
     /// to send a new request. If the connection is not ready, it can't be re-used,
     /// so this shortcut isn't harmful.

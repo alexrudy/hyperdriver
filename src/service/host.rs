@@ -5,7 +5,6 @@ use http::HeaderValue;
 use http::Uri;
 
 use crate::client::conn::Connection;
-use crate::client::pool::PoolableConnection;
 
 use super::ExecuteRequest;
 
@@ -94,7 +93,7 @@ where
 impl<S, B, C> tower::Service<ExecuteRequest<C, B>> for SetHostHeader<S>
 where
     S: tower::Service<ExecuteRequest<C, B>>,
-    C: Connection<B> + PoolableConnection,
+    C: Connection<B>,
 {
     type Response = S::Response;
 

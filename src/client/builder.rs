@@ -426,7 +426,7 @@ where
     >>::Target as Protocol<
         super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
         BIn,
-    >>::Connection: Connection<BIn, ResBody = hyper::body::Incoming> + PoolableConnection,
+    >>::Connection: Connection<BIn, ResBody = hyper::body::Incoming> + PoolableConnection<BIn>,
 
     RP: policy::Policy<BIn, super::Error> + Clone + Send + Sync + 'static,
     S: tower::Layer<SharedService<http::Request<BIn>, http::Response<BOut>, super::Error>>,
@@ -518,7 +518,8 @@ where
     >>::Target as Protocol<
         super::conn::stream::Stream<<<T as BuildTransport>::Target as Transport>::IO>,
         crate::Body,
-    >>::Connection: Connection<crate::Body, ResBody = hyper::body::Incoming> + PoolableConnection,
+    >>::Connection:
+        Connection<crate::Body, ResBody = hyper::body::Incoming> + PoolableConnection<crate::Body>,
 
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
     S: tower::Layer<

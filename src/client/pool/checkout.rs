@@ -45,21 +45,29 @@ impl fmt::Display for CheckoutId {
 }
 
 #[pin_project(project = WaitingProjected)]
-pub(crate) enum Waiting<C: PoolableConnection> {
+pub(crate) enum Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
     /// The checkout is waiting on an idle connection, and should
     /// attempt its own connection in the interim as well.
-    Idle(#[pin] Receiver<Pooled<C>>),
+    Idle(#[pin] Receiver<Pooled<C, B>>),
 
     /// The checkout is waiting on a connection currently in the process
     /// of connecting, and should wait for that connection to complete,
     /// not starting its own connection.
-    Connecting(#[pin] Receiver<Pooled<C>>),
+    Connecting(#[pin] Receiver<Pooled<C, B>>),
 
     /// There is no pool for connections to wait for.
     NoPool,
 }
 
-impl<C: PoolableConnection> Waiting<C> {
+impl<C, B> Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
     fn close(&mut self) {
         match self {
             Waiting::Idle(rx) => {
@@ -75,7 +83,11 @@ impl<C: PoolableConnection> Waiting<C> {
     }
 }
 
-impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
+impl<C, B> fmt::Debug for Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Waiting::Idle(_) => f.debug_tuple("Idle").finish(),
@@ -85,14 +97,22 @@ impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
     }
 }
 
-pub(crate) enum WaitingPoll<C: PoolableConnection> {
-    Connected(Pooled<C>),
+pub(crate) enum WaitingPoll<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
+    Connected(Pooled<C, B>),
     Closed,
     NotReady,
 }
 
-impl<C: PoolableConnection> Future for Waiting<C> {
-    type Output = WaitingPoll<C>;
+impl<C, B> Future for Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
+    type Output = WaitingPoll<C, B>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -116,7 +136,8 @@ pub(crate) enum InnerCheckoutConnecting<T, P, B>
 where
     T: Transport,
     P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     Waiting,
     Connected,
@@ -129,7 +150,8 @@ impl<T, P, B> fmt::Debug for InnerCheckoutConnecting<T, P, B>
 where
     T: Transport,
     P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
@@ -154,13 +176,13 @@ pub(crate) struct Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     token: Token,
-    pool: PoolRef<P::Connection>,
+    pool: PoolRef<P::Connection, B>,
     #[pin]
-    waiter: Waiting<P::Connection>,
+    waiter: Waiting<P::Connection, B>,
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
@@ -173,8 +195,8 @@ impl<T, P, B> fmt::Debug for Checkout<T, P, B>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Checkout")
@@ -190,8 +212,8 @@ impl<T, P, B, C> Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B, Connection = C> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     /// Converts this checkout into a "delayed drop" checkout.
     fn as_delayed(self: Pin<&mut Self>) -> Option<Self> {
@@ -251,8 +273,8 @@ where
 
     pub(super) fn new(
         token: Token,
-        pool: PoolRef<P::Connection>,
-        waiter: Receiver<Pooled<P::Connection>>,
+        pool: PoolRef<P::Connection, B>,
+        waiter: Receiver<Pooled<P::Connection, B>>,
         connect: Option<Connector<T, P, B>>,
         connection: Option<P::Connection>,
         config: &Config,
@@ -315,11 +337,11 @@ impl<T, P, B> Future for Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     type Output = Result<
-        Pooled<P::Connection>,
+        Pooled<P::Connection, B>,
         ConnectorError<<T as Transport>::Error, <P as Protocol<T::IO, B>>::Error>,
     >;
 
@@ -432,9 +454,14 @@ where
 }
 
 /// Register a connection with the pool referenced here.
-fn register_connected<C>(poolref: &PoolRef<C>, token: Token, mut connection: C) -> Pooled<C>
+fn register_connected<C, B>(
+    poolref: &PoolRef<C, B>,
+    token: Token,
+    mut connection: C,
+) -> Pooled<C, B>
 where
-    C: PoolableConnection,
+    C: PoolableConnection<B>,
+    B: Send + 'static,
 {
     if let Some(mut pool) = poolref.lock() {
         if let Some(reused) = connection.reuse() {
@@ -469,8 +496,8 @@ impl<T, P, B> PinnedDrop for Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     fn drop(mut self: Pin<&mut Self>) {
         #[cfg(debug_assertions)]
