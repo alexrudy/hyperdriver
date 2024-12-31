@@ -43,7 +43,7 @@ pub mod tls;
 /// To implement a transport stream, implement a [`tower::Service`] which accepts a URI and returns
 /// an IO stream, which must be compatible with a [`super::Protocol`]. For example, HTTP protocols
 /// require an IO stream which implements [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`].
-pub trait Transport: Clone + Send {
+pub trait Transport: Send {
     /// The type of IO stream used by this transport
     type IO: HasConnectionInfo + Send + 'static;
 
@@ -54,9 +54,7 @@ pub trait Transport: Clone + Send {
     type Future: Future<Output = Result<Self::IO, <Self as Transport>::Error>> + Send + 'static;
 
     /// Connect to a remote server and return a stream.
-    fn connect<R>(&mut self, req: R) -> <Self as Transport>::Future
-    where
-        R: IntoRequestParts;
+    fn connect(&mut self, req: http::request::Parts) -> <Self as Transport>::Future;
 
     /// Poll the transport to see if it is ready to accept a new connection.
     fn poll_ready(
@@ -78,10 +76,10 @@ where
     type Error = T::Error;
     type Future = T::Future;
 
-    fn connect<R>(&mut self, req: R) -> <Self as Service<http::request::Parts>>::Future
-    where
-        R: IntoRequestParts,
-    {
+    fn connect(
+        &mut self,
+        req: http::request::Parts,
+    ) -> <Self as Service<http::request::Parts>>::Future {
         self.call(req.into_request_parts())
     }
 
@@ -113,10 +111,7 @@ where
     type Error = T::Error;
     type Future = T::Future;
 
-    fn connect<R>(&mut self, req: R) -> <Self as Transport>::Future
-    where
-        R: IntoRequestParts,
-    {
+    fn connect(&mut self, req: http::request::Parts) -> <Self as Transport>::Future {
         let parts = req.into_request_parts();
         self.0.call(parts.uri)
     }
@@ -131,12 +126,21 @@ where
 
 /// Extension trait for Transports to provide additional configuration options.
 pub trait TransportExt: Transport {
+    /// Connect to a remote server and return a stream.
+    fn connect_with<R>(&mut self, req: R) -> <Self as Transport>::Future
+    where
+        R: IntoRequestParts,
+    {
+        self.connect(req.into_request_parts())
+    }
+
     #[cfg(feature = "stream")]
     /// Wrap the transport in a converter which produces a Stream
     fn into_stream(self) -> IntoStream<Self>
     where
         Self::IO: Into<Stream> + AsyncRead + AsyncWrite + Unpin + Send + 'static,
         <<Self as Transport>::IO as HasConnectionInfo>::Addr: Into<BraidAddr>,
+        Self: Sized,
     {
         IntoStream::new(self)
     }
@@ -489,6 +493,7 @@ mod oneshot {
     use crate::IntoRequestParts;
 
     use super::Transport;
+    use super::TransportExt;
 
     #[pin_project::pin_project(project=OneshotStateProj)]
     enum OneshotState<T: Transport, R> {
@@ -542,7 +547,7 @@ mod oneshot {
                 match this.state.as_mut().project() {
                     OneshotStateProj::Pending { transport, request } => {
                         ready!(transport.poll_ready(cx))?;
-                        let fut = transport.connect(request.take().unwrap());
+                        let fut = transport.connect_with(request.take().unwrap());
                         this.state.set(OneshotState::Ready(fut));
                     }
                     OneshotStateProj::Ready(fut) => {
@@ -554,15 +559,25 @@ mod oneshot {
     }
 }
 
-#[cfg(all(test, feature = "stream"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::{info::HasTlsConnectionInfo, stream::tcp::TcpStream};
-    use static_assertions::assert_impl_all;
+    use std::future::Ready;
 
-    assert_impl_all!(Stream: HasTlsConnectionInfo, HasConnectionInfo);
-    assert_impl_all!(Stream: Send, Sync, Unpin);
+    use static_assertions::assert_obj_safe;
+    assert_obj_safe!(Transport<IO=(), Error=(), Future=Ready<Result<(),()>>>);
 
-    assert_impl_all!(TcpStream: HasConnectionInfo);
+    #[cfg(feature = "stream")]
+    mod stream {
+        use super::*;
+
+        use crate::{info::HasTlsConnectionInfo, stream::tcp::TcpStream};
+        use static_assertions::assert_impl_all;
+
+        assert_impl_all!(Stream: HasTlsConnectionInfo, HasConnectionInfo);
+        assert_impl_all!(Stream: Send, Sync, Unpin);
+
+        assert_impl_all!(TcpStream: HasConnectionInfo);
+    }
 }

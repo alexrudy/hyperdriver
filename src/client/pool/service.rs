@@ -219,7 +219,7 @@ where
 
 impl<T, P, S, BIn, K> ConnectionPoolService<T, P, S, BIn, K>
 where
-    T: Transport,
+    T: Transport + Clone,
     T::IO: Unpin,
     P: Protocol<T::IO, BIn, Error = ConnectionError> + Clone + Send + Sync + 'static,
     <P as Protocol<T::IO, BIn>>::Connection: PoolableConnection<BIn> + Send + 'static,
@@ -258,7 +258,7 @@ where
         + Send
         + Sync
         + 'static,
-    T: Transport + Send + 'static,
+    T: Transport + Clone + Send + 'static,
     T::IO: PoolableStream + Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
     S: tower::Service<ExecuteRequest<Pooled<C, BIn>, BIn>, Response = http::Response<BOut>>
@@ -302,7 +302,7 @@ where
         + Send
         + Sync
         + 'static,
-    T: Transport + 'static,
+    T: Transport + Clone + 'static,
     T::IO: PoolableStream + Unpin,
     S: tower::Service<ExecuteRequest<Pooled<C, BIn>, BIn>, Response = http::Response<BOut>>
         + Clone

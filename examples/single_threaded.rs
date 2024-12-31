@@ -29,7 +29,6 @@ use hyperdriver::info::HasConnectionInfo;
 use hyperdriver::server::Accept;
 use hyperdriver::service::{make_service_fn, RequestExecutor};
 use hyperdriver::stream::TcpStream;
-use hyperdriver::IntoRequestParts;
 use pin_project::pin_project;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -392,8 +391,8 @@ impl Transport for TransportNotSend {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::IO, Self::Error>> + Send>>;
 
-    fn connect<R: IntoRequestParts>(&mut self, req: R) -> <Self as Transport>::Future {
-        self.tcp.connect(req.into_request_parts()).boxed()
+    fn connect(&mut self, req: http::request::Parts) -> <Self as Transport>::Future {
+        self.tcp.connect(req).boxed()
     }
 
     fn poll_ready(
