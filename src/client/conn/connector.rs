@@ -422,7 +422,7 @@ where
         + Send
         + Sync
         + 'static,
-    T: Transport + Send + 'static,
+    T: Transport + Clone + Send + 'static,
     T::IO: Unpin,
     <<T as Transport>::IO as HasConnectionInfo>::Addr: Send,
     S: tower::Service<ExecuteRequest<C, BIn>, Response = http::Response<BOut>>
