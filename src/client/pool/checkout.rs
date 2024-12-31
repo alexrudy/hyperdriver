@@ -8,16 +8,14 @@ use std::task::Poll;
 
 use pin_project::pin_project;
 use pin_project::pinned_drop;
-use thiserror::Error;
 use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 use tracing::trace;
 
-use crate::client::conn::protocol::HttpProtocol;
+use crate::client::conn::connector::Error as ConnectorError;
+use crate::client::conn::connector::{Connector, ConnectorMeta};
 use crate::client::conn::Protocol;
 use crate::client::conn::Transport;
-use crate::info::ConnectionInfo;
-use crate::info::HasConnectionInfo;
 
 use super::key::Token;
 use super::Config;
@@ -46,35 +44,30 @@ impl fmt::Display for CheckoutId {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Error<Transport, Protocol> {
-    #[error("creating connection")]
-    Connecting(#[source] Transport),
-
-    #[error("handshaking connection")]
-    Handshaking(#[source] Protocol),
-
-    #[error("connection closed")]
-    Unavailable,
-}
-
 #[pin_project(project = WaitingProjected)]
-pub(crate) enum Waiting<C: PoolableConnection> {
+pub(crate) enum Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
     /// The checkout is waiting on an idle connection, and should
     /// attempt its own connection in the interim as well.
-    Idle(#[pin] Receiver<Pooled<C>>),
+    Idle(#[pin] Receiver<Pooled<C, B>>),
 
     /// The checkout is waiting on a connection currently in the process
     /// of connecting, and should wait for that connection to complete,
     /// not starting its own connection.
-    Connecting(#[pin] Receiver<Pooled<C>>),
+    Connecting(#[pin] Receiver<Pooled<C, B>>),
 
     /// There is no pool for connections to wait for.
     NoPool,
 }
 
-impl<C: PoolableConnection> Waiting<C> {
+impl<C, B> Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
     fn close(&mut self) {
         match self {
             Waiting::Idle(rx) => {
@@ -90,7 +83,11 @@ impl<C: PoolableConnection> Waiting<C> {
     }
 }
 
-impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
+impl<C, B> fmt::Debug for Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Waiting::Idle(_) => f.debug_tuple("Idle").finish(),
@@ -100,14 +97,22 @@ impl<C: PoolableConnection> fmt::Debug for Waiting<C> {
     }
 }
 
-pub(crate) enum WaitingPoll<C: PoolableConnection> {
-    Connected(Pooled<C>),
+pub(crate) enum WaitingPoll<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
+    Connected(Pooled<C, B>),
     Closed,
     NotReady,
 }
 
-impl<C: PoolableConnection> Future for Waiting<C> {
-    type Output = WaitingPoll<C>;
+impl<C, B> Future for Waiting<C, B>
+where
+    C: PoolableConnection<B>,
+    B: Send + 'static,
+{
+    type Output = WaitingPoll<C, B>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
@@ -126,242 +131,13 @@ impl<C: PoolableConnection> Future for Waiting<C> {
     }
 }
 
-#[pin_project(project = ConnectorStateProjected)]
-enum ConnectorState<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    PollReadyTransport {
-        parts: http::request::Parts,
-        transport: Option<T>,
-        protocol: Option<P>,
-    },
-    Connect {
-        #[pin]
-        future: T::Future,
-        protocol: Option<P>,
-    },
-    PollReadyHandshake {
-        protocol: Option<P>,
-        stream: Option<T::IO>,
-    },
-    Handshake {
-        #[pin]
-        future: <P as Protocol<T::IO, B>>::Future,
-        info: ConnectionInfo<<T::IO as HasConnectionInfo>::Addr>,
-    },
-}
-
-impl<T, P, B> fmt::Debug for ConnectorState<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConnectorState::PollReadyTransport { parts, .. } => f
-                .debug_struct("PollReadyTransport")
-                .field("address", &parts.uri)
-                .finish(),
-            ConnectorState::Connect { .. } => f.debug_tuple("Connect").finish(),
-            ConnectorState::PollReadyHandshake { .. } => {
-                f.debug_tuple("PollReadyHandshake").finish()
-            }
-            ConnectorState::Handshake { .. } => f.debug_tuple("Handshake").finish(),
-        }
-    }
-}
-
-/// A connector combines the futures required to connect to a transport
-/// and then complete the transport's associated startup handshake.
-#[pin_project]
-pub struct Connector<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    #[pin]
-    state: ConnectorState<T, P, B>,
-
-    version: Option<HttpProtocol>,
-    shareable: bool,
-}
-
-impl<T, P, B> fmt::Debug for Connector<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Connector")
-            .field("state", &self.state)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<T, P, B> Connector<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    /// Create a new connection from a transport connector and a handshake function.
-    pub fn new(
-        transport: T,
-        protocol: P,
-        parts: http::request::Parts,
-        version: HttpProtocol,
-    ) -> Self {
-        //TODO: Fix this
-        let shareable = false;
-
-        Self {
-            state: ConnectorState::PollReadyTransport {
-                parts,
-                transport: Some(transport),
-                protocol: Some(protocol),
-            },
-            version: Some(version),
-            shareable,
-        }
-    }
-}
-
-#[allow(type_alias_bounds)]
-type ConnectionError<T: Transport, P: Protocol<T::IO, B>, B> =
-    Error<<T as Transport>::Error, <P as Protocol<T::IO, B>>::Error>;
-
-impl<T, P, B> Connector<T, P, B>
-where
-    T: Transport,
-    P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
-{
-    fn poll_connector(
-        self: Pin<&mut Self>,
-        pool: &PoolRef<P::Connection>,
-        token: Token,
-        meta: &mut CheckoutMeta,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<P::Connection, ConnectionError<T, P, B>>> {
-        let mut connector_projected = self.project();
-
-        loop {
-            match connector_projected.state.as_mut().project() {
-                ConnectorStateProjected::PollReadyTransport {
-                    parts,
-                    transport,
-                    protocol,
-                } => {
-                    let _entered = meta.transport().enter();
-                    {
-                        let transport = transport.as_mut().unwrap();
-                        if let Err(error) = ready!(transport.poll_ready(cx)) {
-                            return Poll::Ready(Err(Error::Connecting(error)));
-                        }
-                    }
-
-                    let mut transport = transport
-                        .take()
-                        .expect("future polled in invalid state: transport is None");
-                    let future = transport.connect(parts.clone());
-                    let protocol = protocol.take();
-
-                    tracing::trace!("transport ready");
-                    connector_projected
-                        .state
-                        .set(ConnectorState::Connect { future, protocol });
-                }
-
-                ConnectorStateProjected::Connect { future, protocol } => {
-                    let _entered = meta.transport().enter();
-                    let stream = match ready!(future.poll(cx)) {
-                        Ok(stream) => stream,
-                        Err(error) => return Poll::Ready(Err(Error::Connecting(error))),
-                    };
-                    let protocol = protocol.take();
-
-                    tracing::trace!("transport connected");
-                    connector_projected
-                        .state
-                        .set(ConnectorState::PollReadyHandshake {
-                            protocol,
-                            stream: Some(stream),
-                        });
-                }
-
-                ConnectorStateProjected::PollReadyHandshake { protocol, stream } => {
-                    let _entered = meta.protocol().enter();
-
-                    {
-                        let protocol = protocol.as_mut().unwrap();
-                        if let Err(error) =
-                            ready!(<P as Protocol<T::IO, B>>::poll_ready(protocol, cx))
-                        {
-                            return Poll::Ready(Err(Error::Handshaking(error)));
-                        }
-                    }
-
-                    let stream = stream
-                        .take()
-                        .expect("future polled in invalid state: stream is None");
-
-                    let info = stream.info();
-
-                    let future = protocol
-                        .as_mut()
-                        .expect("future polled in invalid state: protocol is None")
-                        .connect(
-                            stream,
-                            connector_projected.version.take().expect("version is None"),
-                        );
-
-                    if *connector_projected.shareable {
-                        // This can happen if we connect expecting an HTTP/1.1 connection, but during the TLS
-                        // handshake we discover that the connection is actually an HTTP/2 connection.
-                        trace!(
-                            ?token,
-                            "connection can be shared, telling pool to wait for handshake"
-                        );
-                        if let Some(mut pool) = pool.lock() {
-                            pool.connected_in_handshake(token);
-                        }
-                    }
-
-                    tracing::trace!("handshake ready");
-
-                    connector_projected
-                        .state
-                        .set(ConnectorState::Handshake { future, info });
-                }
-
-                ConnectorStateProjected::Handshake { future, info } => {
-                    let _entered = meta.protocol().enter();
-
-                    return future.poll(cx).map(|result| match result {
-                        Ok(conn) => {
-                            tracing::debug!("connection to {} ready", info.remote_addr());
-                            Ok(conn)
-                        }
-                        Err(error) => Err(Error::Handshaking(error)),
-                    });
-                }
-            }
-        }
-    }
-}
-
 #[pin_project(project = CheckoutConnectingProj)]
 pub(crate) enum InnerCheckoutConnecting<T, P, B>
 where
     T: Transport,
     P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     Waiting,
     Connected,
@@ -374,7 +150,8 @@ impl<T, P, B> fmt::Debug for InnerCheckoutConnecting<T, P, B>
 where
     T: Transport,
     P: Protocol<T::IO, B>,
-    P::Connection: PoolableConnection,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
@@ -394,50 +171,22 @@ where
     }
 }
 
-struct CheckoutMeta {
-    overall_span: tracing::Span,
-    transport_span: Option<tracing::Span>,
-    protocol_span: Option<tracing::Span>,
-}
-
-impl CheckoutMeta {
-    fn new() -> Self {
-        let overall_span = tracing::Span::current();
-
-        Self {
-            overall_span,
-            transport_span: None,
-            protocol_span: None,
-        }
-    }
-
-    fn transport(&mut self) -> &tracing::Span {
-        self.transport_span
-            .get_or_insert_with(|| tracing::trace_span!(parent: &self.overall_span, "transport"))
-    }
-
-    fn protocol(&mut self) -> &tracing::Span {
-        self.protocol_span
-            .get_or_insert_with(|| tracing::trace_span!(parent: &self.overall_span, "protocol"))
-    }
-}
-
 #[pin_project(PinnedDrop)]
 pub(crate) struct Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     token: Token,
-    pool: PoolRef<P::Connection>,
+    pool: PoolRef<P::Connection, B>,
     #[pin]
-    waiter: Waiting<P::Connection>,
+    waiter: Waiting<P::Connection, B>,
     #[pin]
     inner: InnerCheckoutConnecting<T, P, B>,
     connection: Option<P::Connection>,
-    meta: CheckoutMeta,
+    meta: ConnectorMeta,
     #[cfg(debug_assertions)]
     id: CheckoutId,
 }
@@ -446,8 +195,8 @@ impl<T, P, B> fmt::Debug for Checkout<T, P, B>
 where
     T: Transport + Send + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Checkout")
@@ -463,8 +212,8 @@ impl<T, P, B, C> Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B, Connection = C> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     /// Converts this checkout into a "delayed drop" checkout.
     fn as_delayed(self: Pin<&mut Self>) -> Option<Self> {
@@ -479,7 +228,7 @@ where
                     waiter: Waiting::NoPool,
                     inner: InnerCheckoutConnecting::ConnectingDelayed(connector.take().unwrap()),
                     connection: None,
-                    meta: CheckoutMeta::new(), // New meta to avoid holding spans in the spawned task
+                    meta: ConnectorMeta::new(), // New meta to avoid holding spans in the spawned task
                     #[cfg(debug_assertions)]
                     id: *this.id,
                 })
@@ -516,7 +265,7 @@ where
             waiter: Waiting::NoPool,
             inner: InnerCheckoutConnecting::Connecting(connector),
             connection: None,
-            meta: CheckoutMeta::new(),
+            meta: ConnectorMeta::new(),
             #[cfg(debug_assertions)]
             id,
         }
@@ -524,15 +273,15 @@ where
 
     pub(super) fn new(
         token: Token,
-        pool: PoolRef<P::Connection>,
-        waiter: Receiver<Pooled<P::Connection>>,
+        pool: PoolRef<P::Connection, B>,
+        waiter: Receiver<Pooled<P::Connection, B>>,
         connect: Option<Connector<T, P, B>>,
         connection: Option<P::Connection>,
         config: &Config,
     ) -> Self {
         #[cfg(debug_assertions)]
         let id = CheckoutId::new();
-        let meta = CheckoutMeta::new();
+        let meta = ConnectorMeta::new();
 
         #[cfg(debug_assertions)]
         tracing::trace!(?token, %id, "creating new checkout");
@@ -588,17 +337,17 @@ impl<T, P, B> Future for Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     type Output = Result<
-        Pooled<P::Connection>,
-        Error<<T as Transport>::Error, <P as Protocol<T::IO, B>>::Error>,
+        Pooled<P::Connection, B>,
+        ConnectorError<<T as Transport>::Error, <P as Protocol<T::IO, B>>::Error>,
     >;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut().project();
-        let _entered = this.meta.overall_span.clone().entered();
+        let _entered = this.meta.current().clone().entered();
 
         {
             // Outcomes from .poll_waiter:
@@ -624,7 +373,7 @@ where
                 // We're waiting on a connection to be ready.
                 // If that were still happening, we would bail out above, since the waiter
                 // would return Poll::Pending.
-                Poll::Ready(Err(Error::Unavailable))
+                Poll::Ready(Err(ConnectorError::Unavailable))
             }
             CheckoutConnectingProj::Connected => {
                 // We've already connected, we can just return the connection.
@@ -638,8 +387,23 @@ where
                 Poll::Ready(Ok(register_connected(this.pool, *this.token, connection)))
             }
             CheckoutConnectingProj::Connecting(connector) => {
-                let result =
-                    ready!(connector.poll_connector(this.pool, *this.token, this.meta, cx));
+                let result = ready!(connector.poll_connector(
+                    {
+                        let pool = this.pool.clone();
+                        let token = *this.token;
+                        move || {
+                            trace!(
+                                ?token,
+                                "connection can be shared, telling pool to wait for handshake"
+                            );
+                            if let Some(mut pool) = pool.lock() {
+                                pool.connected_in_handshake(token);
+                            }
+                        }
+                    },
+                    this.meta,
+                    cx
+                ));
 
                 this.waiter.close();
                 this.inner.set(InnerCheckoutConnecting::Connected);
@@ -654,8 +418,19 @@ where
             CheckoutConnectingProj::ConnectingWithDelayDrop(Some(connector))
             | CheckoutConnectingProj::ConnectingDelayed(connector) => {
                 let result = ready!(connector.as_mut().poll_connector(
-                    this.pool,
-                    *this.token,
+                    {
+                        let pool = this.pool.clone();
+                        let token = *this.token;
+                        move || {
+                            trace!(
+                                ?token,
+                                "connection can be shared, telling pool to wait for handshake"
+                            );
+                            if let Some(mut pool) = pool.lock() {
+                                pool.connected_in_handshake(token);
+                            }
+                        }
+                    },
                     this.meta,
                     cx
                 ));
@@ -679,9 +454,14 @@ where
 }
 
 /// Register a connection with the pool referenced here.
-fn register_connected<C>(poolref: &PoolRef<C>, token: Token, mut connection: C) -> Pooled<C>
+fn register_connected<C, B>(
+    poolref: &PoolRef<C, B>,
+    token: Token,
+    mut connection: C,
+) -> Pooled<C, B>
 where
-    C: PoolableConnection,
+    C: PoolableConnection<B>,
+    B: Send + 'static,
 {
     if let Some(mut pool) = poolref.lock() {
         if let Some(reused) = connection.reuse() {
@@ -716,8 +496,8 @@ impl<T, P, B> PinnedDrop for Checkout<T, P, B>
 where
     T: Transport + 'static,
     P: Protocol<T::IO, B> + Send + 'static,
-    P::Connection: PoolableConnection,
-    B: 'static,
+    P::Connection: PoolableConnection<B>,
+    B: Send + 'static,
 {
     fn drop(mut self: Pin<&mut Self>) {
         #[cfg(debug_assertions)]
@@ -745,8 +525,10 @@ mod test {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(Error<std::io::Error, std::io::Error>: std::error::Error, Send, Sync, Into<BoxError>);
+    assert_impl_all!(ConnectorError<std::io::Error, std::io::Error>: std::error::Error, Send, Sync, Into<BoxError>);
 
+    #[cfg(feature = "mocks")]
+    use crate::client::conn::protocol::HttpProtocol;
     #[cfg(feature = "mocks")]
     use crate::client::conn::transport::mock::MockTransport;
     use crate::BoxError;

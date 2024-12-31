@@ -80,7 +80,7 @@ impl Connection<crate::Body> for MockSender {
     }
 }
 
-impl PoolableConnection for MockSender {
+impl PoolableConnection<crate::Body> for MockSender {
     fn is_open(&self) -> bool {
         self.stream.is_open()
     }
@@ -136,6 +136,6 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(MockSender: Connection<crate::Body>, PoolableConnection);
+    assert_impl_all!(MockSender: Connection<crate::Body>, PoolableConnection<crate::Body>);
     assert_impl_all!(MockProtocol: Protocol<MockStream, crate::Body>);
 }

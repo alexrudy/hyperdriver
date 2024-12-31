@@ -38,12 +38,14 @@
 //! and response objects, and for sending and receiving the data over the transport.
 
 pub mod connection;
+pub mod connector;
 pub mod dns;
 pub mod protocol;
 pub mod stream;
 pub mod transport;
 
 pub use self::connection::Connection;
+pub use self::connector::Connector;
 pub use self::protocol::{Protocol, ProtocolRequest};
 pub use self::stream::Stream;
 pub use self::transport::Transport;

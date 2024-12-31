@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::pool;
+use super::conn::connector::Error as ConnectorError;
 use crate::BoxError;
 
 /// Client error type.
@@ -40,16 +40,16 @@ pub enum Error {
     RequestTimeout,
 }
 
-impl<E1, E2> From<pool::Error<E1, E2>> for Error
+impl<E1, E2> From<ConnectorError<E1, E2>> for Error
 where
     E1: Into<BoxError>,
     E2: Into<BoxError>,
 {
-    fn from(error: pool::Error<E1, E2>) -> Self {
+    fn from(error: ConnectorError<E1, E2>) -> Self {
         match error {
-            pool::Error::Connecting(error) => Error::Connection(error.into()),
-            pool::Error::Handshaking(error) => Error::Transport(error.into()),
-            pool::Error::Unavailable => {
+            ConnectorError::Connecting(error) => Error::Connection(error.into()),
+            ConnectorError::Handshaking(error) => Error::Transport(error.into()),
+            ConnectorError::Unavailable => {
                 Error::Connection("pool closed, no connection can be made".into())
             }
         }

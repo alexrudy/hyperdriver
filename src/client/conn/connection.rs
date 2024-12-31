@@ -161,9 +161,9 @@ where
     }
 }
 
-impl<B> PoolableConnection for HttpConnection<B>
+impl<B> PoolableConnection<B> for HttpConnection<B>
 where
-    B: Send + 'static,
+    B: HttpBody + Send + 'static,
 {
     /// Checks for the connection being open by checking if the underlying connection is ready
     /// to send a new request. If the connection is not ready, it can't be re-used,
