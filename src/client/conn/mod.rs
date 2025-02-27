@@ -11,9 +11,9 @@
 //!
 //! Two builtin transports are provided:
 //! - [`transport::tcp::TcpTransport`]: Connects to a remote server over TCP/IP. This is the default transport, and what
-//!     usually powers HTTP connections.
+//!   usually powers HTTP connections.
 //! - [`transport::duplex::DuplexTransport`]: Connects to a remote server over a duplex stream, which
-//!     is an in-memory stream that can be used for testing or other purposes.
+//!   is an in-memory stream that can be used for testing or other purposes.
 //!
 //! ## Stream
 //!
