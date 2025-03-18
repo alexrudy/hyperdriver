@@ -17,6 +17,8 @@ use crate::client::conn::connector::{Connector, ConnectorMeta};
 use crate::client::conn::Protocol;
 use crate::client::conn::Transport;
 
+#[cfg(debug_assertions)]
+use self::ids::CheckoutId;
 use super::key::Token;
 use super::Config;
 use super::PoolRef;
@@ -24,23 +26,24 @@ use super::PoolableConnection;
 use super::Pooled;
 
 #[cfg(debug_assertions)]
-static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+mod ids {
+    use core::fmt;
 
-#[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CheckoutId(usize);
+    static CHECKOUT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
-#[cfg(debug_assertions)]
-impl CheckoutId {
-    fn new() -> Self {
-        CheckoutId(CHECKOUT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) struct CheckoutId(pub(super) usize);
+
+    impl CheckoutId {
+        pub(super) fn new() -> Self {
+            CheckoutId(CHECKOUT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+        }
     }
-}
 
-#[cfg(debug_assertions)]
-impl fmt::Display for CheckoutId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "checkout-{}", self.0)
+    impl fmt::Display for CheckoutId {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "checkout-{}", self.0)
+        }
     }
 }
 
