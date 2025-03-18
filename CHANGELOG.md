@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/alexrudy/hyperdriver/compare/v0.8.5...v0.9.0) - 2025-03-18
+
+### <!-- 0 -->⛰️ Features
+
+- Transport trait is dyn-compatible
+- Add generic body type to PoolableConnection
+- Connector Service
+- Expose the client connector publicly.
+- *(client)* Flexible APIs to leverage the TCP transport
+
 ## [0.8.5](https://github.com/alexrudy/hyperdriver/compare/v0.8.4...v0.8.5) - 2024-12-12
 
 ### <!-- 0 -->⛰️ Features
