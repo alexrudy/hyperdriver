@@ -24,7 +24,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 
 
 [dependencies]
-axum = { version = "0.7", optional = true }
+axum = { version = "0.8", optional = true }
 bytes = "1"
 camino = { version = "1", default-features = false }
 futures-core = "0.3"
