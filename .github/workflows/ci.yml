@@ -88,14 +88,14 @@ jobs:
         run: just pre-commit-ci
 
   msrv:
-    name: MSRV 1.74
+    name: MSRV 1.75
     runs-on: ubuntu-latest
     steps:
       - uses: extractions/setup-just@v2
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.74"
+          toolchain: "1.75"
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Run cargo build
