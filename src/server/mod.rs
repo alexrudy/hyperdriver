@@ -113,7 +113,7 @@ pub trait Protocol<S, IO, B> {
 ///   connection stream (to facilitate connection information).
 /// - `B` is the body type for the service.
 /// - `E` is the executor to use for running the server. This is used to spawn the
-///    connection futures.
+///   connection futures.
 pub struct Server<A, P, S, B, E> {
     acceptor: A,
     protocol: P,
