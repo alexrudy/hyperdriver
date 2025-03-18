@@ -77,7 +77,7 @@ where
     async move {
         tracing::trace!("sending shutdown signal");
         let _ = tx.send(());
-        handle.await.unwrap().map_err(Into::into)
+        handle.await.unwrap()
     }
 }
 
