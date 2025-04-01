@@ -13,21 +13,21 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::marker::PhantomData;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use futures_util::future::FutureExt as _;
 use http::Uri;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpSocket;
 use tokio::task::JoinError;
-use tower::ServiceExt as _;
 use tracing::{trace, warn, Instrument};
 
 use crate::client::builder::BuildTransport;
-use crate::client::conn::dns::{GaiResolver, IpVersion, SocketAddrs};
+use crate::client::conn::dns::{GaiResolver, IpVersion, ResolverExt as _, SocketAddrs};
 use crate::happy_eyeballs::{EyeballSet, HappyEyeballsError};
 use crate::info::HasConnectionInfo;
 use crate::stream::tcp::TcpStream;
@@ -224,42 +224,23 @@ where
 impl<R, IO> TcpTransport<R, IO>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
+    R::Future: Send + 'static,
 {
+    async fn resolve(&mut self, host: Box<str>) -> Result<SocketAddrs, TcpConnectionError> {
+        let resolver = R::clone(&self.resolver);
+        std::mem::replace(&mut self.resolver, resolver)
+            .resolve(host, self.config.connect_timeout)
+            .await
+            .map_err(TcpConnectionError::msg("dns resolve error"))
+    }
+
     /// Connect to a host and port.
     async fn connect(
         &mut self,
         host: Box<str>,
         port: u16,
     ) -> Result<TcpStream, TcpConnectionError> {
-        tracing::trace!(%host, "resolving hostname");
-        let resolver = R::clone(&self.resolver);
-        let resolve = std::mem::replace(&mut self.resolver, resolver).oneshot(host);
-
-        let mut addrs = if let Some(timeout) = self.config.connect_timeout {
-            tracing::trace!(?timeout, "resolve with timeout");
-            let outcome = tokio::time::timeout(timeout, resolve).await;
-            tracing::trace!(success=%outcome.is_ok(), "resolved dns");
-            match outcome {
-                Ok(Ok(addrs)) => addrs,
-                Err(_) => {
-                    return Err(TcpConnectionError::new(format!(
-                        "dns resolution timed out after {}",
-                        self.config.connect_timeout.unwrap().as_millis(),
-                    )))
-                }
-                Ok(Err(error)) => {
-                    return Err(TcpConnectionError::build("dns resolution failed", error))
-                }
-            }
-        } else {
-            tracing::trace!("resolve without timeout");
-            match resolve.await {
-                Ok(addrs) => addrs,
-                Err(error) => {
-                    return Err(TcpConnectionError::build("dns resolution failed", error))
-                }
-            }
-        };
+        let mut addrs = self.resolve(host).await?;
 
         addrs.set_port(port);
         tracing::trace!("dns resolution finished");
@@ -526,6 +507,133 @@ impl BuildTransport for TcpTransportConfig {
     }
 }
 
+/// A simple TCP transport that uses a single connection attempt.
+pub struct SimpleTcpTransport<R, IO = TcpStream> {
+    config: Arc<TcpTransportConfig>,
+    resolver: R,
+    stream: PhantomData<fn() -> IO>,
+}
+
+impl<R, IO> fmt::Debug for SimpleTcpTransport<R, IO> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SimpleTcpTransport").finish()
+    }
+}
+
+impl<R: Clone, IO> Clone for SimpleTcpTransport<R, IO> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            resolver: self.resolver.clone(),
+            stream: PhantomData,
+        }
+    }
+}
+
+impl<R, IO> SimpleTcpTransport<R, IO> {
+    /// Create a new simple TCP transport with the given configuration and resolver.
+    pub fn new(config: TcpTransportConfig, resolver: R) -> Self {
+        Self {
+            config: Arc::new(config),
+            resolver,
+            stream: PhantomData,
+        }
+    }
+
+    /// Chagne the resolver for the transport.
+    pub fn with_resolver<R2>(self, resolver: R2) -> SimpleTcpTransport<R2, IO> {
+        SimpleTcpTransport {
+            config: self.config,
+            resolver,
+            stream: PhantomData,
+        }
+    }
+}
+
+impl<R, IO> SimpleTcpTransport<R, IO>
+where
+    R: tower::Service<Box<str>, Response = IpAddr, Error = io::Error> + Send + Clone + 'static,
+    R::Future: Send + 'static,
+{
+    async fn resolve(&mut self, host: Box<str>) -> Result<IpAddr, TcpConnectionError> {
+        let resolver = R::clone(&self.resolver);
+        std::mem::replace(&mut self.resolver, resolver)
+            .resolve(host, self.config.connect_timeout)
+            .await
+            .map_err(TcpConnectionError::msg("dns resolve error"))
+    }
+
+    async fn connect(
+        &mut self,
+        host: Box<str>,
+        port: u16,
+    ) -> Result<TcpStream, TcpConnectionError> {
+        let ipaddr = self.resolve(host).await?;
+        let addr = SocketAddr::new(ipaddr, port);
+        trace!("tcp connecting to {}", addr);
+
+        self.connect_to_addr(addr).await
+    }
+
+    async fn connect_to_addr(&self, addr: SocketAddr) -> Result<TcpStream, TcpConnectionError> {
+        let connect = connect(&addr, self.config.connect_timeout, &self.config)?;
+        connect
+            .await
+            .map_err(TcpConnectionError::msg("tcp connect error"))
+    }
+}
+
+impl<R, IO> tower::Service<http::request::Parts> for SimpleTcpTransport<R, IO>
+where
+    R: tower::Service<Box<str>, Response = IpAddr, Error = io::Error>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    R::Future: Send + 'static,
+    TcpStream: Into<IO>,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO::Addr: Clone + Unpin + Send + 'static,
+{
+    type Response = IO;
+    type Error = TcpConnectionError;
+    type Future = BoxFuture<'static, Self::Response, Self::Error>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.resolver
+            .poll_ready(cx)
+            .map_err(TcpConnectionError::msg("dns poll_ready"))
+    }
+
+    fn call(&mut self, req: http::request::Parts) -> Self::Future {
+        let (host, port) = match get_host_and_port(&req.uri) {
+            Ok((host, port)) => (host, port),
+            Err(e) => return Box::pin(std::future::ready(Err(e))),
+        };
+
+        let mut transport = std::mem::replace(self, self.clone());
+
+        let span = tracing::trace_span!("tcp", host = %host, port = %port);
+
+        async move {
+            let stream = transport.connect(host, port).await?;
+
+            if let Ok(peer_addr) = stream.peer_addr() {
+                trace!(peer.addr = %peer_addr, "tcp connected");
+            } else {
+                trace!("tcp connected");
+                trace!("no peer address available");
+            }
+
+            let stream = stream.into();
+
+            Ok(stream)
+        }
+        .instrument(span)
+        .boxed()
+    }
+}
+
 fn get_host_and_port(uri: &Uri) -> Result<(Box<str>, u16), TcpConnectionError> {
     let host = uri.host().ok_or(TcpConnectionError::uri("missing host"))?;
     let host = host.trim_start_matches('[').trim_end_matches(']');
@@ -649,9 +757,12 @@ mod test {
     use std::future::Ready;
 
     use tokio::net::TcpListener;
-    use tower::Service;
+    use tower::{Service, ServiceExt as _};
 
-    use crate::{client::conn::Transport, IntoRequestParts};
+    use crate::{
+        client::conn::{dns::FirstAddrResolver, Transport},
+        IntoRequestParts,
+    };
 
     use super::*;
 
@@ -685,6 +796,7 @@ mod test {
         assert!(get_host_and_port(&uri).is_err());
     }
 
+    /// Always resolves to localhost at the given port.
     #[derive(Debug, Clone)]
     struct Resolver(u16);
 
@@ -869,6 +981,27 @@ mod test {
                 TcpStream::server(stream, addr)
             }
         );
+
+        let info = conn.info();
+        assert_eq!(
+            *info.remote_addr(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_transport() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let bind = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = bind.local_addr().unwrap().port();
+
+        let config = TcpTransportConfig::default();
+        let transport: SimpleTcpTransport<_, TcpStream> =
+            SimpleTcpTransport::new(config, FirstAddrResolver::new(Resolver(port)));
+
+        let uri: Uri = format!("http://example.com:{port}").parse().unwrap();
+        let (conn, _) = connect_transport(uri, transport, bind).await;
 
         let info = conn.info();
         assert_eq!(
