@@ -193,7 +193,7 @@ impl GaiResolver {
 impl tower::Service<Box<str>> for GaiResolver {
     type Response = SocketAddrs;
     type Error = io::Error;
-    type Future = GaiFuture<SocketAddrs>;
+    type Future = GaiFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -201,7 +201,7 @@ impl tower::Service<Box<str>> for GaiResolver {
 
     fn call(&mut self, host: Box<str>) -> Self::Future {
         let span = tracing::Span::current();
-        GaiFuture {
+        JoinHandleFuture {
             handle: tokio::task::spawn_blocking(move || {
                 tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
                     tracing::trace!("dns resolution starting");
@@ -214,9 +214,9 @@ impl tower::Service<Box<str>> for GaiResolver {
     }
 }
 
-pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> GaiFuture<SocketAddrs> {
+pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> GaiFuture {
     let span = tracing::Span::current();
-    GaiFuture {
+    JoinHandleFuture {
         handle: tokio::task::spawn_blocking(move || {
             tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
                 tracing::trace!("dns resolution starting");
@@ -229,18 +229,18 @@ pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> GaiFuture<S
 /// Future returned by `GaiResolver` when resolving
 /// via getaddrinfo.
 #[pin_project(PinnedDrop)]
-pub struct GaiFuture<Addr> {
+pub struct JoinHandleFuture<Addr> {
     #[pin]
     handle: JoinHandle<Result<Addr, io::Error>>,
 }
 
-impl<Addr> fmt::Debug for GaiFuture<Addr> {
+impl<Addr> fmt::Debug for JoinHandleFuture<Addr> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GaiFuture").finish()
     }
 }
 
-impl<Addr> Future for GaiFuture<Addr> {
+impl<Addr> Future for JoinHandleFuture<Addr> {
     type Output = Result<Addr, io::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -259,11 +259,15 @@ impl<Addr> Future for GaiFuture<Addr> {
 }
 
 #[pinned_drop]
-impl<Addr> PinnedDrop for GaiFuture<Addr> {
+impl<Addr> PinnedDrop for JoinHandleFuture<Addr> {
     fn drop(self: Pin<&mut Self>) {
         self.handle.abort()
     }
 }
+
+/// A future returned by `GaiResolver` when resolving via getaddrinfo
+/// in a worker thread.
+pub type GaiFuture = JoinHandleFuture<SocketAddrs>;
 
 /// Converts a standard resolver (which can return multiple addresses)
 /// into a resolver that only returns the first address as an IP address,
