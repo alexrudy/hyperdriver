@@ -114,8 +114,8 @@ where
 {
     type Output = WaitingPoll<C, B>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project() {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let polled = match self.as_mut().project() {
             WaitingProjected::Idle(rx) => match rx.poll(cx) {
                 Poll::Ready(Ok(connection)) => Poll::Ready(WaitingPoll::Connected(connection)),
                 Poll::Ready(Err(_)) => Poll::Ready(WaitingPoll::Closed),
@@ -127,7 +127,13 @@ where
                 Poll::Pending => Poll::Pending,
             },
             WaitingProjected::NoPool => Poll::Ready(WaitingPoll::Closed),
-        }
+        };
+
+        if polled.is_ready() {
+            self.as_mut().set(Waiting::NoPool);
+        };
+
+        polled
     }
 }
 
