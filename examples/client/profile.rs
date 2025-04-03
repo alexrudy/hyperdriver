@@ -28,7 +28,7 @@ const NAME: &str = "profile";
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    let _guard = init_tracing();
+    init_tracing()?;
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let args = clap::Command::new("profile-hyperdriver")
@@ -164,53 +164,45 @@ async fn demonstrate_requests(args: &ArgMatches) -> Result<(), BoxError> {
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
-struct OtelGuard {
-    _priv: (),
-}
-
-impl Drop for OtelGuard {
-    fn drop(&mut self) {
-        eprintln!("Draining opentelemetry spans");
-        opentelemetry::global::shutdown_tracer_provider();
-    }
-}
 
 // Create a Resource that captures information about the entity for which telemetry is recorded.
 fn resource() -> Resource {
-    Resource::from_schema_url(
-        [
-            KeyValue::new(SERVICE_NAME, env!("CARGO_PKG_NAME")),
-            KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-            KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop"),
-        ],
-        SCHEMA_URL,
-    )
+    Resource::builder()
+        .with_schema_url(
+            [
+                KeyValue::new(SERVICE_NAME, env!("CARGO_PKG_NAME")),
+                KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop"),
+            ],
+            SCHEMA_URL,
+        )
+        .build()
 }
 
-fn otel() -> Result<(Tracer, OtelGuard), BoxError> {
+fn otel() -> Result<Tracer, BoxError> {
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint("http://localhost:4317")
         .build()?;
 
-    let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_resource(resource())
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_batch_exporter(exporter)
         .build();
 
     opentelemetry::global::set_tracer_provider(provider.clone());
     let tracer = provider.tracer("tracing-otel-subscriber");
 
-    Ok((tracer, OtelGuard { _priv: () }))
+    Ok(tracer)
 }
 
-fn init_tracing() -> Result<OtelGuard, BoxError> {
+fn init_tracing() -> Result<(), BoxError> {
     let filter = Targets::new()
         .with_target("hyperdriver", Level::TRACE)
         .with_target(NAME, Level::TRACE)
         .with_default(Level::INFO);
 
-    let (tracer, guard) = otel()?;
+    let tracer = otel()?;
 
     tracing_subscriber::registry()
         .with(
@@ -225,5 +217,5 @@ fn init_tracing() -> Result<OtelGuard, BoxError> {
                 .with_filter(filter),
         )
         .init();
-    Ok(guard)
+    Ok(())
 }
