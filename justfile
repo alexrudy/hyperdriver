@@ -12,7 +12,7 @@ all: fmt check-all deny clippy examples docs test machete udeps msrv
 # Check for unused dependencies
 udeps:
     #!/usr/bin/env sh
-    set -euo pipefail
+    set -eu
 
     bold() {
         echo "\033[1m$1\033[0m"
