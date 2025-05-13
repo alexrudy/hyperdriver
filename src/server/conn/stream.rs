@@ -19,7 +19,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "tls")]
-use crate::info::tls::TlsConnectionInfoReciever;
+use crate::info::tls::TlsConnectionInfoReceiver;
 
 #[cfg(feature = "tls")]
 use crate::stream::TlsBraid;
@@ -107,7 +107,7 @@ where
     info: ConnectionInfo<IO::Addr>,
 
     #[cfg(feature = "tls")]
-    tls: TlsConnectionInfoReciever,
+    tls: TlsConnectionInfoReceiver,
 
     #[cfg(feature = "tls")]
     #[pin]
@@ -129,7 +129,7 @@ where
     info: ConnectionInfo<IO::Addr>,
 
     #[cfg(feature = "tls")]
-    tls: TlsConnectionInfoReciever,
+    tls: TlsConnectionInfoReceiver,
 
     #[cfg(feature = "tls")]
     #[pin]
@@ -150,7 +150,7 @@ where
             info: inner.info(),
 
             #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReciever::empty(),
+            tls: TlsConnectionInfoReceiver::empty(),
 
             #[cfg(feature = "tls")]
             inner: TlsBraid::NoTls(inner),
@@ -181,7 +181,7 @@ where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
     IO::Addr: Send + Unpin,
 {
-    fn recv(&self) -> TlsConnectionInfoReciever {
+    fn recv(&self) -> TlsConnectionInfoReceiver {
         self.inner.recv()
     }
 }
@@ -219,7 +219,7 @@ impl From<DuplexStream> for Stream {
         Stream {
             info: stream.info().map(Into::into),
             #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReciever::empty(),
+            tls: TlsConnectionInfoReceiver::empty(),
             inner: Braid::from(stream).into(),
         }
     }
@@ -232,7 +232,7 @@ impl From<Braid> for Stream {
         Stream {
             info: stream.info(),
             #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReciever::empty(),
+            tls: TlsConnectionInfoReceiver::empty(),
             inner: stream.into(),
         }
     }

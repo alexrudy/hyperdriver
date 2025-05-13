@@ -6,7 +6,7 @@ use super::HasConnectionInfo;
 use crate::info::Protocol;
 
 #[cfg(feature = "server")]
-pub(crate) use self::channel::{channel, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+pub(crate) use self::channel::{channel, TlsConnectionInfoReceiver, TlsConnectionInfoSender};
 
 /// Information about a TLS connection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -111,11 +111,11 @@ mod channel {
 
     use crate::info::TlsConnectionInfo;
 
-    pub fn channel() -> (TlsConnectionInfoSender, TlsConnectionInfoReciever) {
+    pub fn channel() -> (TlsConnectionInfoSender, TlsConnectionInfoReceiver) {
         let (tx, rx) = tokio::sync::oneshot::channel();
         (
             TlsConnectionInfoSender { tx: Some(tx) },
-            TlsConnectionInfoReciever::new(rx),
+            TlsConnectionInfoReceiver::new(rx),
         )
     }
 
@@ -140,11 +140,11 @@ mod channel {
     }
 
     #[derive(Debug, Clone)]
-    pub(crate) struct TlsConnectionInfoReciever {
+    pub(crate) struct TlsConnectionInfoReceiver {
         state: Arc<RwLock<State>>,
     }
 
-    impl TlsConnectionInfoReciever {
+    impl TlsConnectionInfoReceiver {
         pub(crate) fn empty() -> Self {
             Self {
                 state: Arc::new(RwLock::new(State::Empty)),

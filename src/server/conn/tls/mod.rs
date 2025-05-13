@@ -10,7 +10,7 @@ use futures_core::ready;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::Accept;
 
-use crate::info::tls::{channel, TlsConnectionInfoReciever, TlsConnectionInfoSender};
+use crate::info::tls::{channel, TlsConnectionInfoReceiver, TlsConnectionInfoSender};
 use crate::info::{ConnectionInfo, HasConnectionInfo, TlsConnectionInfo};
 use crate::stream::tls::{TlsHandshakeInfo, TlsHandshakeStream};
 
@@ -46,7 +46,7 @@ where
 {
     state: TlsState<IO>,
     tx: TlsConnectionInfoSender,
-    pub(crate) rx: TlsConnectionInfoReciever,
+    pub(crate) rx: TlsConnectionInfoReceiver,
 }
 
 impl<IO> TlsHandshakeStream for TlsStream<IO>
@@ -64,7 +64,7 @@ where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
     IO::Addr: Unpin,
 {
-    fn recv(&self) -> TlsConnectionInfoReciever {
+    fn recv(&self) -> TlsConnectionInfoReceiver {
         self.rx.clone()
     }
 }
