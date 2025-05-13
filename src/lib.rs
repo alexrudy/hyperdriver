@@ -82,7 +82,7 @@
 //!
 //! # Bodies
 //!
-//! The `hyper` ecosystem relies on the [`http_body::Body`] trait to represent the body of a request or response.
+//! The [`hyper`] ecosystem relies on the [`http_body::Body`] trait to represent the body of a request or response.
 //! This is implemented for many types, and so can be tricky to unify. Many ecosystem crates ([axum][], [reqwest][],
 //! [tonic][], etc.) implement their own body type, which sometimes can be used to encapsulate other bodies.
 //!
@@ -122,6 +122,7 @@ pub mod client;
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
 pub mod info;
+mod notify;
 #[cfg(feature = "server")]
 mod rewind;
 #[cfg(feature = "server")]
