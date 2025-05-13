@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt, num::NonZeroUsize, str::FromStr};
 
+use crate::DebugLiteral;
+
 use super::UriError;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,8 +68,14 @@ where
 
 /// Pool key which is used to identify a connection - using scheme
 /// and authority.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct UriKey(http::uri::Scheme, Option<http::uri::Authority>);
+
+impl fmt::Debug for UriKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("UriKey").field(&DebugLiteral(&self)).finish()
+    }
+}
 
 impl fmt::Display for UriKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -169,10 +177,7 @@ pub(crate) mod test_key {
             http::uri::Scheme::HTTP,
             Some(http::uri::Authority::from_static("localhost:8080")),
         );
-        assert_eq!(
-            format!("{:?}", key),
-            "UriKey(\"http\", Some(localhost:8080))"
-        );
+        assert_eq!(format!("{:?}", key), "UriKey(http://localhost:8080)");
     }
 
     #[test]
