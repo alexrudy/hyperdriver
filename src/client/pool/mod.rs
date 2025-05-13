@@ -364,12 +364,12 @@ where
 
             while let Some(waiter) = waiters.pop_front() {
                 if waiter.is_closed() {
-                    trace!("skipping closed waiter");
+                    trace!(?token, "skipping closed waiter");
                     continue;
                 }
 
                 if let Some(conn) = connection.reuse() {
-                    trace!("re-usable connection will be sent to waiter");
+                    trace!(?token, "re-usable connection will be sent to waiter");
                     let pooled = Pooled {
                         connection: Some(conn),
                         token: Token::zero(),
@@ -377,7 +377,7 @@ where
                     };
 
                     if waiter.send(pooled).is_err() {
-                        trace!("waiter closed, skipping");
+                        trace!(?token, "waiter closed, skipping");
                         continue;
                     };
                 } else {
@@ -392,15 +392,17 @@ where
                     };
 
                     let Err(pooled) = waiter.send(pooled) else {
-                        trace!("connection sent");
+                        trace!(?token, "connection sent");
                         return;
                     };
 
-                    trace!("waiter closed, continuing");
+                    trace!(?token, "waiter closed, continuing");
                     connection = pooled.take().unwrap();
                 }
             }
         }
+
+        trace!(?token, "push");
 
         self.idle.entry(token).or_default().push(connection);
     }
@@ -408,8 +410,6 @@ where
     fn pop(&mut self, token: Token) -> Option<C> {
         let mut empty = false;
         let mut idle_entry = None;
-
-        tracing::trace!(?token, "pop");
 
         if let Some(idle) = self.idle.get_mut(&token) {
             idle_entry = idle.pop(self.config.idle_timeout);
@@ -420,6 +420,8 @@ where
             trace!(?token, "removing empty idle list");
             self.idle.remove(&token);
         }
+
+        tracing::trace!(?token, entry=%idle_entry.is_some(), "pop");
 
         idle_entry
     }
@@ -627,6 +629,7 @@ where
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
             if !connection.can_share() {
+                trace!(token=?self.token, "spawn when ready");
                 tokio::spawn(WhenReady {
                     connection: Some(connection),
                     token: self.token,
