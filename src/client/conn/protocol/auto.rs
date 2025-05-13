@@ -1,5 +1,6 @@
 //! Auto-switching HTTP/1 and HTTP/2 connections.
 
+use std::fmt;
 use std::marker::PhantomData;
 use std::pin::pin;
 
@@ -7,16 +8,132 @@ use http_body::Body;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
+use http_body::Body as HttpBody;
+
+use crate::client::conn::connection::SendRequestFuture;
+use crate::client::conn::Connection;
+use crate::client::pool::PoolableConnection;
+
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::client::conn::connection::ConnectionError;
-use crate::client::conn::connection::HttpConnection;
 use crate::info::HasConnectionInfo;
 use crate::info::HasTlsConnectionInfo;
 use crate::BoxError;
 
 use super::HttpProtocol;
 use super::ProtocolRequest;
+
+/// An HTTP connection which is either HTTP1 or HTTP2
+pub struct HttpConnection<B> {
+    inner: InnerConnection<B>,
+}
+
+impl<B> HttpConnection<B> {
+    /// Create a new HTTP/1 connection.
+    pub(super) fn h1(conn: hyper::client::conn::http1::SendRequest<B>) -> Self {
+        HttpConnection {
+            inner: InnerConnection::H1(conn),
+        }
+    }
+
+    /// Create a new HTTP/2 connection.
+    pub(super) fn h2(conn: hyper::client::conn::http2::SendRequest<B>) -> Self {
+        HttpConnection {
+            inner: InnerConnection::H2(conn),
+        }
+    }
+}
+
+impl<B> fmt::Debug for HttpConnection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpConnection")
+            .field("version", &self.version())
+            .finish()
+    }
+}
+
+enum InnerConnection<B> {
+    H2(hyper::client::conn::http2::SendRequest<B>),
+    H1(hyper::client::conn::http1::SendRequest<B>),
+}
+
+impl<B> Connection<B> for HttpConnection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    type ResBody = hyper::body::Incoming;
+
+    type Error = hyper::Error;
+
+    type Future = SendRequestFuture;
+
+    fn send_request(&mut self, mut request: http::Request<B>) -> Self::Future {
+        match &mut self.inner {
+            InnerConnection::H2(conn) => {
+                *request.version_mut() = http::Version::HTTP_2;
+                SendRequestFuture::new(conn.send_request(request))
+            }
+            InnerConnection::H1(conn) => {
+                *request.version_mut() = http::Version::HTTP_11;
+                SendRequestFuture::new(conn.send_request(request))
+            }
+        }
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        match &mut self.inner {
+            InnerConnection::H2(conn) => conn.poll_ready(cx),
+            InnerConnection::H1(conn) => conn.poll_ready(cx),
+        }
+    }
+
+    fn version(&self) -> http::Version {
+        match &self.inner {
+            InnerConnection::H2(_) => http::Version::HTTP_2,
+            InnerConnection::H1(_) => http::Version::HTTP_11,
+        }
+    }
+}
+
+impl<B> PoolableConnection<B> for HttpConnection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    /// Checks for the connection being open by checking if the underlying connection is ready
+    /// to send a new request. If the connection is not ready, it can't be re-used,
+    /// so this shortcut isn't harmful.
+    fn is_open(&self) -> bool {
+        match &self.inner {
+            InnerConnection::H2(ref conn) => conn.is_ready(),
+            InnerConnection::H1(ref conn) => conn.is_ready(),
+        }
+    }
+
+    /// HTTP/2 connections can be shared, but HTTP/1 connections cannot.
+    fn can_share(&self) -> bool {
+        match &self.inner {
+            InnerConnection::H2(_) => true,
+            InnerConnection::H1(_) => false,
+        }
+    }
+
+    /// Reuse the connection if it is an HTTP/2 connection.
+    fn reuse(&mut self) -> Option<Self> {
+        match &self.inner {
+            InnerConnection::H2(conn) => Some(Self {
+                inner: InnerConnection::H2(conn.clone()),
+            }),
+            InnerConnection::H1(_) => None,
+        }
+    }
+}
 
 /// A builder for configuring and starting HTTP connections.
 ///
@@ -270,8 +387,7 @@ mod tests {
     use crate::client::conn::connection::ConnectionError;
 
     use crate::client::conn::Protocol as _;
-    use crate::client::conn::{protocol::HttpProtocol, Connection as _, Stream};
-    use crate::client::pool::PoolableConnection as _;
+    use crate::client::conn::{protocol::HttpProtocol, Stream};
     use crate::client::Error;
 
     #[cfg(all(feature = "mocks", feature = "tls"))]

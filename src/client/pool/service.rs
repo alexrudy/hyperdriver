@@ -8,7 +8,7 @@ use tower::util::Oneshot;
 use tower::ServiceExt;
 
 use crate::client::conn::connection::ConnectionError;
-use crate::client::conn::connection::HttpConnection;
+use crate::client::conn::protocol::auto::HttpConnection;
 use crate::client::conn::protocol::auto::HttpConnectionBuilder;
 use crate::client::conn::transport::tcp::TcpTransport;
 use crate::client::conn::Connection;

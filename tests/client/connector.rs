@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use http::StatusCode;
 use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::client::conn::connector::ConnectorLayer;
-use hyperdriver::client::conn::Connection as _;
+
 use hyperdriver::service::RequestExecutor;
 use hyperdriver::Body;
 use std::pin::pin;
