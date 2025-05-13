@@ -28,8 +28,10 @@ use crate::BoxError;
 use super::PoolableStream;
 
 /// Layer which adds connection pooling and converts
-/// to an inner service which accepts `ExecuteRequest`
-/// from an outer service which accepts `http::Request`.
+/// to an inner service which accepts [`ExecuteRequest`]
+/// from an outer service which accepts [`http::Request`].
+///
+/// The inner service is usually based on [`RequestExecutor`](crate::service::RequestExecutor).
 pub struct ConnectionPoolLayer<T, P, BIn, K = pool::UriKey> {
     transport: T,
     protocol: P,
@@ -121,7 +123,7 @@ where
 /// This service will accept [`http::Request`] objects, but expects the inner service
 /// to accept [`ExecuteRequest`] objects, which bundle the connection with the request.
 ///
-/// The simplest interior service is [`crate::service::RequestExecutor`], which will execute the request
+/// The simplest interior service is [`RequestExecutor`](crate::service::RequestExecutor), which will execute the request
 /// on the connection and return the response.
 #[derive(Debug)]
 pub struct ConnectionPoolService<T, P, S, BIn = crate::Body, K = crate::client::pool::UriKey>

@@ -1,17 +1,18 @@
 //! Connection Pooling for Clients
 //!
-//! The `pool` module provides a connection pool for clients, which allows for multiple connections to be made to a
-//! remote host and reused across multiple requests. This is supported in the `ClientService` type.
+//! The [`pool`](self) module provides a connection pool for clients, which allows for multiple connections to be made to a
+//! remote host and reused across multiple requests. The [`crate::Client`] implements connection pooling, and it can be
+//! added to tower services using the [`ConnectionPoolLayer`](self::service::ConnectionPoolLayer) with your service.
 //!
 //! This connection pool is specifically designed with HTTP connections in mind. It separates the treatment of the
 //! connection (e.g. HTTP/1.1, HTTP/2, etc) from the transport (e.g. TCP, TCP+TLS, etc). This allows the pool to be used
-//! with any type of connection, as long as it implements the `PoolableConnection` trait, and any type of transport,
-//! as long as it implements the `PoolableTransport` trait. This also allows the pool to be used with upgradeable
+//! with any type of connection, as long as it implements the [`PoolableConnection`] trait, and any type of transport,
+//! as long as the underlying stream implements the [`PoolableStream`] trait. This also allows the pool to be used with upgradeable
 //! connections, such as HTTP/1.1 connections that can be upgraded to HTTP/2, where the pool will have new HTTP/2
 //! connections wait for in-progress upgrades from HTTP/1.1 connections to complete and use those, rather than creating
 //! new connections.
 //!
-//! Pool configuration happens in the `Config` type, which allows for setting the maximum idle duration of a connection,
+//! Pool configuration happens in the [`Config`] type, which allows for setting the maximum idle duration of a connection,
 //! and the maximum number of idle connections per host.
 
 use std::collections::HashMap;
