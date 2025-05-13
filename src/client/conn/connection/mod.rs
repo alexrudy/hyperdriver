@@ -16,6 +16,9 @@ pub(super) use self::future::SendRequestFuture;
 use crate::client::pool::PoolableConnection;
 pub use crate::client::pool::UriError;
 
+pub mod info;
+pub mod notify;
+
 /// A connection to a remote server which can send and recieve HTTP requests/responses.
 ///
 /// Underneath, it may not use HTTP as the connection protocol, and it may use any appropriate
