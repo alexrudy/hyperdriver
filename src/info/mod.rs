@@ -237,18 +237,6 @@ pub struct ConnectionInfo<Addr> {
     pub remote_addr: Addr,
 }
 
-impl<Addr> Default for ConnectionInfo<Addr>
-where
-    Addr: Default,
-{
-    fn default() -> Self {
-        Self {
-            local_addr: Addr::default(),
-            remote_addr: Addr::default(),
-        }
-    }
-}
-
 impl From<DuplexAddr> for ConnectionInfo<DuplexAddr> {
     fn from(value: DuplexAddr) -> Self {
         ConnectionInfo {
@@ -364,14 +352,6 @@ mod tests {
             make_canonical("[::ffff:192.0.2.128]:8080".parse().unwrap()),
             "192.0.2.128:8080".parse().unwrap()
         )
-    }
-
-    #[test]
-    fn connection_info_default() {
-        let info = ConnectionInfo::<DuplexAddr>::default();
-
-        assert_eq!(info.local_addr, DuplexAddr::new());
-        assert_eq!(info.remote_addr, DuplexAddr::new());
     }
 
     #[test]

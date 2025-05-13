@@ -54,14 +54,9 @@ impl fmt::Debug for DuplexAddr {
     }
 }
 
-impl Default for DuplexAddr {
-    fn default() -> DuplexAddr {
-        Self::new()
-    }
-}
-
 impl DuplexAddr {
     /// Create a new duplex address
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             identity: IDENTITY.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
@@ -332,7 +327,7 @@ mod test {
     fn test_duplex_addr_default() {
         use super::*;
 
-        let default_addr = DuplexAddr::default();
+        let default_addr = DuplexAddr::new();
         let new_addr = DuplexAddr::new();
 
         // Default should be equivalent to calling new()

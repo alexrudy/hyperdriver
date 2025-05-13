@@ -109,7 +109,10 @@ impl HasConnectionInfo for MockStream {
     type Addr = MockAddress;
 
     fn info(&self) -> crate::info::ConnectionInfo<Self::Addr> {
-        crate::info::ConnectionInfo::default()
+        crate::info::ConnectionInfo {
+            local_addr: MockAddress,
+            remote_addr: MockAddress,
+        }
     }
 }
 

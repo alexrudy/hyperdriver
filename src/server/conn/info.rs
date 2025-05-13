@@ -220,7 +220,7 @@ mod tests {
                 .extensions()
                 .get::<ConnectionInfo<DuplexAddr>>()
                 .unwrap();
-            assert_eq!(*info.remote_addr(), DuplexAddr::new());
+            assert_eq!(*info.remote_addr(), *info.local_addr());
             async { Ok::<_, Infallible>(Response::new(())) }
         });
 
