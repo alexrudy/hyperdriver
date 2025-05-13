@@ -7,14 +7,13 @@
 use std::future::Future;
 use std::marker::PhantomData;
 
-use crate::BoxFuture;
 use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tower::Service;
 
+use self::future::HttpProtocolFuture;
 use super::connection::ConnectionError;
-use super::connection::HttpConnection;
 use super::Connection;
 use crate::bridge::io::TokioIo;
 use crate::info::HasConnectionInfo;
@@ -157,6 +156,47 @@ impl From<::http::Version> for HttpProtocol {
     }
 }
 
+/// Opaque future for protocols
+mod future {
+    use super::ConnectionError;
+    use std::fmt;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    /// Opaque future for sending a request over a connection.
+    pub struct HttpProtocolFuture<C> {
+        inner: Pin<Box<dyn Future<Output = Result<C, ConnectionError>> + Send + 'static>>,
+    }
+
+    impl<C> fmt::Debug for HttpProtocolFuture<C> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("HttpProtocolFuture").finish()
+        }
+    }
+
+    impl<C> HttpProtocolFuture<C> {
+        pub(super) fn new<F>(future: F) -> Self
+        where
+            F: Future<Output = Result<C, ConnectionError>> + Send + 'static,
+        {
+            Self {
+                inner: Box::pin(future),
+            }
+        }
+    }
+
+    impl<C> Future for HttpProtocolFuture<C> {
+        type Output = Result<C, ConnectionError>;
+
+        fn poll(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            self.inner.as_mut().poll(cx)
+        }
+    }
+}
+
 impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for hyper::client::conn::http1::Builder
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -164,10 +204,10 @@ where
     <B as Body>::Data: Send,
     <B as Body>::Error: Into<BoxError>,
 {
-    type Response = HttpConnection<B>;
+    type Response = hyper::client::conn::http1::SendRequest<B>;
 
     type Error = ConnectionError;
-    type Future = BoxFuture<'static, Result<HttpConnection<B>, ConnectionError>>;
+    type Future = HttpProtocolFuture<hyper::client::conn::http1::SendRequest<B>>;
 
     fn poll_ready(
         &mut self,
@@ -183,7 +223,7 @@ where
         // let info = stream.info();
         // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 
-        Box::pin(async move {
+        HttpProtocolFuture::new(async move {
             let (sender, conn) = builder
                 .handshake(TokioIo::new(stream))
                 .await
@@ -198,7 +238,7 @@ where
                     }
                 }
             });
-            Ok(HttpConnection::h1(sender))
+            Ok(sender)
         })
     }
 }
@@ -216,10 +256,10 @@ where
     <BIn as Body>::Data: Send,
     <BIn as Body>::Error: Into<BoxError>,
 {
-    type Response = HttpConnection<BIn>;
+    type Response = hyper::client::conn::http2::SendRequest<BIn>;
 
     type Error = ConnectionError;
-    type Future = BoxFuture<'static, Result<HttpConnection<BIn>, ConnectionError>>;
+    type Future = HttpProtocolFuture<hyper::client::conn::http2::SendRequest<BIn>>;
 
     fn poll_ready(
         &mut self,
@@ -234,7 +274,7 @@ where
         // let info = stream.info();
         // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 
-        Box::pin(async move {
+        HttpProtocolFuture::new(async move {
             let (sender, conn) = builder
                 .handshake(TokioIo::new(stream))
                 .await
@@ -248,7 +288,7 @@ where
                     }
                 }
             });
-            Ok(HttpConnection::h2(sender))
+            Ok(sender)
         })
     }
 }
