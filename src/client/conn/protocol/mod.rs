@@ -20,8 +20,10 @@ use crate::info::HasConnectionInfo;
 use crate::BoxError;
 
 pub mod auto;
+pub mod info;
 #[cfg(feature = "mocks")]
 pub mod mock;
+pub mod notify;
 pub use hyper::client::conn::http1;
 pub use hyper::client::conn::http2;
 
