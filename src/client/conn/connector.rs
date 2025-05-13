@@ -34,6 +34,8 @@ use crate::client::Error as ClientError;
 use crate::service::ExecuteRequest;
 use crate::BoxError;
 
+use super::protocol::info::ProtocolWithInfo;
+
 pub(in crate::client) struct ConnectorMeta {
     overall_span: tracing::Span,
     transport_span: Option<tracing::Span>,
@@ -181,6 +183,38 @@ where
             version: Some(version),
             shareable,
         }
+    }
+}
+
+impl<T, P, B> Connector<T, P, B>
+where
+    T: Transport,
+    P: Protocol<T::IO, B> + Send + 'static,
+    <<T as Transport>::IO as HasConnectionInfo>::Addr: Clone + Send + Sync + 'static,
+    <P as Protocol<<T as Transport>::IO, B>>::Connection: 'static,
+{
+    /// Add [`ConnectionInfo`] from the transport to the response's
+    /// http extensions.
+    // This method is okay because the only way to change the .state
+    // out of PollReadyTransport is to poll the connector, at which
+    // point the connector is pinned, and can't be moved. This method
+    // moves the connector.
+    pub fn with_info(self) -> Connector<T, ProtocolWithInfo<P>, B> {
+        let ConnectorState::PollReadyTransport {
+            parts: Some(parts),
+            transport: Some(transport),
+            protocol: Some(protocol),
+        } = self.state
+        else {
+            panic!("Connector has already been polled, can't be altered.")
+        };
+
+        Connector::new(
+            transport,
+            ProtocolWithInfo::new(protocol),
+            parts,
+            self.version.unwrap(),
+        )
     }
 }
 
