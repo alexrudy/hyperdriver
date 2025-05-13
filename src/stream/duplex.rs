@@ -28,6 +28,7 @@ use core::fmt;
 use std::{
     io,
     pin::Pin,
+    sync::atomic::AtomicUsize,
     task::{ready, Context, Poll},
 };
 
@@ -39,28 +40,38 @@ use crate::info::{self, HasConnectionInfo};
 #[cfg(feature = "server")]
 use crate::server::conn::Accept;
 
+static IDENTITY: AtomicUsize = AtomicUsize::new(1);
+
 /// Address (blank) for a duplex stream
-#[derive(Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct DuplexAddr {
-    _priv: (),
+    identity: usize,
 }
 
 impl fmt::Debug for DuplexAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DuplexAddr")
+        f.debug_tuple("DuplexAddr").field(&self.identity).finish()
+    }
+}
+
+impl Default for DuplexAddr {
+    fn default() -> DuplexAddr {
+        Self::new()
     }
 }
 
 impl DuplexAddr {
     /// Create a new duplex address
     pub fn new() -> Self {
-        Self { _priv: () }
+        Self {
+            identity: IDENTITY.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        }
     }
 }
 
 impl fmt::Display for DuplexAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "duplex")
+        write!(f, "duplex://{}", self.identity)
     }
 }
 
@@ -91,7 +102,7 @@ impl DuplexStream {
     /// using [`DuplexClient`] and [`DuplexIncoming`] together to create a client/server pair of duplex streams.
     pub fn new(max_buf_size: usize) -> (Self, Self) {
         let (a, b) = tokio::io::duplex(max_buf_size);
-        let info = info::ConnectionInfo::duplex().map(|_| DuplexAddr::new());
+        let info = info::ConnectionInfo::from(DuplexAddr::new());
         (
             DuplexStream {
                 inner: a,
@@ -269,6 +280,73 @@ pub fn pair() -> (DuplexClient, DuplexIncoming) {
 
 #[cfg(test)]
 mod test {
+    #[test]
+    fn test_duplex_addr_new_creates_unique_addresses() {
+        use super::*;
+
+        let addr1 = DuplexAddr::new();
+        let addr2 = DuplexAddr::new();
+
+        assert_ne!(
+            addr1, addr2,
+            "New DuplexAddr instances should have unique identities"
+        );
+
+        // Check that the Display implementation works correctly
+        let addr1_str = format!("{}", addr1);
+        let addr2_str = format!("{}", addr2);
+
+        assert!(
+            addr1_str.starts_with("duplex://"),
+            "Display format should include protocol"
+        );
+        assert!(
+            addr2_str.starts_with("duplex://"),
+            "Display format should include protocol"
+        );
+        assert_ne!(
+            addr1_str, addr2_str,
+            "String representation should be different for different addresses"
+        );
+    }
+
+    #[test]
+    fn test_duplex_addr_clone_and_eq() {
+        use super::*;
+
+        let addr1 = DuplexAddr::new();
+        let addr1_clone = addr1.clone();
+
+        assert_eq!(
+            addr1, addr1_clone,
+            "Cloned address should equal the original"
+        );
+        assert_eq!(
+            format!("{}", addr1),
+            format!("{}", addr1_clone),
+            "Cloned address should have same string representation"
+        );
+    }
+
+    #[test]
+    fn test_duplex_addr_default() {
+        use super::*;
+
+        let default_addr = DuplexAddr::default();
+        let new_addr = DuplexAddr::new();
+
+        // Default should be equivalent to calling new()
+        assert_ne!(
+            default_addr, new_addr,
+            "Default should create a unique address"
+        );
+
+        // Debug formatting should work
+        assert!(
+            format!("{:?}", default_addr).contains("DuplexAddr"),
+            "Debug output should contain struct name"
+        );
+    }
 
     #[tokio::test]
     async fn test_duplex() {

@@ -43,9 +43,7 @@ impl HasConnectionInfo for Braid {
     fn info(&self) -> ConnectionInfo<BraidAddr> {
         match &self.inner {
             BraidCore::Tcp(stream) => stream.info().map(BraidAddr::Tcp),
-            BraidCore::Duplex(stream) => {
-                <DuplexStream as HasConnectionInfo>::info(stream).map(|_| BraidAddr::Duplex)
-            }
+            BraidCore::Duplex(stream) => stream.info().map(BraidAddr::Duplex),
             BraidCore::Unix(stream) => stream.info().map(BraidAddr::Unix),
         }
     }

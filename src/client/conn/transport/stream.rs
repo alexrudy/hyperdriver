@@ -115,7 +115,7 @@ mod tests {
         );
         let info = io.info();
 
-        assert_eq!(info.local_addr, BraidAddr::Duplex);
-        assert_eq!(info.remote_addr, BraidAddr::Duplex);
+        assert_eq!(info.local_addr, info.remote_addr);
+        assert!(matches!(info.local_addr, BraidAddr::Duplex(_)))
     }
 }

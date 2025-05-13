@@ -1,5 +1,7 @@
 //! Test the duplex stream.
 
+use hyperdriver::info::{BraidAddr, HasConnectionInfo as _};
+
 #[tokio::test]
 async fn braided_duplex() {
     use futures_util::StreamExt;
@@ -23,4 +25,19 @@ async fn braided_duplex() {
     conn.write_all(b"hello world").await.unwrap();
     let n = conn.read(&mut buf).await.unwrap();
     assert_eq!(&buf[..n], b"hello world");
+
+    let info = conn.info();
+    assert_eq!(info.local_addr, info.remote_addr);
+
+    let mut conn = client.connect(1024).await.unwrap();
+    let mut buf = [0u8; 1024];
+    conn.write_all(b"hello world").await.unwrap();
+    let n = conn.read(&mut buf).await.unwrap();
+    assert_eq!(&buf[..n], b"hello world");
+
+    let BraidAddr::Duplex(d) = info.local_addr else {
+        panic!("not a duplex address in duplex test?");
+    };
+
+    assert_ne!(d, conn.info().local_addr);
 }

@@ -107,8 +107,8 @@ pub enum BraidAddr {
     /// A TCP socket address.
     Tcp(std::net::SocketAddr),
 
-    /// Represents a duplex connection which has no address.
-    Duplex,
+    /// Represents a duplex connection which has an opaque, unique address.
+    Duplex(DuplexAddr),
 
     /// A Unix socket address.
     Unix(UnixAddr),
@@ -119,7 +119,7 @@ impl std::fmt::Display for BraidAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "{}", addr),
-            Self::Duplex => write!(f, "<duplex>"),
+            Self::Duplex(addr) => write!(f, "{}", addr),
             Self::Unix(path) => write!(f, "{}", path),
         }
     }
@@ -210,8 +210,8 @@ impl From<UnixAddr> for BraidAddr {
 
 #[cfg(feature = "stream")]
 impl From<DuplexAddr> for BraidAddr {
-    fn from(_: DuplexAddr) -> Self {
-        Self::Duplex
+    fn from(addr: DuplexAddr) -> Self {
+        Self::Duplex(addr)
     }
 }
 
@@ -249,22 +249,11 @@ where
     }
 }
 
-#[cfg(feature = "stream")]
-impl ConnectionInfo<BraidAddr> {
-    pub(crate) fn duplex() -> Self {
+impl From<DuplexAddr> for ConnectionInfo<DuplexAddr> {
+    fn from(value: DuplexAddr) -> Self {
         ConnectionInfo {
-            local_addr: BraidAddr::Duplex,
-            remote_addr: BraidAddr::Duplex,
-        }
-    }
-}
-
-#[cfg(not(feature = "stream"))]
-impl ConnectionInfo<DuplexAddr> {
-    pub(crate) fn duplex() -> Self {
-        ConnectionInfo {
-            local_addr: DuplexAddr::new(),
-            remote_addr: DuplexAddr::new(),
+            local_addr: value.clone(),
+            remote_addr: value,
         }
     }
 }
