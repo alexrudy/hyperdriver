@@ -11,9 +11,9 @@ use tracing::debug;
 use tracing::instrument::Instrumented;
 use tracing::Span;
 
+use crate::notify;
 use crate::private::Sealed;
 use crate::server::{Accept, Connection, MakeServiceRef, Protocol};
-use crate::server::{CloseFuture, CloseReciever, CloseSender};
 
 /// An executor suitable for spawning connection futures
 /// and driving them to completion.
@@ -141,8 +141,8 @@ pub struct GracefulConnectionDriver<C, E> {
     #[pin]
     conn: ConnectionDriver<C, E>,
     #[pin]
-    shutdown: Fuse<CloseFuture>,
-    finished: CloseSender,
+    shutdown: Fuse<notify::Notified>,
+    finished: notify::Sender,
     span: Span,
 }
 
@@ -155,8 +155,8 @@ impl<C, E> fmt::Debug for GracefulConnectionDriver<C, E> {
 impl<C, E> GracefulConnectionDriver<C, E> {
     pub(in crate::server) fn new(
         conn: C,
-        shutdown: CloseReciever,
-        finished: CloseSender,
+        shutdown: notify::Receiver,
+        finished: notify::Sender,
         span: Span,
     ) -> Self {
         Self {

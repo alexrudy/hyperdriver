@@ -43,7 +43,6 @@
 use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::pin::{pin, Pin};
-use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
@@ -66,7 +65,7 @@ use self::conn::Connection;
 use crate::bridge::rt::TokioExecutor;
 use crate::info::HasConnectionInfo;
 use crate::service::MakeServiceRef;
-use crate::{BoxError, BoxFuture};
+use crate::{notify, BoxError};
 
 mod builder;
 pub mod conn;
@@ -384,46 +383,6 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-struct CloseSender(Option<tokio::sync::watch::Receiver<()>>);
-
-impl CloseSender {
-    fn send(&mut self) {
-        let _ = self.0.take();
-        tracing::trace!("sending close signal");
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CloseReciever(Arc<tokio::sync::watch::Sender<()>>);
-
-impl IntoFuture for CloseReciever {
-    type IntoFuture = CloseFuture;
-    type Output = ();
-
-    fn into_future(self) -> Self::IntoFuture {
-        CloseFuture(Box::pin(async move {
-            self.0.closed().await;
-        }))
-    }
-}
-
-#[pin_project::pin_project]
-struct CloseFuture(#[pin] BoxFuture<'static, ()>);
-
-impl Future for CloseFuture {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().0.poll(cx)
-    }
-}
-
-fn close() -> (CloseSender, CloseReciever) {
-    let (tx, rx) = tokio::sync::watch::channel(());
-    (CloseSender(Some(rx)), CloseReciever(Arc::new(tx)))
-}
-
 /// A server that can accept connections, and run each connection, and can
 /// also process graceful shutdown signals.
 ///
@@ -440,12 +399,12 @@ where
     #[pin]
     signal: F,
 
-    channel: CloseReciever,
-    shutdown: CloseSender,
+    channel: notify::Receiver,
+    shutdown: notify::Sender,
 
     #[pin]
-    finished: CloseFuture,
-    connection: CloseSender,
+    finished: notify::Notified,
+    connection: notify::Sender,
 }
 
 impl<A, P, S, B, E, F> GracefulShutdown<A, P, S, B, E, F>
@@ -458,8 +417,8 @@ where
     E: ServerExecutor<P, S, A, B>,
 {
     fn new(server: Server<A, P, S, B, E>, signal: F) -> Self {
-        let (tx, rx) = close();
-        let (tx2, rx2) = close();
+        let (tx, rx) = notify::channel();
+        let (tx2, rx2) = notify::channel();
         Self {
             server: server.into_future(),
             signal,
