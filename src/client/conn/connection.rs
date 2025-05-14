@@ -1,13 +1,18 @@
 //! Connections are responsible for sending and receiving HTTP requests and responses
 //! over an arbitrary two-way stream of bytes.
+//!
+//! The connection trait is implemented for [`hyper::client::conn::http1::SendRequest`] and
+//! [`hyper::client::conn::http2::SendRequest`], allowing the native hyper types to be used
+//! for [`Protocol`](super::Protocol).
 
-use std::{fmt, future::Future, pin::Pin, task::Poll};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Poll;
 
-use crate::BoxFuture;
 use http_body::Body as HttpBody;
-use hyper::body::Incoming;
 use thiserror::Error;
 
+pub(super) use self::future::SendRequestFuture;
 use crate::client::pool::PoolableConnection;
 pub use crate::client::pool::UriError;
 
@@ -83,44 +88,7 @@ where
     }
 }
 
-/// An HTTP connection.
-pub struct HttpConnection<B> {
-    inner: InnerConnection<B>,
-}
-
-impl<B> HttpConnection<B> {
-    /// Create a new HTTP/1 connection.
-    pub(super) fn h1(conn: hyper::client::conn::http1::SendRequest<B>) -> Self {
-        HttpConnection {
-            inner: InnerConnection::H1(conn),
-        }
-    }
-
-    /// Create a new HTTP/2 connection.
-    pub(super) fn h2(conn: hyper::client::conn::http2::SendRequest<B>) -> Self {
-        HttpConnection {
-            inner: InnerConnection::H2(conn),
-        }
-    }
-}
-
-impl<B> fmt::Debug for HttpConnection<B>
-where
-    B: HttpBody + Send + 'static,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HttpConnection")
-            .field("version", &self.version())
-            .finish()
-    }
-}
-
-enum InnerConnection<B> {
-    H2(hyper::client::conn::http2::SendRequest<B>),
-    H1(hyper::client::conn::http1::SendRequest<B>),
-}
-
-impl<B> Connection<B> for HttpConnection<B>
+impl<B> Connection<B> for hyper::client::conn::http1::SendRequest<B>
 where
     B: HttpBody + Send + 'static,
 {
@@ -128,69 +96,86 @@ where
 
     type Error = hyper::Error;
 
-    type Future = BoxFuture<'static, Result<http::Response<Incoming>, hyper::Error>>;
+    type Future = SendRequestFuture;
 
     fn send_request(&mut self, mut request: http::Request<B>) -> Self::Future {
-        match &mut self.inner {
-            InnerConnection::H2(conn) => {
-                *request.version_mut() = http::Version::HTTP_2;
-                Box::pin(conn.send_request(request))
-            }
-            InnerConnection::H1(conn) => {
-                *request.version_mut() = http::Version::HTTP_11;
-                Box::pin(conn.send_request(request))
-            }
-        }
+        *request.version_mut() = http::Version::HTTP_11;
+        SendRequestFuture::new(hyper::client::conn::http1::SendRequest::send_request(
+            self, request,
+        ))
     }
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        match &mut self.inner {
-            InnerConnection::H2(conn) => conn.poll_ready(cx),
-            InnerConnection::H1(conn) => conn.poll_ready(cx),
-        }
+        hyper::client::conn::http1::SendRequest::poll_ready(self, cx)
     }
 
     fn version(&self) -> http::Version {
-        match &self.inner {
-            InnerConnection::H2(_) => http::Version::HTTP_2,
-            InnerConnection::H1(_) => http::Version::HTTP_11,
-        }
+        http::Version::HTTP_11
     }
 }
 
-impl<B> PoolableConnection<B> for HttpConnection<B>
+impl<B> PoolableConnection<B> for hyper::client::conn::http1::SendRequest<B>
 where
     B: HttpBody + Send + 'static,
 {
-    /// Checks for the connection being open by checking if the underlying connection is ready
-    /// to send a new request. If the connection is not ready, it can't be re-used,
-    /// so this shortcut isn't harmful.
     fn is_open(&self) -> bool {
-        match &self.inner {
-            InnerConnection::H2(ref conn) => conn.is_ready(),
-            InnerConnection::H1(ref conn) => conn.is_ready(),
-        }
+        self.is_ready()
     }
 
-    /// HTTP/2 connections can be shared, but HTTP/1 connections cannot.
     fn can_share(&self) -> bool {
-        match &self.inner {
-            InnerConnection::H2(_) => true,
-            InnerConnection::H1(_) => false,
-        }
+        false
     }
 
-    /// Reuse the connection if it is an HTTP/2 connection.
     fn reuse(&mut self) -> Option<Self> {
-        match &self.inner {
-            InnerConnection::H2(conn) => Some(Self {
-                inner: InnerConnection::H2(conn.clone()),
-            }),
-            InnerConnection::H1(_) => None,
-        }
+        None
+    }
+}
+
+impl<B> Connection<B> for hyper::client::conn::http2::SendRequest<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    type ResBody = hyper::body::Incoming;
+
+    type Error = hyper::Error;
+
+    type Future = SendRequestFuture;
+
+    fn send_request(&mut self, request: http::Request<B>) -> Self::Future {
+        SendRequestFuture::new(hyper::client::conn::http2::SendRequest::send_request(
+            self, request,
+        ))
+    }
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        hyper::client::conn::http2::SendRequest::poll_ready(self, cx)
+    }
+
+    fn version(&self) -> http::Version {
+        http::Version::HTTP_2
+    }
+}
+
+impl<B> PoolableConnection<B> for hyper::client::conn::http2::SendRequest<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    fn is_open(&self) -> bool {
+        hyper::client::conn::http2::SendRequest::is_ready(self)
+    }
+
+    fn can_share(&self) -> bool {
+        true
+    }
+
+    fn reuse(&mut self) -> Option<Self> {
+        Some(self.clone())
     }
 }
 
@@ -221,6 +206,54 @@ pub enum ConnectionError {
     /// Invalid URI for the connection
     #[error("invalid URI")]
     InvalidUri(#[from] UriError),
+}
+
+/// Opaque future for connections
+mod future {
+    use std::fmt;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    /// Opaque future for sending a request over a connection.
+    pub struct SendRequestFuture {
+        inner: Pin<
+            Box<
+                dyn Future<Output = Result<http::Response<hyper::body::Incoming>, hyper::Error>>
+                    + Send
+                    + 'static,
+            >,
+        >,
+    }
+
+    impl fmt::Debug for SendRequestFuture {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("SendRequestFuture").finish()
+        }
+    }
+
+    impl SendRequestFuture {
+        pub(in crate::client::conn) fn new<F>(future: F) -> Self
+        where
+            F: Future<Output = Result<http::Response<hyper::body::Incoming>, hyper::Error>>
+                + Send
+                + 'static,
+        {
+            Self {
+                inner: Box::pin(future),
+            }
+        }
+    }
+
+    impl Future for SendRequestFuture {
+        type Output = Result<http::Response<hyper::body::Incoming>, hyper::Error>;
+
+        fn poll(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            self.inner.as_mut().poll(cx)
+        }
+    }
 }
 
 #[cfg(test)]
