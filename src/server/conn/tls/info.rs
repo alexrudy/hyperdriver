@@ -76,7 +76,7 @@ mod future {
 
     use pin_project::pin_project;
 
-    use crate::info::tls::TlsConnectionInfoReciever;
+    use crate::info::tls::TlsConnectionInfoReceiver;
     use crate::service::ServiceRef;
 
     use super::TlsConnection;
@@ -92,14 +92,14 @@ mod future {
 
         _io: std::marker::PhantomData<fn(&IO) -> ()>,
 
-        rx: TlsConnectionInfoReciever,
+        rx: TlsConnectionInfoReceiver,
     }
 
     impl<S, IO> TlsConnectionFuture<S, IO>
     where
         S: ServiceRef<IO>,
     {
-        pub(super) fn new(inner: S::Future, rx: TlsConnectionInfoReciever) -> Self {
+        pub(super) fn new(inner: S::Future, rx: TlsConnectionInfoReceiver) -> Self {
             Self {
                 inner,
                 rx,
@@ -134,7 +134,7 @@ mod future {
 #[derive(Debug, Clone)]
 pub struct TlsConnection<S> {
     inner: S,
-    rx: crate::info::tls::TlsConnectionInfoReciever,
+    rx: crate::info::tls::TlsConnectionInfoReceiver,
 }
 
 impl<S, BIn, BOut> Service<Request<BIn>> for TlsConnection<S>

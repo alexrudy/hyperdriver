@@ -8,7 +8,7 @@ use std::{
 };
 
 #[cfg(feature = "server")]
-use crate::info::tls::TlsConnectionInfoReciever;
+use crate::info::tls::TlsConnectionInfoReceiver;
 pub use crate::info::TlsConnectionInfo;
 use futures_core::Future;
 use pin_project::pin_project;
@@ -58,7 +58,7 @@ pub trait TlsHandshakeStream {
 /// A stream which can provide information about the TLS handshake.
 #[cfg(feature = "server")]
 pub(crate) trait TlsHandshakeInfo: TlsHandshakeStream {
-    fn recv(&self) -> TlsConnectionInfoReciever;
+    fn recv(&self) -> TlsConnectionInfoReceiver;
 }
 
 /// Dispatching wrapper for optionally supporting TLS
@@ -94,9 +94,9 @@ where
     Tls: TlsHandshakeInfo + Unpin,
     NoTls: AsyncRead + AsyncWrite + Send + Unpin,
 {
-    fn recv(&self) -> TlsConnectionInfoReciever {
+    fn recv(&self) -> TlsConnectionInfoReceiver {
         match self {
-            TlsBraid::NoTls(_) => TlsConnectionInfoReciever::empty(),
+            TlsBraid::NoTls(_) => TlsConnectionInfoReceiver::empty(),
             TlsBraid::Tls(stream) => stream.recv(),
         }
     }
