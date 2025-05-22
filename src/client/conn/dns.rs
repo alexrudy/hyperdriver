@@ -251,7 +251,7 @@ impl<Addr> Future for JoinHandleFuture<Addr> {
                 if join_err.is_cancelled() {
                     Poll::Ready(Err(io::Error::new(io::ErrorKind::Interrupted, join_err)))
                 } else {
-                    Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, join_err)))
+                    Poll::Ready(Err(io::Error::other(join_err)))
                 }
             }
         }

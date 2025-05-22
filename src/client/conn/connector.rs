@@ -84,6 +84,7 @@ pub enum Error<Transport, Protocol> {
 }
 
 #[pin_project(project = ConnectorStateProjected)]
+#[allow(clippy::large_enum_variant)]
 enum ConnectorState<T, P, B>
 where
     T: Transport,
@@ -605,6 +606,7 @@ mod future {
     }
 
     #[pin_project(project=ResponseFutureStateProj)]
+    #[allow(clippy::large_enum_variant)]
     enum ResponseFutureState<T, P, C, S, BIn, BOut>
     where
         T: Transport + Send + 'static,

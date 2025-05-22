@@ -446,6 +446,7 @@ where
 }
 
 #[pin_project(project=ResponseFutureStateProj)]
+#[allow(clippy::large_enum_variant)]
 enum ResponseFutureState<T, P, C, S, BIn, BOut>
 where
     T: Transport + Send + 'static,

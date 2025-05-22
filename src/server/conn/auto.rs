@@ -204,6 +204,7 @@ where
 }
 
 #[pin_project(project = ConnectionStateProject)]
+#[allow(clippy::large_enum_variant)]
 enum ConnectionState<'b, I, S, E>
 where
     S: hyper::service::HttpService<hyper::body::Incoming>,
