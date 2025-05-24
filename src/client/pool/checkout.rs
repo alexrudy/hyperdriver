@@ -150,7 +150,7 @@ where
 {
     Waiting,
     Connected,
-    Connecting(#[pin] Connector<T, P, B>),
+    Connecting(Pin<Box<Connector<T, P, B>>>),
     ConnectingWithDelayDrop(Option<Pin<Box<Connector<T, P, B>>>>),
     ConnectingDelayed(Pin<Box<Connector<T, P, B>>>),
 }
@@ -272,7 +272,7 @@ where
             token: Token::zero(),
             pool: PoolRef::none(),
             waiter: Waiting::NoPool,
-            inner: InnerCheckoutConnecting::Connecting(connector),
+            inner: InnerCheckoutConnecting::Connecting(Box::pin(connector)),
             connection: None,
             meta: ConnectorMeta::new(),
             #[cfg(debug_assertions)]
@@ -313,7 +313,7 @@ where
             let inner = if config.continue_after_preemption {
                 InnerCheckoutConnecting::ConnectingWithDelayDrop(Some(Box::pin(connector)))
             } else {
-                InnerCheckoutConnecting::Connecting(connector)
+                InnerCheckoutConnecting::Connecting(Box::pin(connector))
             };
 
             Self {
@@ -396,7 +396,7 @@ where
                 Poll::Ready(Ok(register_connected(this.pool, *this.token, connection)))
             }
             CheckoutConnectingProj::Connecting(connector) => {
-                let result = ready!(connector.poll_connector(
+                let result = ready!(connector.as_mut().poll_connector(
                     {
                         let pool = this.pool.clone();
                         let token = *this.token;
