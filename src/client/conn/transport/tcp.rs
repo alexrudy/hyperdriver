@@ -69,39 +69,46 @@ use crate::BoxError;
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct TcpTransport<R = GaiResolver, IO = TcpStream> {
+pub struct TcpTransport<R = GaiResolver, IO = TcpStream, H = HostFromUri> {
     config: Arc<TcpTransportConfig>,
     resolver: R,
+    gethost: H,
     stream: PhantomData<fn() -> IO>,
 }
 
-impl<R, IO> Clone for TcpTransport<R, IO>
+impl<R, IO, H> Clone for TcpTransport<R, IO, H>
 where
     R: Clone,
+    H: Clone,
 {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),
             resolver: self.resolver.clone(),
+            gethost: self.gethost.clone(),
             stream: PhantomData,
         }
     }
 }
 
-impl<IO> Default for TcpTransport<GaiResolver, IO> {
+impl<IO> Default for TcpTransport<GaiResolver, IO, HostFromUri> {
     fn default() -> Self {
-        TcpTransport::builder().with_gai_resolver().build()
+        TcpTransport::builder()
+            .with_gai_resolver()
+            .with_host_from_uri()
+            .build()
     }
 }
 
 #[derive(Debug)]
 /// Builder for a TCP connector.
-pub struct TcpTransportBuilder<R> {
+pub struct TcpTransportBuilder<R, H> {
     config: TcpTransportConfig,
     resolver: R,
+    gethost: H,
 }
 
-impl<R> TcpTransportBuilder<R> {
+impl<R, H> TcpTransportBuilder<R, H> {
     /// Access the TCP connection configuration
     pub fn config(&mut self) -> &mut TcpTransportConfig {
         &mut self.config
@@ -114,20 +121,22 @@ impl<R> TcpTransportBuilder<R> {
     }
 }
 
-impl<R> TcpTransportBuilder<R> {
+impl<R, H> TcpTransportBuilder<R, H> {
     /// Set the resolver for the TCP connector
-    pub fn with_resolver<R2>(self, resolver: R2) -> TcpTransportBuilder<R2> {
+    pub fn with_resolver<R2>(self, resolver: R2) -> TcpTransportBuilder<R2, H> {
         TcpTransportBuilder {
             config: self.config,
             resolver,
+            gethost: self.gethost,
         }
     }
 
     /// Use the default GAI resolver for the TCP connector
-    pub fn with_gai_resolver(self) -> TcpTransportBuilder<GaiResolver> {
+    pub fn with_gai_resolver(self) -> TcpTransportBuilder<GaiResolver, H> {
         TcpTransportBuilder {
             config: self.config,
             resolver: GaiResolver::new(),
+            gethost: self.gethost,
         }
     }
 
@@ -137,15 +146,37 @@ impl<R> TcpTransportBuilder<R> {
     }
 }
 
-impl<R> TcpTransportBuilder<R>
+impl<R, H> TcpTransportBuilder<R, H> {
+    /// Parse the host and port from the Uri in the request data
+    pub fn with_host_from_uri(self) -> TcpTransportBuilder<R, HostFromUri> {
+        TcpTransportBuilder {
+            config: self.config,
+            resolver: self.resolver,
+            gethost: HostFromUri::default(),
+        }
+    }
+
+    /// Set a way to get the host from request data.
+    pub fn with_host_from<H2>(self, get_host: H2) -> TcpTransportBuilder<R, H2> {
+        TcpTransportBuilder {
+            config: self.config,
+            resolver: self.resolver,
+            gethost: get_host,
+        }
+    }
+}
+
+impl<R, H> TcpTransportBuilder<R, H>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
+    H: GetHostAndPort,
 {
     /// Build a TCP connector with a resolver
-    pub fn build<IO>(self) -> TcpTransport<R, IO> {
+    pub fn build<IO>(self) -> TcpTransport<R, IO, H> {
         TcpTransport {
             config: Arc::new(self.config),
             resolver: self.resolver,
+            gethost: self.gethost,
             stream: PhantomData,
         }
     }
@@ -153,10 +184,11 @@ where
 
 impl TcpTransport {
     /// Create a new TCP connector builder with the default configuration.
-    pub fn builder() -> TcpTransportBuilder<()> {
+    pub fn builder() -> TcpTransportBuilder<(), ()> {
         TcpTransportBuilder {
             config: Default::default(),
             resolver: (),
+            gethost: (),
         }
     }
 }
@@ -170,7 +202,7 @@ impl<R, IO> TcpTransport<R, IO> {
 
 type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
-impl<R, IO> tower::Service<http::request::Parts> for TcpTransport<R, IO>
+impl<R, IO, H> tower::Service<http::request::Parts> for TcpTransport<R, IO, H>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error>
         + Clone
@@ -181,6 +213,7 @@ where
     TcpStream: Into<IO>,
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Unpin + Send + 'static,
+    H: GetHostAndPort + Clone + Send + 'static,
 {
     type Response = IO;
     type Error = TcpConnectionError;
@@ -193,7 +226,7 @@ where
     }
 
     fn call(&mut self, req: http::request::Parts) -> Self::Future {
-        let (host, port) = match get_host_and_port(&req.uri) {
+        let (host, port) = match self.gethost.get_host_and_port(&req) {
             Ok((host, port)) => (host, port),
             Err(e) => return Box::pin(std::future::ready(Err(e))),
         };
@@ -221,7 +254,7 @@ where
     }
 }
 
-impl<R, IO> TcpTransport<R, IO>
+impl<R, IO, H> TcpTransport<R, IO, H>
 where
     R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error> + Send + Clone + 'static,
     R::Future: Send + 'static,
@@ -503,6 +536,7 @@ impl BuildTransport for TcpTransportConfig {
         TcpTransport::builder()
             .with_config(self)
             .with_gai_resolver()
+            .with_host_from_uri()
             .build()
     }
 }
@@ -631,6 +665,33 @@ where
         }
         .instrument(span)
         .boxed()
+    }
+}
+
+/// Get the host and port by parsing them from the URI,
+/// and using the scheme to infer the port if not present.
+#[derive(Debug, Default, Clone)]
+pub struct HostFromUri {
+    _priv: (),
+}
+
+/// Trait for producing the host and port from a request.
+pub trait GetHostAndPort {
+    /// Parse information from the request to identify
+    /// the host and URI. Most often, [`HostFromUri`] is
+    /// the right default.
+    fn get_host_and_port(
+        &self,
+        req: &http::request::Parts,
+    ) -> Result<(Box<str>, u16), TcpConnectionError>;
+}
+
+impl GetHostAndPort for HostFromUri {
+    fn get_host_and_port(
+        &self,
+        req: &http::request::Parts,
+    ) -> Result<(Box<str>, u16), TcpConnectionError> {
+        self::get_host_and_port(&req.uri)
     }
 }
 
@@ -883,6 +944,7 @@ mod test {
         let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(Resolver(0))
+            .with_host_from_uri()
             .build::<TcpStream>();
 
         let result = transport.oneshot(uri.into_request_parts()).await;
@@ -903,6 +965,7 @@ mod test {
         let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(Resolver(port))
+            .with_host_from_uri()
             .build::<TcpStream>();
 
         let (stream, _) = connect_transport(uri, transport, bind).await;
@@ -925,6 +988,7 @@ mod test {
         let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(EmptyResolver)
+            .with_host_from_uri()
             .build::<TcpStream>();
 
         let result = transport.oneshot(uri.into_request_parts()).await;
@@ -946,6 +1010,7 @@ mod test {
         let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(ErrorResolver)
+            .with_host_from_uri()
             .build::<TcpStream>();
 
         let result = transport.oneshot(parts).await;
@@ -967,6 +1032,7 @@ mod test {
         let transport = TcpTransport::builder()
             .with_config(config)
             .with_resolver(Resolver(port))
+            .with_host_from_uri()
             .build::<TcpStream>();
 
         let addrs = vec![
