@@ -10,19 +10,15 @@ all: fmt check-all deny clippy examples docs test machete udeps msrv
     @echo "All checks passed 🍻"
 
 # Check for unused dependencies
-udeps:
-    #!/usr/bin/env sh
-    set -eu
+udeps: udeps-one udeps-hack
 
-    bold() {
-        echo "\033[1m$1\033[0m"
-    }
+#[private]
+udeps-one:
+    cargo +{{nightly}} udeps  --target-dir=target/udeps/ --all-features
 
-    export CARGO_TARGET_DIR="target/hack/"
-    bold "cargo +{{nightly}} udeps"
-    cargo +{{nightly}} udeps  --all-features
-    bold "cargo +{{nightly}} hack udeps"
-    cargo +{{nightly}} hack udeps --each-feature
+#[private]
+udeps-hack:
+    cargo +{{nightly}} hack udeps --target-dir=target/udeps/ --each-feature
 
 # Use machete to check for unused dependencies
 machete:
@@ -39,13 +35,15 @@ check-all: check check-hack-each check-hack-powerset check-hack-all-targets
 # Check feature combinations
 check-hack: check-hack-each check-hack-powerset check-hack-all-targets
 
+cargo-hack-args := "--target-dir target/hack/"
+
 [private]
 check-hack-each:
-    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --each-feature --no-dev-deps
+    cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature
 
 [private]
 check-hack-powerset:
-    cargo +{{rust}} hack check --target-dir target/hack/ --no-private --feature-powerset --no-dev-deps --skip docs,axum,sni,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --skip docs,axum,sni,tls-ring,tls-aws-lc
 
 [private]
 check-hack-tests: (check-hack-targets "tests")
@@ -61,7 +59,7 @@ check-hack-all-targets: (check-hack-targets "all-targets")
 
 # Check compilation combinations for a specific target
 check-hack-targets targets='tests':
-    cargo +{{rust}} hack check --{{targets}} --target-dir target/hack/ --no-private --feature-powerset --exclude-no-default-features --include-features mocks,tls-ring,server,client,stream
+    cargo +{{rust}} hack check --{{targets}} {{cargo-hack-args}} --no-private --feature-powerset --exclude-no-default-features --include-features mocks,tls-ring,server,client,stream
 
 # Build the library in release mode
 build:
