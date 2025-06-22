@@ -1,7 +1,7 @@
 #!/usr/bin/env just --justfile
 
 
-nightly := "nightly-2024-12-04"
+nightly := "nightly-2025-06-20"
 msrv := "1.75"
 rust := env("RUSTUP_TOOLCHAIN", "stable")
 
@@ -14,11 +14,11 @@ udeps: udeps-one udeps-hack
 
 #[private]
 udeps-one:
-    cargo +{{nightly}} udeps  --target-dir=target/udeps/ --all-features
+    CARGO_TARGET_DIR="target/udeps" cargo +{{nightly}} udeps --all-features
 
 #[private]
 udeps-hack:
-    cargo +{{nightly}} hack udeps --target-dir=target/udeps/ --each-feature
+    CARGO_TARGET_DIR="target/udeps" cargo +{{nightly}} hack udeps --each-feature
 
 # Use machete to check for unused dependencies
 machete:
