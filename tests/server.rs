@@ -10,6 +10,7 @@ use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::protocol::HttpProtocol;
 use hyperdriver::client::conn::Stream;
+use hyperdriver::info::BraidAddr;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::server::GracefulServerExecutor;
 use hyperdriver::server::ServerExecutor;
@@ -21,6 +22,12 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
     tracing::trace!("processing request");
+    let info = req
+        .extensions()
+        .get::<hyperdriver::info::ConnectionInfo<BraidAddr>>();
+    assert!(info.is_some(), "expected to find connection info");
+    tracing::trace!("found connection info: {info:?}");
+
     let body = req.into_body();
     let data = body.collect().await?;
     tracing::trace!("collected body, responding");
@@ -118,6 +125,7 @@ async fn echo_h1() {
         .with_incoming(incoming)
         .with_http1()
         .with_shared_service(tower::service_fn(echo))
+        .with_connection_info()
         .with_tokio();
 
     let handle = serve_gracefully(server);
@@ -147,6 +155,7 @@ async fn echo_h2() {
         .with_incoming(incoming)
         .with_http2()
         .with_shared_service(tower::service_fn(echo))
+        .with_connection_info()
         .with_tokio();
 
     let guard = serve_gracefully(server);
@@ -175,6 +184,7 @@ async fn echo_h1_early_disconnect() {
         .with_incoming(incoming)
         .with_http1()
         .with_shared_service(tower::service_fn(echo))
+        .with_connection_info()
         .with_tokio();
 
     let handle = serve(server);
@@ -204,6 +214,7 @@ async fn echo_auto_h1() {
         .with_incoming(incoming)
         .with_auto_http()
         .with_shared_service(tower::service_fn(echo))
+        .with_connection_info()
         .with_tokio();
 
     let handle = serve_gracefully(server);
@@ -233,6 +244,7 @@ async fn echo_auto_h2() {
         .with_incoming(incoming)
         .with_auto_http()
         .with_shared_service(tower::service_fn(echo))
+        .with_connection_info()
         .with_tokio();
     let handle = serve_gracefully(server);
 
