@@ -101,6 +101,7 @@ where
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
         let info = stream.info();
+        tracing::trace!("prepared connection info from stream");
         future::MakeServiceConnectionInfoFuture::new(inner.call(stream), info)
     }
 }
@@ -194,6 +195,11 @@ where
         let mut inner = std::mem::replace(&mut self.inner, next);
 
         if let Some(info) = self.info.take() {
+            tracing::trace!(
+                "Inserting connection info {}<{}>",
+                std::any::type_name_of_val(&info),
+                std::any::type_name_of_val(info.local_addr())
+            );
             req.extensions_mut().insert(info);
         } else {
             tracing::error!("Connection called twice, info is not available");

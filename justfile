@@ -2,7 +2,7 @@
 
 
 nightly := "nightly-2025-06-20"
-msrv := "1.75"
+msrv := "1.76"
 rust := env("RUSTUP_TOOLCHAIN", "stable")
 
 # Run all checks
