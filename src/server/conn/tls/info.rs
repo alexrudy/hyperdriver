@@ -167,9 +167,9 @@ where
                     req.extensions_mut().insert(info);
                 }
             }
-            .instrument(span.clone())
+            .instrument(span)
             .await;
-            inner.call(req).instrument(span).await
+            inner.call(req).await
         };
 
         Box::pin(fut)
