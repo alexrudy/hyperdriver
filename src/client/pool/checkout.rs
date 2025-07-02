@@ -547,7 +547,7 @@ mod test {
         let id = CheckoutId(0);
         assert_eq!(id.to_string(), "checkout-0");
         assert_eq!(id, CheckoutId(0));
-        assert_eq!(format!("{:?}", id), "CheckoutId(0)");
+        assert_eq!(format!("{id:?}"), "CheckoutId(0)");
         assert_eq!(id.clone(), CheckoutId(0));
     }
 
@@ -568,7 +568,7 @@ mod test {
         ));
         assert!(matches!(checkout.waiter, Waiting::NoPool));
 
-        let dbg = format!("{:?}", checkout);
+        let dbg = format!("{checkout:?}");
         assert!(dbg.starts_with("Checkout { "));
 
         let connection = checkout.await.unwrap();

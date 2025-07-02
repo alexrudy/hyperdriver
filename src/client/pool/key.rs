@@ -19,7 +19,7 @@ impl Token {
 impl fmt::Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            Some(value) => write!(f, "Token({})", value),
+            Some(value) => write!(f, "Token({value})"),
             None => write!(f, "Token(0)"),
         }
     }
@@ -169,10 +169,7 @@ pub(crate) mod test_key {
             http::uri::Scheme::HTTP,
             Some(http::uri::Authority::from_static("localhost:8080")),
         );
-        assert_eq!(
-            format!("{:?}", key),
-            "UriKey(\"http\", Some(localhost:8080))"
-        );
+        assert_eq!(format!("{key:?}"), "UriKey(\"http\", Some(localhost:8080))");
     }
 
     #[test]

@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
     for (name, value) in res.headers() {
         if let Ok(value) = value.to_str() {
-            println!("  {}: {}", name, value);
+            println!("  {name}: {value}");
         }
     }
 
@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
             total += data.len();
         }
     }
-    println!("Recieved {} body bytes", total);
+    println!("Recieved {total} body bytes");
     drop(r2);
 
     let r3 = client.get(uri).await?;

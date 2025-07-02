@@ -56,7 +56,7 @@ impl UnixAddr {
 impl fmt::Display for UnixAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(path) = self.path() {
-            write!(f, "unix://{}", path)
+            write!(f, "unix://{path}")
         } else {
             write!(f, "unix://")
         }

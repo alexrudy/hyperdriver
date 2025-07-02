@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     );
     for (name, value) in req.headers() {
         if let Ok(value) = value.to_str() {
-            println!("  {}: {}", name, value);
+            println!("  {name}: {value}");
         }
     }
 
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
     for (name, value) in res.headers() {
         if let Ok(value) = value.to_str() {
-            println!("  {}: {}", name, value);
+            println!("  {name}: {value}");
         }
     }
 

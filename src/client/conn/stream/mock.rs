@@ -240,7 +240,7 @@ mod tests {
 
         assert_eq!(conn.info().remote_addr(), &MockAddress);
 
-        let dbg = format!("{:?}", conn);
+        let dbg = format!("{conn:?}");
         assert!(dbg.starts_with("MockStream { "));
     }
 

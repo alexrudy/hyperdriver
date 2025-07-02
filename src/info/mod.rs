@@ -49,10 +49,10 @@ impl std::fmt::Display for Protocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // http::Version uses the debug format to write out the version
-            Self::Http(version) => write!(f, "{:?}", version),
+            Self::Http(version) => write!(f, "{version:?}"),
             Self::Grpc => write!(f, "gRPC"),
             Self::WebSocket => write!(f, "WebSocket"),
-            Self::Other(s) => write!(f, "{}", s),
+            Self::Other(s) => write!(f, "{s}"),
         }
     }
 }
@@ -118,9 +118,9 @@ pub enum BraidAddr {
 impl std::fmt::Display for BraidAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tcp(addr) => write!(f, "{}", addr),
+            Self::Tcp(addr) => write!(f, "{addr}"),
             Self::Duplex => write!(f, "<duplex>"),
-            Self::Unix(path) => write!(f, "{}", path),
+            Self::Unix(path) => write!(f, "{path}"),
         }
     }
 }

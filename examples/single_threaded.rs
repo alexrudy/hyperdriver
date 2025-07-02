@@ -160,8 +160,7 @@ async fn http1_server(rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::erro
             let value = cnt.get();
             async move {
                 Ok::<_, Error>(Response::new(Body::from(format!(
-                    "HTTP/1.1 Request #{}",
-                    value
+                    "HTTP/1.1 Request #{value}"
                 ))))
             }
         });
@@ -171,7 +170,7 @@ async fn http1_server(rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::erro
                 .serve_connection(TokioIo::new(io), TowerHyperService::new(service))
                 .await
             {
-                println!("Error serving connection: {:?}", err);
+                println!("Error serving connection: {err:?}");
             }
         });
     }
@@ -183,7 +182,7 @@ async fn http1_client(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let host = url.host().expect("uri has no host");
     let port = url.port_u16().unwrap_or(80);
-    let addr = format!("{}:{}", host, port);
+    let addr = format!("{host}:{port}");
     let stream = TcpStream::connect(addr).await?;
 
     let io = TokioIo::new(IOTypeNotSend::new(stream));
@@ -194,7 +193,7 @@ async fn http1_client(
         if let Err(err) = conn.await {
             let mut stdout = io::stdout();
             stdout
-                .write_all(format!("Connection failed: {:?}", err).as_bytes())
+                .write_all(format!("Connection failed: {err:?}").as_bytes())
                 .await
                 .unwrap();
             stdout.flush().await.unwrap();
@@ -251,7 +250,7 @@ async fn http2_server(rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::erro
     let listener = TcpListener::bind(addr).await?;
 
     stdout
-        .write_all(format!("Listening on http://{}", addr).as_bytes())
+        .write_all(format!("Listening on http://{addr}").as_bytes())
         .await
         .unwrap();
     stdout.flush().await.unwrap();
@@ -268,8 +267,7 @@ async fn http2_server(rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::erro
                     let value = counter.get();
                     async move {
                         Ok::<_, Error>(Response::new(Body::from(format!(
-                            "HTTP/2 Request #{}",
-                            value
+                            "HTTP/2 Request #{value}"
                         ))))
                     }
                 }))
