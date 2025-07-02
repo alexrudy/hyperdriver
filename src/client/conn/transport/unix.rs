@@ -384,7 +384,7 @@ mod tests {
         for path_str in test_cases {
             let addr = UnixAddr::from_pathbuf(Utf8PathBuf::from(path_str));
             let result = validate_unix_addr(&addr);
-            assert!(result.is_ok(), "Failed for path: {}", path_str);
+            assert!(result.is_ok(), "Failed for path: {path_str}");
             assert_eq!(result.unwrap(), std::path::Path::new(path_str));
         }
     }
@@ -545,7 +545,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             UnixConnectionError::ConnectionError(_) => {} // Expected
-            other => panic!("Unexpected error type: {:?}", other),
+            other => panic!("Unexpected error type: {other:?}"),
         }
     }
 
@@ -593,7 +593,7 @@ mod tests {
         // Could be either a timeout or connection error depending on system
         match result.unwrap_err() {
             UnixConnectionError::ConnectionError(_) | UnixConnectionError::Timeout(_) => {} // Both are acceptable
-            other => panic!("Unexpected error type: {:?}", other),
+            other => panic!("Unexpected error type: {other:?}"),
         }
     }
 
