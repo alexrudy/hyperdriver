@@ -12,6 +12,7 @@ use std::path::Path;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
@@ -189,6 +190,108 @@ impl Default for UnixTransportConfig {
         Self {
             connect_timeout: Some(Duration::from_secs(10)),
         }
+    }
+}
+
+/// A Unix Domain Socket connector that always connects to a single static address.
+///
+/// Unlike [`UnixTransport`], which extracts the socket path from request extensions,
+/// this transport is configured with a single Unix socket path and always connects
+/// to that address regardless of the request.
+///
+/// # Example
+/// ```no_run
+/// # use hyperdriver::client::conn::transport::unix::StaticAddressUnixTransport;
+/// # use hyperdriver::stream::unix::UnixStream;
+/// # use tower::ServiceExt as _;
+///
+/// # async fn run() {
+/// let transport: StaticAddressUnixTransport<UnixStream> =
+///     StaticAddressUnixTransport::new("/var/run/my-service.sock");
+///
+/// let request = http::Request::get("http://somewhere/over/the/rainbow").body(()).unwrap();
+/// let (parts, _) = request.into_parts();
+/// let stream = transport.oneshot(parts).await.unwrap();
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct StaticAddressUnixTransport<IO = UnixStream> {
+    address: Utf8PathBuf,
+    config: UnixTransportConfig,
+    stream: PhantomData<fn() -> IO>,
+}
+
+impl<IO> Clone for StaticAddressUnixTransport<IO> {
+    fn clone(&self) -> Self {
+        Self {
+            address: self.address.clone(),
+            config: self.config.clone(),
+            stream: PhantomData,
+        }
+    }
+}
+
+impl<IO> StaticAddressUnixTransport<IO> {
+    /// Create a new static Unix transport that always connects to the given path.
+    pub fn new<P: Into<Utf8PathBuf>>(path: P) -> Self {
+        Self {
+            address: path.into(),
+            config: UnixTransportConfig::default(),
+            stream: PhantomData,
+        }
+    }
+
+    /// Create a new static Unix transport with the given configuration.
+    pub fn with_config<P: Into<Utf8PathBuf>>(path: P, config: UnixTransportConfig) -> Self {
+        Self {
+            address: path.into(),
+            config,
+            stream: PhantomData,
+        }
+    }
+
+    /// Get the static address this transport connects to.
+    pub fn address(&self) -> &Utf8PathBuf {
+        &self.address
+    }
+
+    /// Get the configuration for the Unix transport.
+    pub fn config(&self) -> &UnixTransportConfig {
+        &self.config
+    }
+
+    /// Set the configuration for the Unix transport.
+    pub fn set_config(&mut self, config: UnixTransportConfig) {
+        self.config = config;
+    }
+}
+
+impl<IO> tower::Service<http::request::Parts> for StaticAddressUnixTransport<IO>
+where
+    UnixStream: Into<IO>,
+    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    IO::Addr: Clone + Unpin + Send + 'static,
+{
+    type Response = IO;
+    type Error = UnixConnectionError;
+    type Future = BoxFuture<'static, Self::Response, Self::Error>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _req: http::request::Parts) -> Self::Future {
+        let address = self.address.clone();
+        let config = self.config.clone();
+
+        Box::pin(async move {
+            let stream = connect_unix_socket(address.as_std_path(), config.connect_timeout).await?;
+
+            trace!(path = %address, "unix socket connected to static address");
+
+            let stream = stream.into();
+            Ok(stream)
+        })
     }
 }
 
@@ -371,6 +474,152 @@ mod tests {
         assert_eq!(
             transport_with_config.config().connect_timeout,
             custom_config.connect_timeout
+        );
+    }
+
+    #[test]
+    fn test_static_address_unix_transport_new() {
+        let transport = StaticAddressUnixTransport::<UnixStream>::new("/var/run/test.sock");
+        assert_eq!(
+            transport.address(),
+            &Utf8PathBuf::from("/var/run/test.sock")
+        );
+        assert_eq!(
+            transport.config().connect_timeout,
+            Some(std::time::Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn test_static_address_unix_transport_with_config() {
+        let config = UnixTransportConfig {
+            connect_timeout: Some(std::time::Duration::from_secs(30)),
+        };
+        let transport = StaticAddressUnixTransport::<UnixStream>::with_config(
+            "/var/run/test.sock",
+            config.clone(),
+        );
+        assert_eq!(
+            transport.address(),
+            &Utf8PathBuf::from("/var/run/test.sock")
+        );
+        assert_eq!(transport.config().connect_timeout, config.connect_timeout);
+    }
+
+    #[test]
+    fn test_static_address_unix_transport_set_config() {
+        let mut transport = StaticAddressUnixTransport::<UnixStream>::new("/var/run/test.sock");
+        let new_config = UnixTransportConfig {
+            connect_timeout: Some(std::time::Duration::from_secs(60)),
+        };
+        transport.set_config(new_config.clone());
+        assert_eq!(
+            transport.config().connect_timeout,
+            new_config.connect_timeout
+        );
+    }
+
+    #[test]
+    fn test_static_address_unix_transport_clone() {
+        let transport = StaticAddressUnixTransport::<UnixStream>::new("/var/run/test.sock");
+        let cloned = transport.clone();
+        assert_eq!(transport.address(), cloned.address());
+        assert_eq!(
+            transport.config().connect_timeout,
+            cloned.config().connect_timeout
+        );
+    }
+
+    #[tokio::test]
+    async fn test_static_address_unix_transport_connection_failure() {
+        let transport = StaticAddressUnixTransport::<UnixStream>::new("/nonexistent/socket.sock");
+
+        let req = http::Request::builder()
+            .uri("http://example.com")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        let result = tower::ServiceExt::oneshot(transport, req).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            UnixConnectionError::ConnectionError(_) => {} // Expected
+            other => panic!("Unexpected error type: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_static_address_unix_transport_ignores_request_extensions() {
+        let transport = StaticAddressUnixTransport::<UnixStream>::new("/var/run/static.sock");
+
+        let mut req = http::Request::builder()
+            .uri("http://example.com")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        // Add a different Unix address to the request - it should be ignored
+        let different_addr = UnixAddr::from_pathbuf(Utf8PathBuf::from("/var/run/different.sock"));
+        req.extensions.insert(different_addr);
+
+        // The transport should still use its static address, not the one from the request
+        assert_eq!(
+            transport.address(),
+            &Utf8PathBuf::from("/var/run/static.sock")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_static_address_unix_transport_with_timeout() {
+        let config = UnixTransportConfig {
+            connect_timeout: Some(std::time::Duration::from_millis(1)),
+        };
+        let transport = StaticAddressUnixTransport::<UnixStream>::with_config(
+            "/nonexistent/socket.sock",
+            config,
+        );
+
+        let req = http::Request::builder()
+            .uri("http://example.com")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        let result = tower::ServiceExt::oneshot(transport, req).await;
+        assert!(result.is_err());
+        // Could be either a timeout or connection error depending on system
+        match result.unwrap_err() {
+            UnixConnectionError::ConnectionError(_) | UnixConnectionError::Timeout(_) => {} // Both are acceptable
+            other => panic!("Unexpected error type: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_static_address_unix_transport_accepts_different_path_types() {
+        // Test with &str
+        let transport1 = StaticAddressUnixTransport::<UnixStream>::new("/var/run/test.sock");
+        assert_eq!(
+            transport1.address(),
+            &Utf8PathBuf::from("/var/run/test.sock")
+        );
+
+        // Test with String
+        let transport2 =
+            StaticAddressUnixTransport::<UnixStream>::new(String::from("/var/run/test.sock"));
+        assert_eq!(
+            transport2.address(),
+            &Utf8PathBuf::from("/var/run/test.sock")
+        );
+
+        // Test with Utf8PathBuf
+        let transport3 =
+            StaticAddressUnixTransport::<UnixStream>::new(Utf8PathBuf::from("/var/run/test.sock"));
+        assert_eq!(
+            transport3.address(),
+            &Utf8PathBuf::from("/var/run/test.sock")
         );
     }
 }
