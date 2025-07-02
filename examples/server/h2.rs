@@ -50,7 +50,7 @@ async fn main() {
         println!("{} {}", req.method(), req.uri());
         for (name, value) in req.headers() {
             if let Ok(value) = value.to_str() {
-                println!("  {}: {}", name, value);
+                println!("  {name}: {value}");
             }
         }
 
@@ -77,7 +77,7 @@ async fn main() {
             })
             .await
     });
-    println!("Server listening on {}", addr);
+    println!("Server listening on {addr}");
 
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;

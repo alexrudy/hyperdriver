@@ -190,7 +190,7 @@ mod tests {
         let err = result.unwrap_err();
 
         let Error::Connection(err) = err else {
-            panic!("unexpected error: {:?}", err);
+            panic!("unexpected error: {err:?}");
         };
 
         err.downcast::<MockConnectionError>().unwrap();

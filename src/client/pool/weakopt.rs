@@ -70,9 +70,9 @@ pub(crate) mod test_weak_opt {
     fn weak_opt_debug() {
         let arc = Arc::new(());
         let weak = WeakOpt::downgrade(&arc);
-        assert_eq!(format!("{:?}", weak), "WeakOpt(Some(...))");
+        assert_eq!(format!("{weak:?}"), "WeakOpt(Some(...))");
 
         let weak: WeakOpt<()> = WeakOpt::none();
-        assert_eq!(format!("{:?}", weak), "WeakOpt(None)");
+        assert_eq!(format!("{weak:?}"), "WeakOpt(None)");
     }
 }

@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         .with_auto_http();
 
     if let Some(tls_root) = args.get_one::<String>("tls") {
-        println!("Using TLS root: {}", tls_root);
+        println!("Using TLS root: {tls_root}");
 
         let config = rustls::ClientConfig::builder();
         let mut roots = rustls::RootCertStore::empty();
@@ -151,7 +151,7 @@ async fn send(
     let res = match client.request(req).await {
         Ok(res) => res,
         Err(err) => {
-            println!("Error: {}", err);
+            println!("Error: {err}");
             return;
         }
     };

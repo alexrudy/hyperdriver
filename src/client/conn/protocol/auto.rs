@@ -443,10 +443,7 @@ mod tests {
         assert!(!conn.can_share());
         assert_eq!(conn.version(), Version::HTTP_11);
         assert!(conn.reuse().is_none());
-        assert_eq!(
-            format!("{:?}", conn),
-            "HttpConnection { version: HTTP/1.1 }"
-        );
+        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/1.1 }");
 
         let request = http::Request::builder()
             .method(http::Method::GET)
@@ -491,10 +488,7 @@ mod tests {
         assert!(conn.can_share());
         assert_eq!(conn.version(), Version::HTTP_2);
         assert!(conn.reuse().is_some());
-        assert_eq!(
-            format!("{:?}", conn),
-            "HttpConnection { version: HTTP/2.0 }"
-        );
+        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
 
         let request = http::Request::builder()
             .version(::http::Version::HTTP_2)
@@ -558,9 +552,6 @@ mod tests {
         assert!(conn.can_share());
         assert_eq!(conn.version(), Version::HTTP_2);
         assert!(conn.reuse().is_some());
-        assert_eq!(
-            format!("{:?}", conn),
-            "HttpConnection { version: HTTP/2.0 }"
-        );
+        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
     }
 }

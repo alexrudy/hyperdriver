@@ -43,7 +43,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoProgress => write!(f, "no progress can be made"),
-            Self::Error(e) => write!(f, "error: {}", e),
+            Self::Error(e) => write!(f, "error: {e}"),
             Self::Timeout(d) => write!(f, "timeout: {}ms", d.as_millis()),
         }
     }

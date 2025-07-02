@@ -111,7 +111,7 @@ mod test {
         let conn = MockSender::single();
         let idle = Idle::new(conn);
 
-        let dbg = format!("{:?}", idle);
+        let dbg = format!("{idle:?}");
         assert!(dbg.starts_with("Idle { at: Instant {"));
     }
 
