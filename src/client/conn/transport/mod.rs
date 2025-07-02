@@ -37,6 +37,8 @@ pub(crate) mod stream;
 pub mod tcp;
 #[cfg(feature = "tls")]
 pub mod tls;
+#[cfg(target_family = "unix")]
+pub mod unix;
 
 /// A transport provides data transmission between two endpoints.
 ///
