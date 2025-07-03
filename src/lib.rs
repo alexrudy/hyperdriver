@@ -122,6 +122,7 @@ pub mod client;
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
 pub mod info;
+#[cfg(feature = "server")]
 mod notify;
 #[cfg(feature = "server")]
 mod rewind;
