@@ -363,7 +363,13 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
 
 impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     /// Add a layer to the service under construction
-    pub fn with_body<B2In, B2Out>(self) -> Builder<T, P, RP, S, B2In, B2Out> {
+    pub fn with_body<B2In, B2Out>(self) -> Builder<T, P, RP, S, B2In, B2Out>
+    where
+        B2In: Default + Body + Unpin + Send + 'static,
+        <B2In as Body>::Data: Send,
+        <B2In as Body>::Error: Into<BoxError>,
+        B2Out: From<hyper::body::Incoming> + Body + Unpin + Send + 'static,
+    {
         Builder {
             transport: self.transport,
             protocol: self.protocol,
