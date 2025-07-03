@@ -12,7 +12,7 @@ use std::path::Path;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
@@ -106,11 +106,10 @@ where
         let config = self.config.clone();
 
         Box::pin(async move {
-            let addr = extract_unix_addr_from_request(&req)?;
-            let path = validate_unix_addr(&addr)?;
+            let path = extract_unix_path_from_request(&req)?;
             let stream = connect_unix_socket(path, config.connect_timeout).await?;
 
-            trace!(path = %path.display(), "unix socket connected");
+            trace!(path = %path, "unix socket connected");
 
             let stream = stream.into();
             Ok(stream)
@@ -119,20 +118,13 @@ where
 }
 
 /// Extract a Unix address from the request extensions.
-fn extract_unix_addr_from_request(
+fn extract_unix_path_from_request(
     req: &http::request::Parts,
-) -> Result<UnixAddr, UnixConnectionError> {
+) -> Result<&Utf8Path, UnixConnectionError> {
     req.extensions
         .get::<UnixAddr>()
-        .cloned()
         .ok_or(UnixConnectionError::NoAddress)
-}
-
-/// Validate that a Unix address has a path and return it.
-fn validate_unix_addr(addr: &UnixAddr) -> Result<&Path, UnixConnectionError> {
-    addr.path()
-        .map(|path| path.as_ref())
-        .ok_or(UnixConnectionError::UnnamedAddress)
+        .and_then(|addr| addr.path().ok_or(UnixConnectionError::UnnamedAddress))
 }
 
 /// Connect to a Unix domain socket at the given path.
@@ -329,9 +321,9 @@ mod tests {
         let addr = UnixAddr::from_pathbuf(Utf8PathBuf::from("/tmp/test.sock"));
         req.extensions.insert(addr.clone());
 
-        let result = extract_unix_addr_from_request(&req);
+        let result = extract_unix_path_from_request(&req);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), addr);
+        assert_eq!(result.unwrap(), Utf8PathBuf::from("/tmp/test.sock"));
     }
 
     #[test]
@@ -343,50 +335,12 @@ mod tests {
             .into_parts()
             .0;
 
-        let result = extract_unix_addr_from_request(&req);
+        let result = extract_unix_path_from_request(&req);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
             UnixConnectionError::NoAddress
         ));
-    }
-
-    #[test]
-    fn test_validate_unix_addr_with_named_path() {
-        let addr = UnixAddr::from_pathbuf(Utf8PathBuf::from("/tmp/test.sock"));
-
-        let result = validate_unix_addr(&addr);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), std::path::Path::new("/tmp/test.sock"));
-    }
-
-    #[test]
-    fn test_validate_unix_addr_with_unnamed_addr() {
-        let addr = UnixAddr::unnamed();
-
-        let result = validate_unix_addr(&addr);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            UnixConnectionError::UnnamedAddress
-        ));
-    }
-
-    #[test]
-    fn test_validate_unix_addr_with_various_paths() {
-        let test_cases = vec![
-            "/tmp/socket.sock",
-            "/var/run/service.socket",
-            "/home/user/.config/app/socket",
-            "relative/path.sock",
-        ];
-
-        for path_str in test_cases {
-            let addr = UnixAddr::from_pathbuf(Utf8PathBuf::from(path_str));
-            let result = validate_unix_addr(&addr);
-            assert!(result.is_ok(), "Failed for path: {path_str}");
-            assert_eq!(result.unwrap(), std::path::Path::new(path_str));
-        }
     }
 
     #[tokio::test]
