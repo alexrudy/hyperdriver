@@ -15,8 +15,6 @@
 //! // Note that they are the same type:
 //! req = http::Request::post("http://example.com").body(Body::from("hello")).unwrap();
 //!```
-
-//! [axum]: https://docs.rs/axum
 #![cfg_attr(
     feature = "docs",
     doc = r#"
@@ -34,11 +32,13 @@ use http_body_util::BodyExt;
 use http_body_util::{Empty, Full};
 
 #[cfg(feature = "incoming")]
-#[deprecated(since = "0.7.0", note = "Use IncomingRequestService instead")]
-pub use crate::service::{AdaptIncomingLayer, AdaptIncomingService};
-#[cfg(feature = "incoming")]
-pub use crate::service::{IncomingRequestLayer, IncomingRequestService};
+pub use crate::service::{
+    IncomingRequestLayer, IncomingRequestService, IncomingResponseLayer, IncomingResponseService,
+};
+pub mod adapt;
+
 type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
+type BoxBody = UnsyncBoxBody<Bytes, BodyError>;
 
 /// A wrapper for different internal body types which implements [http_body::Body](http_body::Body)
 /// It is always backed by [`Bytes`] for simplicity.
@@ -72,6 +72,43 @@ impl Body {
         }
     }
 
+    /// Create a new body from another body type. This method tries to be as unconstrained as possible,
+    /// and internally uses downcasting to avoid just making another boxed body indirection.
+    pub fn new<B>(body: B) -> Self
+    where
+        B: http_body::Body<Data = Bytes> + Send + 'static,
+        <B as http_body::Body>::Error: Into<BodyError> + 'static,
+    {
+        if body.is_end_stream() {
+            return Self::empty();
+        }
+
+        let mut body = Some(body);
+
+        if let Some(body) = <dyn std::any::Any>::downcast_mut::<Option<Body>>(&mut body) {
+            return body.take().unwrap();
+        }
+
+        #[cfg(feature = "incoming")]
+        if let Some(body) =
+            <dyn std::any::Any>::downcast_mut::<Option<hyper::body::Incoming>>(&mut body)
+        {
+            return Self {
+                inner: InnerBody::Incoming(body.take().unwrap()),
+            };
+        }
+
+        if let Some(body) = <dyn std::any::Any>::downcast_mut::<Option<BoxBody>>(&mut body) {
+            Self {
+                inner: InnerBody::Boxed(body.take().unwrap()),
+            }
+        } else {
+            Self {
+                inner: InnerBody::Boxed(body.take().unwrap().map_err(Into::into).boxed_unsync()),
+            }
+        }
+    }
+
     /// Try to clone this body.
     pub fn try_clone(&self) -> Option<Self> {
         match &self.inner {
@@ -85,8 +122,7 @@ impl Body {
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(_) => None,
 
-            #[cfg(feature = "axum")]
-            InnerBody::AxumBody(_) => None,
+            InnerBody::Boxed(_) => None,
         }
     }
 
@@ -111,8 +147,7 @@ impl Body {
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(incoming) => UnsyncBoxBody::new(incoming.map_err(Into::into)),
 
-            #[cfg(feature = "axum")]
-            InnerBody::AxumBody(body) => UnsyncBoxBody::new(body.map_err(Into::into)),
+            InnerBody::Boxed(boxed) => boxed.map_err(Into::into).boxed_unsync(),
         }
     }
 }
@@ -171,28 +206,20 @@ impl From<Empty<Bytes>> for Body {
     }
 }
 
+impl From<UnsyncBoxBody<Bytes, BoxError>> for Body {
+    fn from(value: UnsyncBoxBody<Bytes, BoxError>) -> Self {
+        Self {
+            inner: InnerBody::Boxed(value.map_err(Into::into).boxed_unsync()),
+        }
+    }
+}
+
 #[cfg(feature = "incoming")]
 impl From<hyper::body::Incoming> for Body {
     fn from(body: hyper::body::Incoming) -> Self {
         Self {
             inner: InnerBody::Incoming(body),
         }
-    }
-}
-
-#[cfg(feature = "axum")]
-impl From<axum::body::Body> for Body {
-    fn from(body: axum::body::Body) -> Self {
-        Self {
-            inner: InnerBody::AxumBody(body),
-        }
-    }
-}
-
-#[cfg(feature = "axum")]
-impl From<Body> for axum::body::Body {
-    fn from(body: Body) -> Self {
-        axum::body::Body::new(body)
     }
 }
 
@@ -204,8 +231,7 @@ enum InnerBody {
     #[cfg(feature = "incoming")]
     Incoming(#[pin] hyper::body::Incoming),
 
-    #[cfg(feature = "axum")]
-    AxumBody(#[pin] axum::body::Body),
+    Boxed(UnsyncBoxBody<Bytes, BodyError>),
 }
 
 impl From<String> for InnerBody {
@@ -242,8 +268,10 @@ impl http_body::Body for Body {
             #[cfg(feature = "incoming")]
             InnerBodyProj::Incoming(body) => poll_frame!(body, cx),
 
-            #[cfg(feature = "axum")]
-            InnerBodyProj::AxumBody(body) => poll_frame!(body, cx),
+            InnerBodyProj::Boxed(body) => {
+                let body = Pin::new(body);
+                poll_frame!(body, cx)
+            }
         }
     }
 
@@ -254,8 +282,8 @@ impl http_body::Body for Body {
 
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(ref body) => body.is_end_stream(),
-            #[cfg(feature = "axum")]
-            InnerBody::AxumBody(ref body) => body.is_end_stream(),
+
+            InnerBody::Boxed(ref body) => body.is_end_stream(),
         }
     }
 
@@ -266,8 +294,8 @@ impl http_body::Body for Body {
 
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(ref body) => body.size_hint(),
-            #[cfg(feature = "axum")]
-            InnerBody::AxumBody(ref body) => body.size_hint(),
+
+            InnerBody::Boxed(ref body) => body.size_hint(),
         }
     }
 }
@@ -280,9 +308,58 @@ impl fmt::Debug for InnerBody {
 
             #[cfg(feature = "incoming")]
             InnerBody::Incoming(_) => f.debug_struct("Incoming").finish(),
-            #[cfg(feature = "axum")]
-            InnerBody::AxumBody(_) => f.debug_struct("AxumBody").finish(),
+
+            InnerBody::Boxed(_) => f.debug_struct("Boxed").finish(),
         }
+    }
+}
+
+/// An error type which wraps Box<dyn Error + Send + Sync> so that itself implements
+/// the Error trait.
+pub struct BodyError {
+    inner: BoxError,
+}
+
+impl BodyError {
+    /// Creates a new `BodyError` from the given error.
+    pub fn new<E>(error: E) -> Self
+    where
+        E: std::error::Error + Sync + std::marker::Send + 'static,
+    {
+        let mut error = Some(error);
+        if let Some(error) = <dyn std::any::Any>::downcast_mut::<Option<BoxError>>(&mut error) {
+            Self {
+                inner: error.take().unwrap(),
+            }
+        } else {
+            Self {
+                inner: Box::new(error.take().unwrap()),
+            }
+        }
+    }
+}
+
+impl fmt::Debug for BodyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl fmt::Display for BodyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl std::error::Error for BodyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+
+impl From<BoxError> for BodyError {
+    fn from(inner: BoxError) -> Self {
+        Self { inner }
     }
 }
 

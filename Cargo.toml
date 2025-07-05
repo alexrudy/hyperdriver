@@ -24,7 +24,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 
 
 [dependencies]
-axum = { version = "0.8", optional = true }
 bytes = "1"
 camino = { version = "1", default-features = false }
 futures-core = "0.3"
@@ -82,7 +81,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 webpki-roots.version = "1.0"
 
 [features]
-axum = ["dep:axum"]
 client = [
     "incoming",
     "dep:parking_lot",
@@ -94,7 +92,7 @@ client = [
 default = ["client", "server", "stream"]
 docs = []
 incoming = []
-mocks = []
+mocks = ["dep:thiserror"]
 server = ["incoming", "dep:ouroboros", "dep:thiserror"]
 sni = []
 stream = []
@@ -199,7 +197,7 @@ path = "tests/upgrades.rs"
 required-features = ["server", "client", "stream"]
 
 [package.metadata.cargo-udeps.ignore]
-normal = ["rustls-native-certs", "rustls", "tokio-rustls"]
+normal = ["rustls-native-certs", "rustls", "tokio-rustls", "thiserror"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -43,7 +43,7 @@ check-hack-each:
 
 [private]
 check-hack-powerset:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --skip docs,axum,sni,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --skip docs,sni,tls-ring,tls-aws-lc
 
 [private]
 check-hack-tests: (check-hack-targets "tests")
@@ -95,21 +95,21 @@ test: test-build test-run
 
 [private]
 test-build:
-    cargo +{{rust}} nextest run --features axum,sni,tls,tls-ring,mocks --no-run
+    cargo +{{rust}} nextest run --features sni,tls,tls-ring,mocks --no-run
 
 [private]
 test-run:
-    cargo +{{rust}} nextest run --features axum,sni,tls,tls-ring,mocks
-    cargo +{{rust}} test --features axum,sni,tls,tls-ring,mocks --doc
+    cargo +{{rust}} nextest run --features sni,tls,tls-ring,mocks
+    cargo +{{rust}} test --features sni,tls,tls-ring,mocks --doc
 
 # Run coverage tests
 coverage:
-    cargo +{{rust}} tarpaulin -o html --features axum,sni,tls,tls-ring,mocks
+    cargo +{{rust}} tarpaulin -o html --features sni,tls,tls-ring,mocks
 
 alias timing := timings
 # Compile with timing checks
 timings:
-    cargo +{{rust}} build --features  axum,sni,tls,tls-ring,mocks --timings
+    cargo +{{rust}} build --features  sni,tls,tls-ring,mocks --timings
 
 # Run deny checks
 deny:

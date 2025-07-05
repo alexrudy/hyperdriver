@@ -24,11 +24,7 @@ pub use self::http::http1::{Http1ChecksLayer, Http1ChecksService};
 #[cfg(feature = "client")]
 pub use self::http::http2::{Http2ChecksLayer, Http2ChecksService};
 pub use self::http::HttpService;
-#[cfg(feature = "incoming")]
-#[deprecated(since = "0.7.0", note = "Use IncomingRequestService instead")]
-pub use self::incoming::{
-    IncomingRequestLayer as AdaptIncomingLayer, IncomingRequestService as AdaptIncomingService,
-};
+
 #[cfg(feature = "incoming")]
 pub use self::incoming::{
     IncomingRequestLayer, IncomingRequestService, IncomingResponseLayer, IncomingResponseService,
