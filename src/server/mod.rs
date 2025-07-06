@@ -264,7 +264,7 @@ where
         Serving {
             server: self,
             state: State::Preparing,
-            span: tracing::debug_span!("accept"),
+            span: tracing::debug_span!(parent: None, "accept"),
         }
     }
 }
