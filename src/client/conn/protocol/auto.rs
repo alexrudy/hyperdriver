@@ -11,18 +11,17 @@ use tracing::trace;
 use http_body::Body as HttpBody;
 
 use crate::client::conn::connection::SendRequestFuture;
-use crate::client::conn::Connection;
-use crate::client::pool::PoolableConnection;
+use chateau::client::conn::Connection;
+use chateau::client::pool::PoolableConnection;
 
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
-use crate::client::conn::connection::ConnectionError;
-use crate::info::HasConnectionInfo;
-use crate::info::HasTlsConnectionInfo;
 use crate::BoxError;
+use chateau::client::conn::ConnectionError;
+use chateau::info::HasConnectionInfo;
+use chateau::info::HasTlsConnectionInfo;
 
 use super::HttpProtocol;
-use super::ProtocolRequest;
 
 /// An HTTP connection which is either HTTP1 or HTTP2
 pub struct HttpConnection<B> {
@@ -61,11 +60,11 @@ enum InnerConnection<B> {
     H1(hyper::client::conn::http1::SendRequest<B>),
 }
 
-impl<B> Connection<B> for HttpConnection<B>
+impl<B> Connection<http::Request<B>> for HttpConnection<B>
 where
     B: HttpBody + Send + 'static,
 {
-    type ResBody = hyper::body::Incoming;
+    type Response = http::Response<hyper::body::Incoming>;
 
     type Error = hyper::Error;
 
@@ -93,16 +92,9 @@ where
             InnerConnection::H1(conn) => conn.poll_ready(cx),
         }
     }
-
-    fn version(&self) -> http::Version {
-        match &self.inner {
-            InnerConnection::H2(_) => http::Version::HTTP_2,
-            InnerConnection::H1(_) => http::Version::HTTP_11,
-        }
-    }
 }
 
-impl<B> PoolableConnection<B> for HttpConnection<B>
+impl<B> PoolableConnection<http::Request<B>> for HttpConnection<B>
 where
     B: HttpBody + Send + 'static,
 {
@@ -180,17 +172,13 @@ where
     <B as Body>::Data: Send,
     <B as Body>::Error: Into<BoxError>,
 {
-    async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
+    async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, hyper::Error>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake h2");
         // let span = tracing::info_span!(parent: tracing::Span::none(), "connection", version = ?http::Version::HTTP_2, peer = %stream.info().remote_addr());
-        let (sender, conn) = self
-            .http2
-            .handshake(TokioIo::new(stream))
-            .await
-            .map_err(|error| ConnectionError::Handshake(error.into()))?;
+        let (sender, conn) = self.http2.handshake(TokioIo::new(stream)).await?;
         tokio::spawn(async {
             let conn = pin!(conn);
             if let Err(err) = conn.await {
@@ -207,18 +195,14 @@ where
         Ok(HttpConnection::h2(sender))
     }
 
-    async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
+    async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection<B>, hyper::Error>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!(version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr(), "handshake h1");
         // let span = tracing::info_span!("connection", version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr());
 
-        let (sender, conn) = self
-            .http1
-            .handshake(TokioIo::new(stream))
-            .await
-            .map_err(|error| ConnectionError::Handshake(error.into()))?;
+        let (sender, conn) = self.http1.handshake(TokioIo::new(stream)).await?;
         tokio::spawn(async {
             if let Err(err) = conn.with_upgrades().await {
                 tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
@@ -233,7 +217,7 @@ where
         &self,
         transport: IO,
         protocol: HttpProtocol,
-    ) -> Result<HttpConnection<B>, ConnectionError>
+    ) -> Result<HttpConnection<B>, hyper::Error>
     where
         IO: HasTlsConnectionInfo
             + HasConnectionInfo
@@ -248,9 +232,7 @@ where
             HttpProtocol::Http2 => self.handshake_h2(transport).await,
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
-                if transport.tls_info().and_then(|tls| tls.alpn.as_ref())
-                    == Some(&crate::info::Protocol::Http(http::Version::HTTP_2))
-                {
+                if transport.tls_info().and_then(|tls| tls.alpn.as_deref()) == Some("h2") {
                     trace!("alpn h2 switching");
                     return self.handshake_h2(transport).await;
                 }
@@ -274,7 +256,7 @@ impl<B> Default for HttpConnectionBuilder<B> {
     }
 }
 
-impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for HttpConnectionBuilder<B>
+impl<IO, B> tower::Service<IO> for HttpConnectionBuilder<B>
 where
     IO: HasTlsConnectionInfo + HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Send + Sync,
@@ -284,7 +266,7 @@ where
 {
     type Response = HttpConnection<B>;
 
-    type Error = ConnectionError;
+    type Error = hyper::Error;
 
     type Future = future::HttpConnectFuture<IO, B>;
 
@@ -296,9 +278,9 @@ where
     }
 
     #[tracing::instrument("http-connect", level="trace", skip_all, fields(addr=?req.transport.info().remote_addr()))]
-    fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
+    fn call(&mut self, req: IO) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
-        future::HttpConnectFuture::new(builder, req.transport, req.version)
+        future::HttpConnectFuture::new(builder, req, builder.version)
     }
 }
 
@@ -313,11 +295,10 @@ mod future {
     use http_body::Body;
     use tokio::io::{AsyncRead, AsyncWrite};
 
-    use crate::client::conn::connection::ConnectionError;
     use crate::client::conn::protocol::HttpProtocol;
-    use crate::info::{HasConnectionInfo, HasTlsConnectionInfo};
     use crate::BoxError;
     use crate::DebugLiteral;
+    use chateau::info::{HasConnectionInfo, HasTlsConnectionInfo};
 
     use super::HttpConnection;
     use super::HttpConnectionBuilder;
@@ -325,7 +306,7 @@ mod future {
     type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
     pub struct HttpConnectFuture<IO, B> {
-        future: BoxFuture<'static, HttpConnection<B>, ConnectionError>,
+        future: BoxFuture<'static, HttpConnection<B>, hyper::Error>,
         _io: PhantomData<IO>,
     }
 
@@ -369,7 +350,7 @@ mod future {
     where
         IO: Unpin,
     {
-        type Output = Result<HttpConnection<B>, ConnectionError>;
+        type Output = Result<HttpConnection<B>, hyper::Error>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             self.future.poll_unpin(cx)
@@ -384,14 +365,12 @@ mod tests {
 
     use super::*;
 
-    use crate::client::conn::connection::ConnectionError;
-
     use crate::client::conn::Protocol as _;
     use crate::client::conn::{protocol::HttpProtocol, Stream};
     use crate::client::Error;
 
     #[cfg(all(feature = "mocks", feature = "tls"))]
-    use crate::stream::tls::TlsHandshakeStream as _;
+    use chateau::stream::tls::TlsHandshakeStream as _;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};
     use http::Version;
@@ -404,14 +383,14 @@ mod tests {
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
     #[cfg(all(feature = "mocks", feature = "stream"))]
-    assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+    assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = hyper::Error, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
 
     #[cfg(feature = "stream")]
-    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);
+    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, hyper::Error>>, Debug, Send);
 
     #[cfg(feature = "stream")]
     async fn transport() -> Result<(Stream, Stream), BoxError> {
-        let (client, mut incoming) = crate::stream::duplex::pair();
+        let (client, mut incoming) = chateau::stream::duplex::pair();
 
         // Connect to the server. This is a helper function that creates a client and server
         // pair, and returns the client's transport stream and the server's stream.
@@ -429,7 +408,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "stream")]
     async fn http_connector_request_h1() {
-        use crate::client::conn::connection::ConnectionExt as _;
+        use chateau::client::conn::connection::ConnectionExt as _;
 
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -437,7 +416,7 @@ mod tests {
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = builder.connect(stream, HttpProtocol::Http1).await.unwrap();
+        let mut conn = builder.connect(stream).await.unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(!conn.can_share());
@@ -529,9 +508,9 @@ mod tests {
         async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, ConnectionError> {
             let mut builder = HttpConnectionBuilder::default();
 
-            let tls = crate::info::TlsConnectionInfo::new_client(Some(
-                crate::info::Protocol::http(http::Version::HTTP_2),
-            ));
+            let tls = chateau::info::TlsConnectionInfo::client(Some(crate::info::Protocol::http(
+                http::Version::HTTP_2,
+            )));
 
             builder
                 .connect(MockTls::new(stream, tls), HttpProtocol::Http1)

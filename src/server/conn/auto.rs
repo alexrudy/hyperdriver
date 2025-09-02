@@ -96,7 +96,7 @@ impl<E> Builder<E> {
     }
 }
 
-impl<S, IO, BIn, BOut, E> Protocol<S, IO, BIn> for Builder<E>
+impl<S, IO, BIn, BOut, E> Protocol<S, IO, http::Request<BIn>> for Builder<E>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -112,11 +112,11 @@ where
         + Sync
         + 'static,
 {
-    type ResponseBody = BOut;
+    type Response = http::Response<BOut>;
     type Connection = Connecting<S, IO, BIn, BOut, E>;
     type Error = ConnectionError;
 
-    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {
+    fn serve_connection(&self, stream: IO, service: S) -> Self::Connection {
         Connecting::build(self.clone(), service, stream)
     }
 }

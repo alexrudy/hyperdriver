@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use super::conn::connector::Error as ConnectorError;
 use crate::BoxError;
+use chateau::client::conn::connector::Error as ConnectorError;
 
 /// Client error type.
 #[derive(Debug, Error)]
@@ -40,18 +40,21 @@ pub enum Error {
     RequestTimeout,
 }
 
-impl<E1, E2> From<ConnectorError<E1, E2>> for Error
+impl<D, T, P> From<ConnectorError<D, T, P>> for Error
 where
-    E1: Into<BoxError>,
-    E2: Into<BoxError>,
+    D: Into<BoxError>,
+    T: Into<BoxError>,
+    P: Into<BoxError>,
 {
-    fn from(error: ConnectorError<E1, E2>) -> Self {
+    fn from(error: ConnectorError<D, T, P>) -> Self {
         match error {
+            ConnectorError::Resolving(error) => Error::Connection(error.into()),
             ConnectorError::Connecting(error) => Error::Connection(error.into()),
             ConnectorError::Handshaking(error) => Error::Transport(error.into()),
             ConnectorError::Unavailable => {
                 Error::Connection("pool closed, no connection can be made".into())
             }
+            _ => Error::Connection("Unknown error occured"),
         }
     }
 }

@@ -42,6 +42,10 @@ thiserror = { version = "2", optional = true }
 tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
 
+[dependencies.chateau]
+path = "../chateau"
+features = ["client", "server", "duplex"]
+
 [dependencies.rustls]
 version = ">=0.23.18"    # RUSTSEC-2024-0399 is fixed in 0.23.18
 features = ["tls12"]
@@ -98,9 +102,9 @@ mocks = []
 server = ["incoming", "dep:ouroboros", "dep:thiserror"]
 sni = []
 stream = []
-tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
-tls-aws-lc = ["rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs"]
-tls-ring = ["rustls/ring", "tokio-rustls/ring"]
+tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls", "chateau/tls"]
+tls-aws-lc = ["rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs", "chateau/tls-aws-lc"]
+tls-ring = ["rustls/ring", "tokio-rustls/ring", "chateau/tls-ring"]
 
 [[example]]
 name = "google"

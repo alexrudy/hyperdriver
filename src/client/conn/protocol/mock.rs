@@ -1,15 +1,13 @@
 //! Mock protocol implementation for testing purposes.
 
+use std::convert::Infallible;
 use std::future::{ready, Ready};
 
 use thiserror::Error;
 
-use crate::client::conn::connection::ConnectionError;
 use crate::client::conn::stream::mock::{MockStream, StreamID};
 use crate::client::conn::Connection;
-use crate::client::pool::{PoolableConnection, PoolableStream};
-
-use super::ProtocolRequest;
+use chateau::client::pool::{PoolableConnection, PoolableStream};
 
 /// A minimal protocol sender for testing purposes.
 #[derive(Debug, Clone)]
@@ -57,8 +55,8 @@ impl Default for MockSender {
     }
 }
 
-impl Connection<crate::Body> for MockSender {
-    type ResBody = crate::Body;
+impl Connection<http::Request<crate::Body>> for MockSender {
+    type Response = http::Response<crate::Body>;
 
     type Error = MockProtocolError;
 
@@ -74,13 +72,9 @@ impl Connection<crate::Body> for MockSender {
     ) -> std::task::Poll<Result<(), Self::Error>> {
         std::task::Poll::Ready(Ok(()))
     }
-
-    fn version(&self) -> http::Version {
-        http::Version::HTTP_11
-    }
 }
 
-impl PoolableConnection<crate::Body> for MockSender {
+impl PoolableConnection<http::Request<crate::Body>> for MockSender {
     fn is_open(&self) -> bool {
         self.stream.is_open()
     }
@@ -107,11 +101,11 @@ pub struct MockProtocol {
     _private: (),
 }
 
-impl tower::Service<ProtocolRequest<MockStream, crate::Body>> for MockProtocol {
+impl tower::Service<MockStream> for MockProtocol {
     type Response = MockSender;
 
-    type Error = ConnectionError;
-    type Future = Ready<Result<MockSender, ConnectionError>>;
+    type Error = Infallible;
+    type Future = Ready<Result<MockSender, Infallible>>;
 
     fn poll_ready(
         &mut self,
@@ -120,10 +114,10 @@ impl tower::Service<ProtocolRequest<MockStream, crate::Body>> for MockProtocol {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProtocolRequest<MockStream, crate::Body>) -> Self::Future {
+    fn call(&mut self, stream: MockStream) -> Self::Future {
         ready(Ok(MockSender {
             id: StreamID::new(),
-            stream: req.transport,
+            stream: stream,
         }))
     }
 }

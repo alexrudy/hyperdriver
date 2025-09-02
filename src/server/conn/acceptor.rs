@@ -12,16 +12,19 @@ use std::task::{Context, Poll};
 use pin_project::pin_project;
 #[cfg(feature = "tls")]
 use rustls::ServerConfig;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 #[cfg(feature = "stream")]
 use tokio::net::{TcpListener, UnixListener};
 
 use super::Accept;
 use super::Stream;
-use crate::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
 use crate::server::conn::tls::TlsAcceptor as RawTlsAcceptor;
 #[cfg(feature = "stream")]
-use crate::stream::{duplex::DuplexIncoming, Braid};
+use crate::stream::Braid;
+use chateau::info::HasConnectionInfo;
+use chateau::stream::duplex::DuplexIncoming;
 
 /// Accept incoming connections for streams which might
 /// be wrapped in TLS. Use [`Acceptor::with_tls`] to enable TLS.
@@ -163,13 +166,13 @@ where
 
 #[cfg(feature = "stream")]
 impl Accept for AcceptorCore {
-    type Conn = Braid;
+    type Connection = Braid;
     type Error = io::Error;
 
     fn poll_accept(
         self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<Result<Self::Conn, Self::Error>> {
+    ) -> Poll<Result<Self::Connection, Self::Error>> {
         match self.project().inner.project() {
             AcceptorCoreProj::Tcp(acceptor) => acceptor
                 .poll_accept(cx)
@@ -187,16 +190,16 @@ impl Accept for AcceptorCore {
 impl<A> Accept for Acceptor<A>
 where
     A: Accept,
-    A::Conn: HasConnectionInfo,
-    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
+    A::Connection: AsyncRead + AsyncWrite + HasConnectionInfo,
+    <<A as Accept>::Connection as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
 {
-    type Conn = Stream<A::Conn>;
+    type Connection = Stream<A::Connection>;
     type Error = A::Error;
 
     fn poll_accept(
         self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<Result<Self::Conn, Self::Error>> {
+    ) -> Poll<Result<Self::Connection, Self::Error>> {
         match self.project().inner.project() {
             AcceptorInnerProj::NoTls(acceptor) => {
                 acceptor.poll_accept(cx).map(|r| r.map(Stream::new))
@@ -213,10 +216,10 @@ where
 impl<A> futures_core::Stream for Acceptor<A>
 where
     A: Accept,
-    A::Conn: HasConnectionInfo,
-    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
+    A::Connection: AsyncWrite + AsyncRead + HasConnectionInfo,
+    <<A as Accept>::Connection as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
 {
-    type Item = Result<Stream<A::Conn>, A::Error>;
+    type Item = Result<Stream<A::Connection>, A::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         self.poll_accept(cx).map(Some)

@@ -7,8 +7,8 @@ use std::{fmt, task::Poll};
 use hyper::{Request, Response};
 use tower::{Layer, Service};
 
-use crate::info::{ConnectionInfo, HasConnectionInfo};
-use crate::service::ServiceRef;
+use chateau::info::{ConnectionInfo, HasConnectionInfo};
+use chateau::services::ServiceRef;
 
 /// A middleware which adds connection information to the request extensions.
 ///
@@ -111,7 +111,7 @@ mod future {
     use pin_project::pin_project;
     use std::future::Future;
 
-    use crate::service::ServiceRef;
+    use chateau::services::ServiceRef;
 
     use super::*;
 
@@ -234,7 +234,7 @@ mod tests {
             .layer(MakeServiceConnectionInfoLayer::new())
             .service(Shared::new(service));
 
-        let (client, incoming) = crate::stream::duplex::pair();
+        let (client, incoming) = chateau::stream::duplex::pair();
 
         let (_, conn) = tokio::try_join!(client.connect(1024), incoming.accept()).unwrap();
 

@@ -28,8 +28,6 @@ use crate::info::BraidAddr;
 use crate::info::HasConnectionInfo;
 use crate::IntoRequestParts;
 
-#[cfg(feature = "stream")]
-pub mod duplex;
 #[cfg(feature = "mocks")]
 pub mod mock;
 #[cfg(feature = "stream")]

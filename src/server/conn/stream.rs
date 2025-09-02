@@ -6,95 +6,23 @@
 #[cfg(feature = "tls")]
 use std::io;
 use std::task::{Context, Poll};
-use std::{future::Future, pin::Pin};
 
-use crate::info::ConnectionInfo;
-use crate::info::HasConnectionInfo;
-#[cfg(feature = "stream")]
-use crate::stream::duplex::DuplexStream;
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
-use crate::BoxError;
+use chateau::info::ConnectionInfo;
+use chateau::info::HasConnectionInfo;
+#[cfg(feature = "stream")]
+use chateau::stream::duplex::DuplexStream;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "tls")]
-use crate::info::tls::TlsConnectionInfoReceiver;
+use chateau::stream::tls::OptTlsStream;
 
 #[cfg(feature = "tls")]
-use crate::stream::TlsBraid;
-
+use chateau::server::conn::tls::TlsStream;
 #[cfg(feature = "tls")]
-use crate::server::conn::tls::TlsStream;
-#[cfg(feature = "tls")]
-use crate::stream::tls::TlsHandshakeInfo;
-#[cfg(feature = "tls")]
-use crate::stream::tls::TlsHandshakeStream;
-
-/// An async generator of new connections
-pub trait Accept {
-    /// The connection type for this acceptor
-    type Conn: HasConnectionInfo + AsyncRead + AsyncWrite + Unpin + 'static;
-
-    /// The error type for this acceptor
-    type Error: Into<BoxError>;
-
-    /// Poll for a new connection
-    fn poll_accept(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Self::Conn, Self::Error>>;
-}
-
-/// Extension trait for Accept
-pub trait AcceptExt: Accept {
-    /// Wrap the acceptor in a future that resolves to a single connection.
-    ///
-    /// For example, to accept only a single duplex connection, you can do:
-    /// ```
-    /// # use hyperdriver::server::conn::AcceptExt;
-    /// # use hyperdriver::stream::duplex;
-    /// # async fn demo_accept() {
-    /// let (client, acceptor) = duplex::pair();
-    ///
-    /// let (client_conn, server_conn) = tokio::try_join!(client.connect(1024), acceptor.accept()).unwrap();
-    /// # }
-    fn accept(self) -> AcceptOne<Self>
-    where
-        Self: Sized,
-    {
-        AcceptOne::new(self)
-    }
-}
-
-impl<A> AcceptExt for A where A: Accept {}
-
-/// A future that resolves to a single connection
-#[derive(Debug)]
-#[pin_project]
-pub struct AcceptOne<A> {
-    #[pin]
-    inner: A,
-}
-
-impl<A> AcceptOne<A> {
-    fn new(inner: A) -> Self {
-        AcceptOne { inner }
-    }
-}
-
-impl<A> Future for AcceptOne<A>
-where
-    A: Accept,
-    A::Conn: HasConnectionInfo,
-    <<A as Accept>::Conn as HasConnectionInfo>::Addr: Clone + Unpin + Send + Sync + 'static,
-{
-    type Output = Result<A::Conn, A::Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        self.project().inner.poll_accept(cx)
-    }
-}
+use chateau::stream::tls::TlsHandshakeStream;
 
 /// Dispatching wrapper for potential stream connection types for servers
 #[cfg(feature = "stream")]
@@ -107,11 +35,8 @@ where
     info: ConnectionInfo<IO::Addr>,
 
     #[cfg(feature = "tls")]
-    tls: TlsConnectionInfoReceiver,
-
-    #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<TlsStream<IO>, IO>,
+    inner: OptTlsStream<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -150,10 +75,7 @@ where
             info: inner.info(),
 
             #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReceiver::empty(),
-
-            #[cfg(feature = "tls")]
-            inner: TlsBraid::NoTls(inner),
+            inner: OptTlsStream::NoTls(inner),
 
             #[cfg(not(feature = "tls"))]
             inner,
@@ -169,20 +91,9 @@ where
 {
     fn poll_handshake(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match &mut self.inner {
-            TlsBraid::Tls(stream) => stream.poll_handshake(cx),
-            TlsBraid::NoTls(_) => Poll::Ready(Ok(())),
+            OptTlsStream::Tls(stream) => stream.poll_handshake(cx),
+            OptTlsStream::NoTls(_) => Poll::Ready(Ok(())),
         }
-    }
-}
-
-#[cfg(feature = "tls")]
-impl<IO> TlsHandshakeInfo for Stream<IO>
-where
-    IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin,
-    IO::Addr: Send + Unpin,
-{
-    fn recv(&self) -> TlsConnectionInfoReceiver {
-        self.inner.recv()
     }
 }
 
@@ -206,8 +117,7 @@ where
     fn from(stream: TlsStream<IO>) -> Self {
         Stream {
             info: stream.info(),
-            tls: stream.rx.clone(),
-            inner: TlsBraid::Tls(stream),
+            inner: OptTlsStream::Tls(stream),
         }
     }
 }
@@ -218,8 +128,6 @@ impl From<DuplexStream> for Stream {
     fn from(stream: DuplexStream) -> Self {
         Stream {
             info: stream.info().map(Into::into),
-            #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReceiver::empty(),
             inner: Braid::from(stream).into(),
         }
     }
@@ -231,8 +139,6 @@ impl From<Braid> for Stream {
     fn from(stream: Braid) -> Self {
         Stream {
             info: stream.info(),
-            #[cfg(feature = "tls")]
-            tls: TlsConnectionInfoReceiver::empty(),
             inner: stream.into(),
         }
     }

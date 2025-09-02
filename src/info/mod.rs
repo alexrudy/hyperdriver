@@ -10,19 +10,14 @@ use std::str::FromStr;
 use camino::Utf8Path;
 #[cfg(feature = "stream")]
 use camino::Utf8PathBuf;
-
-#[cfg(feature = "tls")]
-pub mod tls;
-#[cfg(feature = "tls")]
-pub use self::tls::HasTlsConnectionInfo;
-#[cfg(feature = "tls")]
-pub use self::tls::TlsConnectionInfo;
-#[doc(hidden)]
-pub use crate::stream::duplex::DuplexAddr;
 #[cfg(feature = "stream")]
-use crate::stream::tcp::make_canonical;
+use chateau::info::ConnectionInfo;
+
 #[doc(hidden)]
-pub use crate::stream::unix::UnixAddr;
+pub use chateau::stream::duplex::DuplexAddr;
+
+#[doc(hidden)]
+pub use chateau::stream::unix::UnixAddr;
 
 /// The transport protocol used for a connection.
 ///
@@ -146,7 +141,7 @@ impl BraidAddr {
     /// Returns the canonical TCP address, if this is a TCP socket address.
     pub fn canonical(self) -> Self {
         match self {
-            Self::Tcp(addr) => Self::Tcp(make_canonical(addr)),
+            Self::Tcp(addr) => Self::Tcp(addr),
             _ => self,
         }
     }
@@ -155,7 +150,7 @@ impl BraidAddr {
 #[cfg(feature = "stream")]
 impl From<std::net::SocketAddr> for BraidAddr {
     fn from(addr: std::net::SocketAddr) -> Self {
-        Self::Tcp(make_canonical(addr))
+        Self::Tcp(addr)
     }
 }
 
@@ -215,92 +210,6 @@ impl From<DuplexAddr> for BraidAddr {
     }
 }
 
-/// Information about a connection to a stream.
-#[cfg(feature = "stream")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectionInfo<Addr = BraidAddr> {
-    /// The local address for this connection.
-    pub local_addr: Addr,
-
-    /// The remote address for this connection.
-    pub remote_addr: Addr,
-}
-
-/// Information about a connection to a stream.
-#[cfg(not(feature = "stream"))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectionInfo<Addr> {
-    /// The local address for this connection.
-    pub local_addr: Addr,
-
-    /// The remote address for this connection.
-    pub remote_addr: Addr,
-}
-
-impl<Addr> Default for ConnectionInfo<Addr>
-where
-    Addr: Default,
-{
-    fn default() -> Self {
-        Self {
-            local_addr: Addr::default(),
-            remote_addr: Addr::default(),
-        }
-    }
-}
-
-#[cfg(feature = "stream")]
-impl ConnectionInfo<BraidAddr> {
-    pub(crate) fn duplex() -> Self {
-        ConnectionInfo {
-            local_addr: BraidAddr::Duplex,
-            remote_addr: BraidAddr::Duplex,
-        }
-    }
-}
-
-#[cfg(not(feature = "stream"))]
-impl ConnectionInfo<DuplexAddr> {
-    pub(crate) fn duplex() -> Self {
-        ConnectionInfo {
-            local_addr: DuplexAddr::new(),
-            remote_addr: DuplexAddr::new(),
-        }
-    }
-}
-
-impl<Addr> ConnectionInfo<Addr> {
-    /// The local address for this connection
-    pub fn local_addr(&self) -> &Addr {
-        &self.local_addr
-    }
-
-    /// The remote address for this connection
-    pub fn remote_addr(&self) -> &Addr {
-        &self.remote_addr
-    }
-
-    /// Map the addresses in this connection info to a new type.
-    pub fn map<T, F>(self, f: F) -> ConnectionInfo<T>
-    where
-        F: Fn(Addr) -> T,
-    {
-        ConnectionInfo {
-            local_addr: f(self.local_addr),
-            remote_addr: f(self.remote_addr),
-        }
-    }
-}
-
-/// Trait for types which can provide connection information.
-pub trait HasConnectionInfo {
-    /// The address type for this connection.
-    type Addr: fmt::Display + fmt::Debug + Send;
-
-    /// Get the connection information for this stream.
-    fn info(&self) -> ConnectionInfo<Self::Addr>;
-}
-
 #[cfg(not(feature = "tls"))]
 /// Trait for types which can provide TLS connection information, not populated without the `tls` feature.
 pub trait HasTlsConnectionInfo {}
@@ -320,8 +229,8 @@ mod tests {
     use tokio::net::UnixListener;
 
     #[cfg(feature = "client")]
-    use crate::stream::tcp::TcpStream;
-    use crate::stream::unix::UnixStream;
+    use chateau::stream::tcp::TcpStream;
+    use chateau::stream::unix::UnixStream;
 
     use super::*;
 
@@ -361,19 +270,6 @@ mod tests {
         assert_eq!(
             Protocol::from_str("foo").unwrap(),
             Protocol::Other("foo".into())
-        )
-    }
-
-    #[test]
-    #[cfg(feature = "stream")]
-    fn test_make_canonical() {
-        assert_eq!(
-            make_canonical("[::1]:8080".parse().unwrap()),
-            "[::1]:8080".parse().unwrap()
-        );
-        assert_eq!(
-            make_canonical("[::ffff:192.0.2.128]:8080".parse().unwrap()),
-            "192.0.2.128:8080".parse().unwrap()
         )
     }
 

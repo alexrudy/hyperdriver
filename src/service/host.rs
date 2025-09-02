@@ -6,8 +6,6 @@ use http::Uri;
 
 use crate::client::conn::Connection;
 
-use super::ExecuteRequest;
-
 /// Returns true if the URI scheme is presumed secure.
 fn is_schema_secure(uri: &Uri) -> bool {
     uri.scheme_str()
@@ -90,9 +88,9 @@ where
     }
 }
 
-impl<S, B, C> tower::Service<ExecuteRequest<C, B>> for SetHostHeader<S>
+impl<S, B, C> tower::Service<(C, B)> for SetHostHeader<S>
 where
-    S: tower::Service<ExecuteRequest<C, B>>,
+    S: tower::Service<(C, B)>,
     C: Connection<B>,
 {
     type Response = S::Response;
@@ -108,7 +106,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: ExecuteRequest<C, B>) -> Self::Future {
+    fn call(&mut self, (_, mut req): (C, B)) -> Self::Future {
         if req.connection().version() < http::Version::HTTP_2 {
             set_host_header(req.request_mut());
         }

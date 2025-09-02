@@ -4,20 +4,17 @@
 //! negotiated protocol which can be either HTTP/1.1 or HTTP/2 based on the connection
 //! protocol and ALPN negotiation.
 
-use std::future::Future;
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
-use tower::Service;
 
-use self::future::HttpProtocolFuture;
-use super::connection::ConnectionError;
-use super::Connection;
 use crate::bridge::io::TokioIo;
-use crate::info::HasConnectionInfo;
 use crate::BoxError;
+use chateau::info::HasConnectionInfo;
 
 pub mod auto;
 #[cfg(feature = "mocks")]
@@ -25,92 +22,7 @@ pub mod mock;
 pub use hyper::client::conn::http1;
 pub use hyper::client::conn::http2;
 
-/// A request to establish a connection using a specific HTTP protocol
-/// over a given transport.
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct ProtocolRequest<IO: HasConnectionInfo, B> {
-    /// The transport to use for the connection
-    pub transport: IO,
-
-    /// The HTTP protocol to use for the connection
-    pub version: HttpProtocol,
-
-    _body: PhantomData<fn() -> B>,
-}
-
-/// Protocols (like HTTP) define how data is sent and received over a connection.
-///
-/// A protocol is a service which accepts a [`ProtocolRequest`] and returns a connection.
-///
-/// The request contains a transport stream and the HTTP protocol to use for the connection.
-///
-/// The connection is responsible for sending and receiving HTTP requests and responses.
-///
-///
-pub trait Protocol<IO, B>
-where
-    IO: HasConnectionInfo,
-    Self: Service<ProtocolRequest<IO, B>, Response = Self::Connection>,
-{
-    /// Error returned when connection fails
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// The type of connection returned by this service
-    type Connection: Connection<B>;
-
-    /// The type of the handshake future
-    type Future: Future<Output = Result<Self::Connection, <Self as Protocol<IO, B>>::Error>>
-        + Send
-        + 'static;
-
-    /// Connect to a remote server and return a connection.
-    ///
-    /// The protocol version is provided to facilitate the correct handshake procedure.
-    fn connect(
-        &mut self,
-        transport: IO,
-        version: HttpProtocol,
-    ) -> <Self as Protocol<IO, B>>::Future;
-
-    /// Poll the protocol to see if it is ready to accept a new connection.
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Protocol<IO, B>>::Error>>;
-}
-
-impl<T, C, IO, B> Protocol<IO, B> for T
-where
-    IO: HasConnectionInfo,
-    T: Service<ProtocolRequest<IO, B>, Response = C> + Send + 'static,
-    T::Error: std::error::Error + Send + Sync + 'static,
-    T::Future: Send + 'static,
-    C: Connection<B>,
-{
-    type Error = T::Error;
-    type Connection = C;
-    type Future = T::Future;
-
-    fn connect(
-        &mut self,
-        transport: IO,
-        version: HttpProtocol,
-    ) -> <Self as Protocol<IO, B>>::Future {
-        self.call(ProtocolRequest {
-            transport,
-            version,
-            _body: PhantomData,
-        })
-    }
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Protocol<IO, B>>::Error>> {
-        Service::poll_ready(self, cx)
-    }
-}
+use super::connection::Http1Connection;
 
 /// The HTTP protocol to use for a connection.
 ///
@@ -156,58 +68,33 @@ impl From<::http::Version> for HttpProtocol {
     }
 }
 
-/// Opaque future for protocols
-mod future {
-    use super::ConnectionError;
-    use std::fmt;
-    use std::future::Future;
-    use std::pin::Pin;
+pub struct Http1Builder<B>(hyper::client::conn::http1::Builder, PhantomData<fn(B)>);
 
-    /// Opaque future for sending a request over a connection.
-    pub struct HttpProtocolFuture<C> {
-        inner: Pin<Box<dyn Future<Output = Result<C, ConnectionError>> + Send + 'static>>,
-    }
+impl<B> Deref for Http1Builder<B> {
+    type Target = hyper::client::conn::http1::Builder;
 
-    impl<C> fmt::Debug for HttpProtocolFuture<C> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("HttpProtocolFuture").finish()
-        }
-    }
-
-    impl<C> HttpProtocolFuture<C> {
-        pub(super) fn new<F>(future: F) -> Self
-        where
-            F: Future<Output = Result<C, ConnectionError>> + Send + 'static,
-        {
-            Self {
-                inner: Box::pin(future),
-            }
-        }
-    }
-
-    impl<C> Future for HttpProtocolFuture<C> {
-        type Output = Result<C, ConnectionError>;
-
-        fn poll(
-            mut self: Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Self::Output> {
-            self.inner.as_mut().poll(cx)
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for hyper::client::conn::http1::Builder
+impl<B> DerefMut for Http1Builder<B> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<IO, B> tower::Service<IO> for Http1Builder<B>
 where
     IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
     <B as Body>::Error: Into<BoxError>,
 {
-    type Response = hyper::client::conn::http1::SendRequest<B>;
+    type Response = Http1Connection<B>;
 
-    type Error = ConnectionError;
-    type Future = HttpProtocolFuture<hyper::client::conn::http1::SendRequest<B>>;
+    type Error = hyper::Error;
+    type Future = self::future::HttpProtocolFuture<Http1Connection<B>>;
 
     fn poll_ready(
         &mut self,
@@ -216,18 +103,14 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
+    fn call(&mut self, req: IO) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
-        let stream = req.transport;
 
         // let info = stream.info();
         // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 
-        HttpProtocolFuture::new(async move {
-            let (sender, conn) = builder
-                .handshake(TokioIo::new(stream))
-                .await
-                .map_err(|err| ConnectionError::Handshake(err.into()))?;
+        self::future::HttpProtocolFuture::new(async move {
+            let (sender, conn) = builder.handshake(TokioIo::new(req)).await?;
 
             tokio::spawn(async {
                 if let Err(err) = conn.with_upgrades().await {
@@ -243,7 +126,23 @@ where
     }
 }
 
-impl<E, IO, BIn> tower::Service<ProtocolRequest<IO, BIn>> for hyper::client::conn::http2::Builder<E>
+pub struct Http2Builder<B, E>(hyper::client::conn::http2::Builder<E>, PhantomData<fn(B)>);
+
+impl<B, E> Deref for Http2Builder<B, E> {
+    type Target = hyper::client::conn::http2::Builder<E>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<B, E> DerefMut for Http2Builder<B, E> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<E, IO, BIn> tower::Service<IO> for Http2Builder<BIn, E>
 where
     E: hyper::rt::bounds::Http2ClientConnExec<BIn, TokioIo<IO>>
         + Unpin
@@ -258,8 +157,8 @@ where
 {
     type Response = hyper::client::conn::http2::SendRequest<BIn>;
 
-    type Error = ConnectionError;
-    type Future = HttpProtocolFuture<hyper::client::conn::http2::SendRequest<BIn>>;
+    type Error = hyper::Error;
+    type Future = self::future::HttpProtocolFuture<hyper::client::conn::http2::SendRequest<BIn>>;
 
     fn poll_ready(
         &mut self,
@@ -268,17 +167,13 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProtocolRequest<IO, BIn>) -> Self::Future {
+    fn call(&mut self, req: IO) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
-        let stream = req.transport;
         // let info = stream.info();
         // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
 
-        HttpProtocolFuture::new(async move {
-            let (sender, conn) = builder
-                .handshake(TokioIo::new(stream))
-                .await
-                .map_err(|err| ConnectionError::Handshake(err.into()))?;
+        self::future::HttpProtocolFuture::new(async move {
+            let (sender, conn) = builder.handshake(TokioIo::new(req)).await?;
             tokio::spawn(async {
                 if let Err(err) = conn.await {
                     if err.is_user() {
@@ -290,5 +185,38 @@ where
             });
             Ok(sender)
         })
+    }
+}
+
+mod future {
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use crate::BoxFuture;
+
+    pub struct HttpProtocolFuture<C> {
+        inner: BoxFuture<'static, Result<C, hyper::Error>>,
+    }
+
+    impl<C> HttpProtocolFuture<C> {
+        pub(super) fn new<F>(inner: F) -> Self
+        where
+            F: Future<Output = Result<C, hyper::Error>> + 'static,
+        {
+            Self {
+                inner: Box::pin(inner),
+            }
+        }
+    }
+
+    impl<C> Future for HttpProtocolFuture<C> {
+        type Output = Result<C, hyper::Error>;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            self.inner.poll_unpin(cx)
+        }
     }
 }

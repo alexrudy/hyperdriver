@@ -11,28 +11,27 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 #[cfg(feature = "tls")]
-pub use self::tls::TlsStream;
+use chateau::client::conn::stream::tls::TlsStream;
 #[cfg(feature = "stream")]
-use crate::stream::{TcpStream, UnixStream};
+use chateau::stream::{tcp::TcpStream, unix::UnixStream};
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-#[cfg(feature = "tls")]
-use crate::info::HasTlsConnectionInfo;
-#[cfg(feature = "stream")]
-use crate::stream::duplex::DuplexStream;
-#[cfg(feature = "tls")]
-use crate::stream::tls::TlsHandshakeStream;
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
+use chateau::client::pool::PoolableStream;
+use chateau::info::HasConnectionInfo;
 #[cfg(feature = "tls")]
-use crate::stream::TlsBraid;
-use crate::{client::pool::PoolableStream, info::HasConnectionInfo};
+use chateau::info::HasTlsConnectionInfo;
+#[cfg(feature = "stream")]
+use chateau::stream::duplex::DuplexStream;
+#[cfg(feature = "tls")]
+use chateau::stream::tls::OptTlsStream;
+#[cfg(feature = "tls")]
+use chateau::stream::tls::TlsHandshakeStream;
 
 #[cfg(feature = "mocks")]
 pub mod mock;
-#[cfg(feature = "tls")]
-pub(crate) mod tls;
 
 #[cfg(feature = "stream")]
 /// A stream which can handle multiple different underlying transports, and TLS
@@ -47,7 +46,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<TlsStream<IO>, IO>,
+    inner: OptTlsStream<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -67,7 +66,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<TlsStream<IO>, IO>,
+    inner: OptTlsStream<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -93,7 +92,7 @@ where
     pub fn new(inner: IO) -> Self {
         Stream {
             #[cfg(feature = "tls")]
-            inner: TlsBraid::NoTls(inner),
+            inner: OptTlsStream::NoTls(inner),
 
             #[cfg(not(feature = "tls"))]
             inner,
@@ -109,8 +108,8 @@ where
         Stream {
             #[cfg(feature = "tls")]
             inner: match self.inner {
-                TlsBraid::NoTls(inner) => TlsBraid::NoTls(f(inner)),
-                TlsBraid::Tls(_) => panic!("Stream::map called on a TLS stream"),
+                OptTlsStream::NoTls(inner) => OptTlsStream::NoTls(f(inner)),
+                OptTlsStream::Tls(_) => panic!("Stream::map called on a TLS stream"),
             },
 
             #[cfg(not(feature = "tls"))]
@@ -136,12 +135,12 @@ where
     /// * `config` - The TLS client configuration to use.
     pub fn tls(self, domain: &str, config: Arc<rustls::ClientConfig>) -> Self {
         let core = match self.inner {
-            TlsBraid::NoTls(core) => core,
-            TlsBraid::Tls(_) => panic!("Stream::tls called twice"),
+            OptTlsStream::NoTls(core) => core,
+            OptTlsStream::Tls(_) => panic!("Stream::tls called twice"),
         };
 
         Stream {
-            inner: TlsBraid::Tls(TlsStream::new(core, domain, config)),
+            inner: OptTlsStream::Tls(TlsStream::new(core, domain, config)),
         }
     }
 }
@@ -169,11 +168,11 @@ where
     ///
     /// This method is async because TLS information isn't available until the handshake
     /// is complete. This method will not return until the handshake is complete.
-    fn info(&self) -> crate::info::ConnectionInfo<IO::Addr> {
+    fn info(&self) -> chateau::info::ConnectionInfo<IO::Addr> {
         #[cfg(feature = "tls")]
         match self.inner {
-            TlsBraid::Tls(ref stream) => stream.info(),
-            TlsBraid::NoTls(ref stream) => stream.info(),
+            OptTlsStream::Tls(ref stream) => stream.info(),
+            OptTlsStream::NoTls(ref stream) => stream.info(),
         }
 
         #[cfg(not(feature = "tls"))]
@@ -187,10 +186,10 @@ where
     IO: HasConnectionInfo,
     IO::Addr: Unpin + Clone,
 {
-    fn tls_info(&self) -> Option<&crate::info::TlsConnectionInfo> {
+    fn tls_info(&self) -> Option<&chateau::info::TlsConnectionInfo> {
         match self.inner {
-            TlsBraid::Tls(ref stream) => stream.tls_info(),
-            TlsBraid::NoTls(_) => None,
+            OptTlsStream::Tls(ref stream) => stream.tls_info(),
+            OptTlsStream::NoTls(_) => None,
         }
     }
 }
@@ -203,7 +202,7 @@ where
     fn can_share(&self) -> bool {
         match self.inner {
             #[cfg(feature = "tls")]
-            TlsBraid::Tls(ref stream) => stream.can_share(),
+            OptTlsStream::Tls(ref stream) => stream.can_share(),
 
             _ => false,
         }

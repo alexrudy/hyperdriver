@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use tracing::trace;
 
-use crate::client::pool::PoolableStream;
-use crate::info::HasConnectionInfo;
+use chateau::client::pool::PoolableStream;
+use chateau::info::HasConnectionInfo;
 
 #[cfg(feature = "tls")]
 pub use self::tls::MockTls;
@@ -108,14 +108,14 @@ impl fmt::Display for MockAddress {
 impl HasConnectionInfo for MockStream {
     type Addr = MockAddress;
 
-    fn info(&self) -> crate::info::ConnectionInfo<Self::Addr> {
-        crate::info::ConnectionInfo::default()
+    fn info(&self) -> chateau::info::ConnectionInfo<Self::Addr> {
+        chateau::info::ConnectionInfo::default()
     }
 }
 
 #[cfg(feature = "tls")]
 mod tls {
-    use crate::{
+    use chateau::{
         info::{HasConnectionInfo, TlsConnectionInfo},
         stream::tls::TlsHandshakeStream,
     };
@@ -126,7 +126,7 @@ mod tls {
     pub struct MockTls<IO> {
         #[pin]
         inner: IO,
-        info: crate::info::TlsConnectionInfo,
+        info: chateau::info::TlsConnectionInfo,
     }
 
     impl<IO> MockTls<IO> {
@@ -168,12 +168,12 @@ mod tls {
     {
         type Addr = IO::Addr;
 
-        fn info(&self) -> crate::info::ConnectionInfo<Self::Addr> {
+        fn info(&self) -> chateau::info::ConnectionInfo<Self::Addr> {
             self.inner.info()
         }
     }
 
-    impl<IO> crate::info::HasTlsConnectionInfo for MockTls<IO>
+    impl<IO> chateau::info::HasTlsConnectionInfo for MockTls<IO>
     where
         IO: HasConnectionInfo,
     {

@@ -1,12 +1,16 @@
 //! Server-side connection builders for the HTTP2 protocol and the HTTP1 protocol.
 
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 use crate::body::IncomingRequestService;
 use crate::bridge::io::TokioIo;
 use crate::bridge::service::TowerHyperFuture;
 use crate::bridge::service::TowerHyperService;
+pub use chateau::server::Connection;
 use hyper::body::Incoming;
 use hyper::rt::bounds::Http2ServerConnExec;
 pub use hyper::server::conn::http1;
@@ -20,16 +24,16 @@ use crate::BoxError;
 pub use acceptor::Acceptor;
 #[cfg(feature = "stream")]
 pub use acceptor::AcceptorCore;
+pub use chateau::server::{conn::AcceptExt, conn::AcceptOne, Accept};
 pub use info::{
     ConnectionWithInfo, MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService,
 };
-pub use stream::{Accept, AcceptExt, AcceptOne, Stream};
+pub use stream::Stream;
 
 mod acceptor;
 /// HTTP connection builder with automatic protocol detection.
 pub mod auto;
 mod connecting;
-pub(super) mod drivers;
 mod info;
 mod stream;
 #[cfg(feature = "tls")]
@@ -54,14 +58,20 @@ pub enum ConnectionError {
 
 type Adapted<S, BIn, BOut> = TowerHyperService<IncomingRequestService<S, BIn, BOut>>;
 
-/// A connection that can be gracefully shutdown.
-pub trait Connection {
-    /// Gracefully shutdown the connection.
-    fn graceful_shutdown(self: Pin<&mut Self>);
-}
+#[pin_project::pin_project]
+pub struct HTTP1Connection<S, IO, BIn, BOut>(
+    #[pin] http1::UpgradeableConnection<TokioIo<IO>, Adapted<S, BIn, BOut>>,
+)
+where
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<BoxError>,
+    BIn: From<hyper::body::Incoming>,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Error: Into<BoxError>,
+    IO: AsyncRead + AsyncWrite + Unpin + 'static;
 
-impl<S, IO, BIn, BOut> Connection
-    for http1::UpgradeableConnection<TokioIo<IO>, Adapted<S, BIn, BOut>>
+impl<S, IO, BIn, BOut> Connection for HTTP1Connection<S, IO, BIn, BOut>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -72,11 +82,37 @@ where
     IO: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
-        http1::UpgradeableConnection::graceful_shutdown(self)
+        http1::UpgradeableConnection::graceful_shutdown(self.project().0)
     }
 }
 
-impl<S, IO, BIn, BOut> Protocol<S, IO, BIn> for http1::Builder
+impl<S, IO, BIn, BOut> Future for HTTP1Connection<S, IO, BIn, BOut>
+where
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<BoxError>,
+    BIn: From<hyper::body::Incoming>,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Error: Into<BoxError>,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    type Output = Result<(), hyper::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().0.poll(cx)
+    }
+}
+
+#[derive(Debug)]
+pub struct Http1Builder(http1::Builder);
+
+impl From<http1::Builder> for Http1Builder {
+    fn from(builder: http1::Builder) -> Self {
+        Http1Builder(builder)
+    }
+}
+
+impl<S, IO, BIn, BOut> Protocol<S, IO, http::Request<BIn>> for Http1Builder
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -87,23 +123,40 @@ where
     BOut::Data: Send,
     IO: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type ResponseBody = BOut;
-    type Connection = http1::UpgradeableConnection<TokioIo<IO>, Adapted<S, BIn, BOut>>;
+    type Response = http::Response<BOut>;
+    type Connection = HTTP1Connection<S, IO, BIn, BOut>;
     type Error = hyper::Error;
 
-    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection
-    where
-        IO: AsyncRead + AsyncWrite + Unpin + 'static,
-    {
-        let conn = self.serve_connection(
+    fn serve_connection(&self, stream: IO, service: S) -> Self::Connection {
+        let conn = self.0.serve_connection(
             TokioIo::new(stream),
             TowerHyperService::new(IncomingRequestService::new(service)),
         );
-        conn.with_upgrades()
+        HTTP1Connection(conn.with_upgrades())
     }
 }
 
-impl<S, IO, BIn, BOut, E> Connection for http2::Connection<TokioIo<IO>, Adapted<S, BIn, BOut>, E>
+#[pin_project::pin_project]
+pub struct Http2Connection<S, IO, BIn, BOut, E>(
+    #[pin] http2::Connection<TokioIo<IO>, Adapted<S, BIn, BOut>, E>,
+)
+where
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + 'static,
+    S::Future: 'static,
+    S::Error: Into<BoxError>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Data: Send + 'static,
+    BOut::Error: Into<BoxError>,
+    IO: AsyncRead + AsyncWrite + Unpin + 'static,
+    E: Http2ServerConnExec<
+            TowerHyperFuture<IncomingRequestService<S, BIn, BOut>, http::Request<Incoming>>,
+            BOut,
+        > + Clone
+        + Send
+        + 'static;
+
+impl<S, IO, BIn, BOut, E> Connection for Http2Connection<S, IO, BIn, BOut, E>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + 'static,
     S::Future: 'static,
@@ -121,11 +174,43 @@ where
         + 'static,
 {
     fn graceful_shutdown(self: Pin<&mut Self>) {
-        http2::Connection::graceful_shutdown(self)
+        http2::Connection::graceful_shutdown(self.project().0)
     }
 }
 
-impl<S, IO, BIn, BOut, E> Protocol<S, IO, BIn> for http2::Builder<E>
+impl<S, IO, BIn, BOut, E> Future for Http2Connection<S, IO, BIn, BOut, E>
+where
+    S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + 'static,
+    S::Future: 'static,
+    S::Error: Into<BoxError>,
+    BIn: From<hyper::body::Incoming> + 'static,
+    BOut: http_body::Body + Send + 'static,
+    BOut::Data: Send + 'static,
+    BOut::Error: Into<BoxError>,
+    IO: AsyncRead + AsyncWrite + Unpin + 'static,
+    E: Http2ServerConnExec<
+            TowerHyperFuture<IncomingRequestService<S, BIn, BOut>, http::Request<Incoming>>,
+            BOut,
+        > + Clone
+        + Send
+        + 'static,
+{
+    type Output = Result<(), hyper::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().0.poll(cx)
+    }
+}
+
+pub struct Http2Builder<E>(http2::Builder<E>);
+
+impl<E> From<http2::Builder<E>> for Http2Builder<E> {
+    fn from(builder: http2::Builder<E>) -> Self {
+        Http2Builder(builder)
+    }
+}
+
+impl<S, IO, BIn, BOut, E> Protocol<S, IO, http::Request<BIn>> for Http2Builder<E>
 where
     S: tower::Service<http::Request<BIn>, Response = http::Response<BOut>> + Clone + 'static,
     S::Future: 'static,
@@ -142,14 +227,14 @@ where
         + Send
         + 'static,
 {
-    type ResponseBody = BOut;
-    type Connection = http2::Connection<TokioIo<IO>, Adapted<S, BIn, BOut>, E>;
+    type Response = http::Response<BOut>;
+    type Connection = Http2Connection<S, IO, BIn, BOut, E>;
     type Error = hyper::Error;
 
-    fn serve_connection_with_upgrades(&self, stream: IO, service: S) -> Self::Connection {
-        self.serve_connection(
+    fn serve_connection(&self, stream: IO, service: S) -> Self::Connection {
+        Http2Connection(self.0.serve_connection(
             TokioIo::new(stream),
             TowerHyperService::new(IncomingRequestService::new(service)),
-        )
+        ))
     }
 }

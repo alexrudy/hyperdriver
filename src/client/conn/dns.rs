@@ -1,17 +1,15 @@
 //! DNS resolution utilities.
 
 use std::collections::VecDeque;
-use std::future::Ready;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
+use chateau::client::conn::dns::Resolver;
 use futures_util::{Future, FutureExt as _};
 use pin_project::{pin_project, pinned_drop};
 use tokio::task::JoinHandle;
-
-use crate::BoxFuture;
 
 /// A collection of socket addresses.
 #[derive(Debug, Clone, Default)]
@@ -190,7 +188,7 @@ impl GaiResolver {
     }
 }
 
-impl tower::Service<Box<str>> for GaiResolver {
+impl<B> tower::Service<&http::Request<B>> for GaiResolver {
     type Response = SocketAddrs;
     type Error = io::Error;
     type Future = GaiFuture;
@@ -199,19 +197,46 @@ impl tower::Service<Box<str>> for GaiResolver {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, host: Box<str>) -> Self::Future {
+    fn call(&mut self, req: &http::Request<B>) -> Self::Future {
         let span = tracing::Span::current();
+        let (host, port) = match get_host_and_port(&req.uri) {
+            Ok((host, port)) => (host, port),
+            Err(e) => return Box::pin(std::future::ready(Err(e))),
+        };
         JoinHandleFuture {
             handle: tokio::task::spawn_blocking(move || {
                 tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
                     tracing::trace!("dns resolution starting");
-                    (host.as_ref(), 0)
+                    (host.as_ref(), port)
                         .to_socket_addrs()
                         .map(SocketAddrs::from_iter)
                 })
             }),
         }
     }
+}
+
+fn get_host_and_port(uri: &http::Uri) -> Result<(Box<str>, u16), io::Error> {
+    let host = uri.host().ok_or(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "missing host in URI",
+    ))?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let port = match uri.port_u16() {
+        Some(port) => port,
+        None => match uri.scheme_str() {
+            Some("http") => 80,
+            Some("https") => 443,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "missing port in URI for non-http(s) scheme",
+                ))
+            }
+        },
+    };
+
+    Ok((host.into(), port))
 }
 
 pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> GaiFuture {
@@ -289,21 +314,21 @@ impl<R> FirstAddrResolver<R> {
     }
 }
 
-impl<R> tower::Service<Box<str>> for FirstAddrResolver<R>
+impl<D, R> tower::Service<R> for FirstAddrResolver<D>
 where
-    R: tower::Service<Box<str>, Response = SocketAddrs, Error = io::Error>,
+    D: tower::Service<R, Response = SocketAddrs, Error = io::Error>,
 {
     type Response = IpAddr;
     type Error = io::Error;
-    type Future = FirstAddrFuture<R::Future>;
+    type Future = FirstAddrFuture<D::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, host: Box<str>) -> Self::Future {
+    fn call(&mut self, req: R) -> Self::Future {
         FirstAddrFuture {
-            inner: self.inner.call(host),
+            inner: self.inner.call(req),
         }
     }
 }
@@ -354,178 +379,3 @@ pub trait FirstAddrExt {
 }
 
 impl<R> FirstAddrExt for R {}
-
-/// A resolver that parses the input hostname as an IP address.
-#[derive(Debug, Clone, Default)]
-pub struct ParseAddressResolver {
-    _priv: (),
-}
-
-impl ParseAddressResolver {
-    /// Create a new `ParseAddressResolver`.
-    pub fn new() -> Self {
-        Self { _priv: () }
-    }
-}
-
-impl tower::Service<Box<str>> for ParseAddressResolver {
-    type Response = SocketAddrs;
-    type Error = io::Error;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, host: Box<str>) -> Self::Future {
-        match host.parse::<IpAddr>() {
-            Ok(addr) => std::future::ready(Ok(SocketAddrs::from_iter(std::iter::once(
-                SocketAddr::new(addr, 0),
-            )))),
-            Err(e) => std::future::ready(Err(io::Error::new(io::ErrorKind::InvalidInput, e))),
-        }
-    }
-}
-
-/// A resolver that always returns the same address.
-#[derive(Debug, Clone)]
-pub struct ConstantResolver {
-    addr: SocketAddr,
-}
-
-impl ConstantResolver {
-    /// Create a new `ConstantResolver`.
-    pub fn new(addr: SocketAddr) -> Self {
-        Self { addr }
-    }
-}
-
-impl tower::Service<Box<str>> for ConstantResolver {
-    type Response = SocketAddrs;
-    type Error = io::Error;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, _req: Box<str>) -> Self::Future {
-        std::future::ready(Ok(SocketAddrs::from_iter(std::iter::once(self.addr))))
-    }
-}
-
-/// Extension trait for resolvers.
-pub trait ResolverExt {
-    /// Address return type of the resolver.
-    type Address;
-
-    /// Resolve a hostname to an address.
-    fn resolve(
-        &mut self,
-        host: Box<str>,
-        timeout: Option<std::time::Duration>,
-    ) -> BoxFuture<'static, Result<Self::Address, io::Error>> {
-        match timeout {
-            Some(timeout) => self.resolve_with_timeout(host, timeout),
-            None => self.resolve_without_timeout(host),
-        }
-    }
-
-    /// Resolve a hostname to an address with a timeout.
-    fn resolve_with_timeout(
-        &mut self,
-        host: Box<str>,
-        timeout: std::time::Duration,
-    ) -> BoxFuture<'static, Result<Self::Address, io::Error>>;
-
-    /// Resolve a hostname to an address without a timeout.
-    fn resolve_without_timeout(
-        &mut self,
-        host: Box<str>,
-    ) -> BoxFuture<'static, Result<Self::Address, io::Error>>;
-}
-
-impl<R> ResolverExt for R
-where
-    R: tower::Service<Box<str>, Error = io::Error>,
-    R::Future: Send + 'static,
-{
-    type Address = R::Response;
-
-    fn resolve_with_timeout(
-        &mut self,
-        host: Box<str>,
-        timeout: std::time::Duration,
-    ) -> BoxFuture<'static, Result<Self::Address, io::Error>> {
-        let resolve = self.call(host);
-        async move {
-            tracing::trace!(?timeout, "resolve with timeout");
-            let outcome = tokio::time::timeout(timeout, resolve).await;
-            tracing::trace!(success=%outcome.is_ok(), "resolved dns");
-            match outcome {
-                Ok(Ok(addrs)) => Ok(addrs),
-                Err(_) => Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    format!("dns resolution timed out after {}ms", timeout.as_millis()),
-                )),
-                Ok(Err(error)) => Err(error),
-            }
-        }
-        .boxed()
-    }
-
-    fn resolve_without_timeout(
-        &mut self,
-        host: Box<str>,
-    ) -> BoxFuture<'static, Result<Self::Address, io::Error>> {
-        self.call(host).boxed()
-    }
-}
-
-#[cfg(test)]
-mod test {
-
-    use super::*;
-
-    #[tokio::test]
-    async fn constant_resolver() {
-        let mut resolver = ConstantResolver::new(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 80));
-        let mut addrs = resolver
-            .resolve_without_timeout("localhost".into())
-            .await
-            .unwrap();
-        assert_eq!(addrs.pop().unwrap().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-
-        let resolve_one = resolver
-            .first_addr()
-            .resolve_without_timeout("localhost".into())
-            .await
-            .unwrap();
-        assert_eq!(resolve_one, IpAddr::V4(Ipv4Addr::LOCALHOST));
-    }
-
-    #[tokio::test]
-    async fn parser_resolver() {
-        let mut resolver = ParseAddressResolver::new();
-
-        let mut addrs = resolver
-            .resolve_without_timeout("127.0.0.1".into())
-            .await
-            .unwrap();
-        assert_eq!(addrs.pop().unwrap().ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-
-        let mut addrs = resolver
-            .resolve_without_timeout("::1".into())
-            .await
-            .unwrap();
-        assert_eq!(addrs.pop().unwrap().ip(), IpAddr::V6(Ipv6Addr::LOCALHOST));
-
-        let resolve_one = resolver
-            .first_addr()
-            .resolve_without_timeout("10.0.0.1".into())
-            .await
-            .unwrap();
-
-        assert_eq!(resolve_one, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
-    }
-}

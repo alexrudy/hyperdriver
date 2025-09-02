@@ -20,20 +20,19 @@ use tower::util::Oneshot;
 use tower::ServiceExt;
 
 use self::conn::protocol::auto;
-use self::conn::transport::tcp::TcpTransportConfig;
-pub use self::pool::service::ConnectionPoolLayer;
-pub use self::pool::service::ConnectionPoolService;
-use crate::service::SharedService;
 use crate::BoxError;
+use chateau::client::conn::transport::tcp::TcpTransportConfig;
+pub use chateau::client::ConnectionPoolLayer;
+pub use chateau::client::ConnectionPoolService;
+use chateau::services::SharedService;
 
 mod builder;
 pub mod conn;
 mod error;
-pub mod pool;
 
 pub use self::error::Error;
-pub use self::pool::Config as PoolConfig;
 pub use builder::Builder;
+pub use chateau::client::pool::Config as PoolConfig;
 
 #[cfg(feature = "tls")]
 /// Get a default TLS client configuration by loading the platform's native certificates.

@@ -12,27 +12,27 @@ use tower_http::follow_redirect::policy;
 use tower_http::follow_redirect::FollowRedirectLayer;
 use tower_http::set_header::SetRequestHeaderLayer;
 
+use super::conn::dns::GaiResolver;
 use super::conn::protocol::auto;
-use super::conn::transport::tcp::TcpTransportConfig;
-use super::conn::transport::TransportExt;
-use super::conn::Connection;
-use super::conn::Protocol;
-use super::conn::Transport;
-use super::pool::{PoolableConnection, PoolableStream, UriKey};
-use super::ConnectionPoolLayer;
-use crate::service::RequestExecutor;
 use crate::service::{Http1ChecksLayer, Http2ChecksLayer, SetHostHeaderLayer};
 use crate::BoxError;
+use chateau::client::conn::transport::tcp::TcpTransportConfig;
+use chateau::client::conn::transport::TransportExt;
+use chateau::client::conn::Connection;
+use chateau::client::conn::Protocol;
+use chateau::client::conn::Transport;
+use chateau::client::pool::{PoolableConnection, PoolableStream};
+use chateau::client::ConnectionPoolLayer;
 
-use crate::client::conn::connection::ConnectionError;
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
 use crate::client::{conn::protocol::auto::HttpConnectionBuilder, Client};
-use crate::info::HasConnectionInfo;
 use crate::service::IncomingResponseLayer;
 use crate::service::OptionLayerExt;
-use crate::service::SharedService;
 use crate::service::TimeoutLayer;
+use chateau::client::conn::ConnectionError;
+use chateau::info::HasConnectionInfo;
+use chateau::services::SharedService;
 
 pub trait BuildProtocol<IO, B>
 where
@@ -53,14 +53,14 @@ where
     }
 }
 
-pub trait BuildTransport {
-    type Target: Transport;
+pub trait BuildTransport<A> {
+    type Target: Transport<A>;
     fn build(self) -> Self::Target;
 }
 
-impl<T> BuildTransport for T
+impl<T, A> BuildTransport<A> for T
 where
-    T: Transport,
+    T: Transport<A>,
 {
     type Target = T;
     fn build(self) -> Self::Target {
@@ -70,8 +70,16 @@ where
 
 /// A builder for a client.
 #[derive(Debug)]
-pub struct Builder<T, P, RP = policy::Standard, S = Identity, BIn = crate::Body, BOut = crate::Body>
-{
+pub struct Builder<
+    D,
+    T,
+    P,
+    RP = policy::Standard,
+    S = Identity,
+    BIn = crate::Body,
+    BOut = crate::Body,
+> {
+    resolver: D,
     transport: T,
     protocol: P,
     builder: ServiceBuilder<S>,
@@ -80,14 +88,15 @@ pub struct Builder<T, P, RP = policy::Standard, S = Identity, BIn = crate::Body,
     timeout: Option<Duration>,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
-    pool: Option<crate::client::pool::Config>,
+    pool: Option<chateau::client::pool::Config>,
     body: std::marker::PhantomData<fn(BIn) -> BOut>,
 }
 
-impl Builder<(), (), policy::Standard> {
+impl Builder<(), (), (), policy::Standard> {
     /// Create a new, empty builder
     pub fn new() -> Self {
         Self {
+            resolver: (),
             transport: (),
             protocol: (),
             builder: ServiceBuilder::new(),
@@ -104,6 +113,7 @@ impl Builder<(), (), policy::Standard> {
 
 impl Default
     for Builder<
+        GaiResolver,
         TcpTransportConfig,
         HttpConnectionBuilder<crate::Body>,
         policy::Standard,
@@ -206,12 +216,12 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
 
 impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     /// Connection pool configuration.
-    pub fn pool(&mut self) -> Option<&mut crate::client::pool::Config> {
+    pub fn pool(&mut self) -> Option<&mut chateau::client::pool::Config> {
         self.pool.as_mut()
     }
 
     /// Use the provided connection pool configuration.
-    pub fn with_pool(mut self, pool: crate::client::pool::Config) -> Self {
+    pub fn with_pool(mut self, pool: chateau::client::pool::Config) -> Self {
         self.pool = Some(pool);
         self
     }

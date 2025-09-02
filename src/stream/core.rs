@@ -6,10 +6,10 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::info::BraidAddr;
-use crate::info::{ConnectionInfo, HasConnectionInfo};
-use crate::stream::duplex::DuplexStream;
-use crate::stream::tcp::TcpStream;
-use crate::stream::unix::UnixStream;
+use chateau::info::{ConnectionInfo, HasConnectionInfo};
+use chateau::stream::duplex::DuplexStream;
+use chateau::stream::tcp::TcpStream;
+use chateau::stream::unix::UnixStream;
 
 #[derive(Debug)]
 #[pin_project(project = BraidCoreProjection)]
