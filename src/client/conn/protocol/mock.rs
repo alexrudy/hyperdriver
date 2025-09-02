@@ -130,6 +130,6 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(MockSender: Connection<crate::Body>, PoolableConnection<crate::Body>);
-    assert_impl_all!(MockProtocol: Protocol<MockStream, crate::Body>);
+    assert_impl_all!(MockSender: Connection<http::Request<crate::Body>>, PoolableConnection<http::Request<crate::Body>>);
+    assert_impl_all!(MockProtocol: Protocol<MockStream, http::Request<crate::Body>>);
 }

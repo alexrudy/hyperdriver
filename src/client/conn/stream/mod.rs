@@ -202,7 +202,7 @@ where
     fn can_share(&self) -> bool {
         match self.inner {
             #[cfg(feature = "tls")]
-            OptTlsStream::Tls(ref stream) => stream.can_share(),
+            OptTlsStream::Tls(ref _stream) => false,
 
             _ => false,
         }

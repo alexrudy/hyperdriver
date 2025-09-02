@@ -54,7 +54,7 @@ where
             ConnectorError::Unavailable => {
                 Error::Connection("pool closed, no connection can be made".into())
             }
-            _ => Error::Connection("Unknown error occured"),
+            _ => Error::Connection("Unknown error occured".into()),
         }
     }
 }

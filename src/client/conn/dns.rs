@@ -6,8 +6,7 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
-use chateau::client::conn::dns::Resolver;
-use futures_util::{Future, FutureExt as _};
+use futures_util::Future;
 use pin_project::{pin_project, pinned_drop};
 use tokio::task::JoinHandle;
 
@@ -199,9 +198,13 @@ impl<B> tower::Service<&http::Request<B>> for GaiResolver {
 
     fn call(&mut self, req: &http::Request<B>) -> Self::Future {
         let span = tracing::Span::current();
-        let (host, port) = match get_host_and_port(&req.uri) {
+        let (host, port) = match get_host_and_port(req.uri()) {
             Ok((host, port)) => (host, port),
-            Err(e) => return Box::pin(std::future::ready(Err(e))),
+            Err(e) => {
+                return JoinHandleFuture {
+                    handle: tokio::task::spawn_blocking(move || Err(e)),
+                }
+            }
         };
         JoinHandleFuture {
             handle: tokio::task::spawn_blocking(move || {
