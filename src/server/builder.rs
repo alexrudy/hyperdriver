@@ -1,4 +1,3 @@
-#[cfg(all(feature = "tls", feature = "stream"))]
 #[cfg(feature = "stream")]
 use std::{io, net::SocketAddr};
 

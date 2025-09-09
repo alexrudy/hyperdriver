@@ -22,7 +22,7 @@ pub mod mock;
 pub use hyper::client::conn::http1;
 pub use hyper::client::conn::http2;
 
-use super::connection::Http1Connection;
+use super::connection::{Http1Connection, Http2Connection};
 
 /// The HTTP protocol to use for a connection.
 ///
@@ -69,6 +69,12 @@ impl From<::http::Version> for HttpProtocol {
 }
 
 pub struct Http1Builder<B>(hyper::client::conn::http1::Builder, PhantomData<fn(B)>);
+
+impl<B> Clone for Http1Builder<B> {
+    fn clone(&self) -> Self {
+        Http1Builder(self.0.clone(), PhantomData)
+    }
+}
 
 impl<B> Deref for Http1Builder<B> {
     type Target = hyper::client::conn::http1::Builder;
@@ -121,12 +127,18 @@ where
                     }
                 }
             });
-            Ok(sender)
+            Ok(Http1Connection::new(sender))
         })
     }
 }
 
 pub struct Http2Builder<B, E>(hyper::client::conn::http2::Builder<E>, PhantomData<fn(B)>);
+
+impl<B, E: Clone> Clone for Http2Builder<B, E> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), PhantomData)
+    }
+}
 
 impl<B, E> Deref for Http2Builder<B, E> {
     type Target = hyper::client::conn::http2::Builder<E>;
@@ -155,10 +167,10 @@ where
     <BIn as Body>::Data: Send,
     <BIn as Body>::Error: Into<BoxError>,
 {
-    type Response = hyper::client::conn::http2::SendRequest<BIn>;
+    type Response = Http2Connection<BIn>;
 
     type Error = hyper::Error;
-    type Future = self::future::HttpProtocolFuture<hyper::client::conn::http2::SendRequest<BIn>>;
+    type Future = self::future::HttpProtocolFuture<Http2Connection<BIn>>;
 
     fn poll_ready(
         &mut self,
@@ -183,7 +195,7 @@ where
                     }
                 }
             });
-            Ok(sender)
+            Ok(Http2Connection::new(sender))
         })
     }
 }
@@ -204,7 +216,7 @@ mod future {
     impl<C> HttpProtocolFuture<C> {
         pub(super) fn new<F>(inner: F) -> Self
         where
-            F: Future<Output = Result<C, hyper::Error>> + 'static,
+            F: Future<Output = Result<C, hyper::Error>> + Send + 'static,
         {
             Self {
                 inner: Box::pin(inner),
@@ -216,7 +228,7 @@ mod future {
         type Output = Result<C, hyper::Error>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            self.inner.poll_unpin(cx)
+            Pin::new(&mut self.inner).poll(cx)
         }
     }
 }

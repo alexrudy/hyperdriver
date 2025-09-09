@@ -10,8 +10,6 @@ use std::str::FromStr;
 use camino::Utf8Path;
 #[cfg(feature = "stream")]
 use camino::Utf8PathBuf;
-#[cfg(feature = "stream")]
-use chateau::info::ConnectionInfo;
 
 #[doc(hidden)]
 pub use chateau::stream::duplex::DuplexAddr;
@@ -133,7 +131,7 @@ impl BraidAddr {
     /// Returns the Unix socket address, if this is a Unix socket address.
     pub fn path(&self) -> Option<&Utf8Path> {
         match self {
-            Self::Unix(addr) => addr.path(),
+            Self::Unix(addr) => addr.path().map(Utf8Path::from_path).flatten(),
             _ => None,
         }
     }
@@ -192,7 +190,7 @@ impl From<(std::net::Ipv6Addr, u16)> for BraidAddr {
 #[cfg(feature = "stream")]
 impl From<Utf8PathBuf> for BraidAddr {
     fn from(addr: Utf8PathBuf) -> Self {
-        Self::Unix(UnixAddr::from_pathbuf(addr))
+        Self::Unix(UnixAddr::from_pathbuf(addr.into_std_path_buf()))
     }
 }
 
@@ -210,13 +208,6 @@ impl From<DuplexAddr> for BraidAddr {
     }
 }
 
-#[cfg(not(feature = "tls"))]
-/// Trait for types which can provide TLS connection information, not populated without the `tls` feature.
-pub trait HasTlsConnectionInfo {}
-
-#[cfg(not(feature = "tls"))]
-impl<T> HasTlsConnectionInfo for T where T: HasConnectionInfo {}
-
 #[cfg(test)]
 mod tests {
 
@@ -230,7 +221,10 @@ mod tests {
 
     #[cfg(feature = "client")]
     use chateau::stream::tcp::TcpStream;
-    use chateau::stream::unix::UnixStream;
+    use chateau::{
+        info::{ConnectionInfo, HasConnectionInfo},
+        stream::unix::UnixStream,
+    };
 
     use super::*;
 
@@ -284,7 +278,7 @@ mod tests {
     #[test]
     fn unix_addr() {
         let addr = UnixAddr::from_pathbuf("/tmp/foo.sock".into());
-        assert_eq!(addr.path(), Some("/tmp/foo.sock".into()));
+        assert_eq!(addr.path(), Some(std::path::Path::new("/tmp/foo.sock")));
 
         let addr = UnixAddr::unnamed();
         assert_eq!(addr.path(), None);

@@ -12,9 +12,16 @@ use chateau::client::pool::PoolableConnection;
 use http_body::Body as HttpBody;
 
 pub(super) use self::future::SendRequestFuture;
+use crate::service::HttpConnection;
 
 #[derive(Debug)]
 pub struct Http1Connection<B>(hyper::client::conn::http1::SendRequest<B>);
+
+impl<B> Http1Connection<B> {
+    pub fn new(send_request: hyper::client::conn::http1::SendRequest<B>) -> Self {
+        Self(send_request)
+    }
+}
 
 impl<B> Deref for Http1Connection<B> {
     type Target = hyper::client::conn::http1::SendRequest<B>;
@@ -56,6 +63,15 @@ where
     }
 }
 
+impl<B> HttpConnection<B> for Http1Connection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    fn version(&self) -> http::Version {
+        http::Version::HTTP_11
+    }
+}
+
 impl<B> PoolableConnection<http::Request<B>> for Http1Connection<B>
 where
     B: HttpBody + Send + 'static,
@@ -75,6 +91,12 @@ where
 
 #[derive(Debug, Clone)]
 pub struct Http2Connection<B>(hyper::client::conn::http2::SendRequest<B>);
+
+impl<B> Http2Connection<B> {
+    pub fn new(send_request: hyper::client::conn::http2::SendRequest<B>) -> Self {
+        Self(send_request)
+    }
+}
 
 impl<B> Deref for Http2Connection<B> {
     type Target = hyper::client::conn::http2::SendRequest<B>;
@@ -111,6 +133,15 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
         hyper::client::conn::http2::SendRequest::poll_ready(self, cx)
+    }
+}
+
+impl<B> HttpConnection<B> for Http2Connection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    fn version(&self) -> http::Version {
+        http::Version::HTTP_2
     }
 }
 

@@ -13,15 +13,17 @@
 //!
 
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use chateau::client::pool::{Key, KeyError};
 use tower::util::Oneshot;
 use tower::ServiceExt;
 
 use self::conn::protocol::auto;
 use crate::BoxError;
-use chateau::client::conn::transport::tcp::TcpTransportConfig;
+use chateau::client::conn::transport::tcp::TcpTransport;
 pub use chateau::client::ConnectionPoolLayer;
 pub use chateau::client::ConnectionPoolService;
 use chateau::services::SharedService;
@@ -123,13 +125,16 @@ impl Client {
     }
 
     /// Create a new, empty builder for clients.
-    pub fn builder() -> self::builder::Builder<(), ()> {
+    pub fn builder() -> self::builder::Builder<(), (), ()> {
         Builder::new()
     }
 
     /// Create a new client builder with default settings applied.
-    pub fn build_tcp_http(
-    ) -> self::builder::Builder<TcpTransportConfig, auto::HttpConnectionBuilder<crate::Body>> {
+    pub fn build_tcp_http() -> self::builder::Builder<
+        conn::dns::GaiResolver,
+        TcpTransport,
+        auto::HttpConnectionBuilder<crate::Body>,
+    > {
         Builder::default()
     }
 
@@ -181,6 +186,117 @@ impl tower::Service<http::Request<crate::Body>> for Client {
 
     fn call(&mut self, request: http::Request<crate::Body>) -> Self::Future {
         Arc::make_mut(&mut self.inner).request(request)
+    }
+}
+
+/// Pool key which is used to identify a connection - using scheme
+/// and authority.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct UriKey(http::uri::Scheme, Option<http::uri::Authority>);
+
+impl fmt::Display for UriKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}://{}",
+            self.0,
+            self.1.as_ref().map_or("", |a| a.as_str())
+        )
+    }
+}
+
+impl From<(http::uri::Scheme, http::uri::Authority)> for UriKey {
+    fn from(value: (http::uri::Scheme, http::uri::Authority)) -> Self {
+        Self(value.0, Some(value.1))
+    }
+}
+
+impl TryFrom<http::Uri> for UriKey {
+    type Error = KeyError;
+
+    fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
+        let parts = uri.into_parts();
+        let authority = parts.authority.clone();
+        let scheme = parts.scheme.clone().ok_or_else(|| {
+            KeyError::new(format!(
+                "Missing scheme in URI: {}",
+                http::Uri::from_parts(parts).unwrap()
+            ))
+        })?;
+        Ok::<_, KeyError>(Self(scheme, authority))
+    }
+}
+
+impl FromStr for UriKey {
+    type Err = KeyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uri = http::Uri::from_str(s).map_err(KeyError::new)?;
+        uri.try_into()
+    }
+}
+
+impl<B> Key<http::Request<B>> for UriKey {
+    fn build_key(request: &http::Request<B>) -> Result<Self, KeyError>
+    where
+        Self: Sized,
+    {
+        let uri = request.uri().clone();
+        let parts = uri.into_parts();
+        let authority = parts.authority;
+        let scheme = parts
+            .scheme
+            .ok_or_else(|| KeyError::new(format!("Missing scheme in URI: {}", request.uri())))?;
+        Ok::<_, KeyError>(Self(scheme, authority))
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_key {
+
+    use super::*;
+
+    #[test]
+    fn key_from_uri() {
+        let uri = http::Uri::from_static("http://localhost:8080");
+        let key: UriKey = uri.try_into().unwrap();
+        assert_eq!(key.0, http::uri::Scheme::HTTP);
+        assert_eq!(
+            key.1,
+            Some(http::uri::Authority::from_static("localhost:8080"))
+        );
+    }
+
+    #[test]
+    fn key_display() {
+        let key = UriKey(
+            http::uri::Scheme::HTTP,
+            Some(http::uri::Authority::from_static("localhost:8080")),
+        );
+        assert_eq!(key.to_string(), "http://localhost:8080");
+    }
+
+    #[test]
+    fn key_from_tuple() {
+        let key: UriKey = (
+            http::uri::Scheme::HTTP,
+            http::uri::Authority::from_static("localhost:8080"),
+        )
+            .into();
+        assert_eq!(key.0, http::uri::Scheme::HTTP);
+        assert_eq!(
+            key.1,
+            Some(http::uri::Authority::from_static("localhost:8080"))
+        );
+    }
+
+    #[test]
+    fn key_debug() {
+        let key = UriKey(
+            http::uri::Scheme::HTTP,
+            Some(http::uri::Authority::from_static("localhost:8080")),
+        );
+        assert_eq!(format!("{key:?}"), "UriKey(\"http\", Some(localhost:8080))");
     }
 }
 

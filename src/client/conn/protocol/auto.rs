@@ -17,7 +17,6 @@ use chateau::client::pool::PoolableConnection;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
 use crate::BoxError;
-use chateau::client::conn::ConnectionError;
 use chateau::info::HasConnectionInfo;
 use chateau::info::HasTlsConnectionInfo;
 
@@ -40,6 +39,13 @@ impl<B> HttpConnection<B> {
     pub(super) fn h2(conn: hyper::client::conn::http2::SendRequest<B>) -> Self {
         HttpConnection {
             inner: InnerConnection::H2(conn),
+        }
+    }
+
+    pub fn version(&self) -> HttpProtocol {
+        match &self.inner {
+            InnerConnection::H1(_) => HttpProtocol::Http1,
+            InnerConnection::H2(_) => HttpProtocol::Http2,
         }
     }
 }
@@ -277,10 +283,13 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument("http-connect", level="trace", skip_all, fields(addr=?req.transport.info().remote_addr()))]
+    #[tracing::instrument("http-connect", level="trace", skip_all, fields(addr=?req.info().remote_addr()))]
     fn call(&mut self, req: IO) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
-        future::HttpConnectFuture::new(builder, req, builder.version)
+        //TODO: Should there be some way to force an HTTP2 connection from the get-go?
+        // Since this could depend on the HTTP request, we'd need a different way to propogate that along with the
+        // IO stream into this method.
+        future::HttpConnectFuture::new(builder, req, HttpProtocol::Http1)
     }
 }
 
@@ -373,7 +382,6 @@ mod tests {
     use chateau::stream::tls::TlsHandshakeStream as _;
 
     use futures_util::{stream::StreamExt as _, TryFutureExt};
-    use http::Version;
     use static_assertions::assert_impl_all;
     use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -420,7 +428,7 @@ mod tests {
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(!conn.can_share());
-        assert_eq!(conn.version(), Version::HTTP_11);
+        assert_eq!(conn.version(), HttpProtocol::Http1);
         assert!(conn.reuse().is_none());
         assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/1.1 }");
 
@@ -453,7 +461,7 @@ mod tests {
     #[tokio::test]
     #[cfg(all(feature = "stream", feature = "tls"))]
     async fn http_connector_request_h2() {
-        use crate::client::conn::connection::ConnectionExt as _;
+        use chateau::client::conn::connection::ConnectionExt as _;
 
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -461,13 +469,11 @@ mod tests {
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = builder.connect(stream, HttpProtocol::Http2).await.unwrap();
+        let mut conn = builder.connect(stream).await.unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
         assert!(conn.can_share());
-        assert_eq!(conn.version(), Version::HTTP_2);
         assert!(conn.reuse().is_some());
-        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
 
         let request = http::Request::builder()
             .version(::http::Version::HTTP_2)
@@ -505,16 +511,21 @@ mod tests {
 
         let (stream, client) = transport().await.unwrap();
 
-        async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, ConnectionError> {
+        async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, hyper::Error> {
+            use std::sync::Arc;
+
+            use rustls::pki_types::ServerName;
+
             let mut builder = HttpConnectionBuilder::default();
 
-            let tls = chateau::info::TlsConnectionInfo::client(Some(crate::info::Protocol::http(
-                http::Version::HTTP_2,
-            )));
+            let info = rustls::ClientConnection::new(
+                Arc::new(crate::fixtures::tls_client_config()),
+                ServerName::try_from("example.com").unwrap(),
+            )
+            .unwrap();
+            let tls = chateau::info::TlsConnectionInfo::client(&info);
 
-            builder
-                .connect(MockTls::new(stream, tls), HttpProtocol::Http1)
-                .await
+            builder.connect(MockTls::new(stream, tls)).await
         }
 
         async fn handshake(mut stream: Stream) -> Result<(), std::io::Error> {
@@ -529,7 +540,6 @@ mod tests {
         let mut conn = conn.unwrap();
         assert!(conn.is_open());
         assert!(conn.can_share());
-        assert_eq!(conn.version(), Version::HTTP_2);
         assert!(conn.reuse().is_some());
         assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
     }

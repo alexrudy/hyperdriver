@@ -171,7 +171,7 @@ where
     fn info(&self) -> chateau::info::ConnectionInfo<IO::Addr> {
         #[cfg(feature = "tls")]
         match self.inner {
-            OptTlsStream::Tls(ref stream) => stream.info(),
+            OptTlsStream::Tls(ref stream) => stream.info().map(|tls_addr| tls_addr.into_addr()),
             OptTlsStream::NoTls(ref stream) => stream.info(),
         }
 
@@ -196,13 +196,13 @@ where
 
 impl<IO> PoolableStream for Stream<IO>
 where
-    IO: HasConnectionInfo + Unpin + Send + 'static,
+    IO: PoolableStream + HasConnectionInfo + Unpin + Send + 'static,
     IO::Addr: Send + Unpin + Clone,
 {
     fn can_share(&self) -> bool {
         match self.inner {
             #[cfg(feature = "tls")]
-            OptTlsStream::Tls(ref _stream) => false,
+            OptTlsStream::Tls(ref stream) => stream.can_share(),
 
             _ => false,
         }

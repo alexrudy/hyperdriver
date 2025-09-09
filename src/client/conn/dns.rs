@@ -1,172 +1,129 @@
 //! DNS resolution utilities.
 
-use std::collections::VecDeque;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+#[cfg(feature = "tls")]
+use std::marker::PhantomData;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
+use chateau::client::conn::dns::{Resolver, SocketAddrs};
+#[cfg(feature = "tls")]
+use chateau::client::conn::transport::TlsAddr;
 use futures_util::Future;
 use pin_project::{pin_project, pinned_drop};
 use tokio::task::JoinHandle;
 
-/// A collection of socket addresses.
-#[derive(Debug, Clone, Default)]
-pub struct SocketAddrs(VecDeque<SocketAddr>);
+#[cfg(feature = "tls")]
+#[derive(Debug, thiserror::Error)]
+pub enum TlsResolverError<E> {
+    #[error("{0}")]
+    Resolver(#[source] E),
+    #[error("No hostname in URI for TLS: {0}")]
+    MissingHostname(http::Uri),
+}
 
-impl SocketAddrs {
-    pub(crate) fn set_port(&mut self, port: u16) {
-        for addr in &mut self.0 {
-            addr.set_port(port)
+#[cfg(feature = "tls")]
+#[derive(Debug, Default, Clone)]
+pub struct TlsResolver<R> {
+    inner: R,
+}
+
+#[cfg(feature = "tls")]
+impl<R> TlsResolver<R> {
+    pub fn new(resolver: R) -> Self {
+        Self { inner: resolver }
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<R, B, A> tower::Service<&http::Request<B>> for TlsResolver<R>
+where
+    R: Resolver<http::Request<B>, Address = A>,
+{
+    type Response = TlsAddr<A>;
+    type Error = TlsResolverError<R::Error>;
+    type Future = TlsResolverFuture<R::Future, A, R::Error>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner
+            .poll_ready(cx)
+            .map_err(TlsResolverError::Resolver)
+    }
+
+    fn call(&mut self, req: &http::Request<B>) -> Self::Future {
+        let Some(hostname) = req.uri().host().map(|s| s.to_owned()) else {
+            return TlsResolverFuture::missing_hostname(req.uri().clone());
+        };
+
+        TlsResolverFuture::new(self.inner.resolve(req), hostname)
+    }
+}
+
+#[cfg(feature = "tls")]
+#[pin_project(project = TlsResolverFutureStateProj)]
+enum TlsResolverFutureState<F> {
+    Future {
+        #[pin]
+        future: F,
+        hostname: Option<String>,
+    },
+
+    MissingHostname(Option<http::Uri>),
+}
+
+#[cfg(feature = "tls")]
+#[pin_project]
+pub struct TlsResolverFuture<F, A, E> {
+    #[pin]
+    state: TlsResolverFutureState<F>,
+    address: PhantomData<fn() -> (A, E)>,
+}
+
+#[cfg(feature = "tls")]
+impl<F, A, E> TlsResolverFuture<F, A, E> {
+    fn missing_hostname(err: http::Uri) -> Self {
+        Self {
+            state: TlsResolverFutureState::MissingHostname(Some(err)),
+            address: PhantomData,
         }
     }
 
-    pub(crate) fn pop(&mut self) -> Option<SocketAddr> {
-        self.0.pop_front()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub(crate) fn sort_preferred(&mut self, prefer: Option<IpVersion>) {
-        let mut v4_idx = None;
-        let mut v6_idx = None;
-
-        for (idx, addr) in self.0.iter().enumerate() {
-            match (addr.version(), v4_idx, v6_idx) {
-                (IpVersion::V4, None, _) => {
-                    v4_idx = Some(idx);
-                }
-                (IpVersion::V6, _, None) => {
-                    v6_idx = Some(idx);
-                }
-                (_, Some(_), Some(_)) => break,
-                _ => {}
-            }
-        }
-
-        let v4: Option<SocketAddr>;
-        let v6: Option<SocketAddr>;
-        if v4_idx.zip(v6_idx).is_some_and(|(v4, v6)| v4 > v6) {
-            v4 = v4_idx.and_then(|idx| self.0.remove(idx));
-            v6 = v6_idx.and_then(|idx| self.0.remove(idx));
-        } else {
-            v6 = v6_idx.and_then(|idx| self.0.remove(idx));
-            v4 = v4_idx.and_then(|idx| self.0.remove(idx));
-        }
-
-        match (prefer, v4, v6) {
-            (Some(IpVersion::V4), Some(addr_v4), Some(addr_v6)) => {
-                self.0.push_front(addr_v6);
-                self.0.push_front(addr_v4);
-            }
-            (Some(IpVersion::V6), Some(addr_v4), Some(addr_v6)) => {
-                self.0.push_front(addr_v4);
-                self.0.push_front(addr_v6);
-            }
-
-            (_, Some(addr_v4), Some(addr_v6)) => {
-                self.0.push_front(addr_v4);
-                self.0.push_front(addr_v6);
-            }
-            (_, Some(addr_v4), None) => {
-                self.0.push_front(addr_v4);
-            }
-            (_, None, Some(addr_v6)) => {
-                self.0.push_front(addr_v6);
-            }
-            _ => {}
-        }
-    }
-}
-
-impl FromIterator<SocketAddr> for SocketAddrs {
-    fn from_iter<T: IntoIterator<Item = SocketAddr>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
-    }
-}
-
-impl IntoIterator for SocketAddrs {
-    type Item = SocketAddr;
-    type IntoIter = std::collections::vec_deque::IntoIter<SocketAddr>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a SocketAddrs {
-    type Item = &'a SocketAddr;
-    type IntoIter = std::collections::vec_deque::Iter<'a, SocketAddr>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
-    }
-}
-
-/// Extension trait for `IpAddr` and `SocketAddr` to get the IP version.
-pub trait IpVersionExt {
-    /// Get the IP version of this address.
-    fn version(&self) -> IpVersion;
-}
-
-/// IP version.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub enum IpVersion {
-    /// IPv4
-    V4,
-
-    /// IPv6
-    V6,
-}
-
-impl IpVersion {
-    pub(super) fn from_binding(
-        ip_v4_address: Option<Ipv4Addr>,
-        ip_v6_address: Option<Ipv6Addr>,
-    ) -> Option<Self> {
-        match (ip_v4_address, ip_v6_address) {
-            // Prefer IPv6 if both are available.
-            (Some(_), Some(_)) => Some(Self::V6),
-            (Some(_), None) => Some(Self::V4),
-            (None, Some(_)) => Some(Self::V6),
-            (None, None) => None,
-        }
-    }
-
-    /// Is this IP version IPv4?
-    #[allow(dead_code)]
-    pub fn is_v4(&self) -> bool {
-        matches!(self, Self::V4)
-    }
-
-    /// Is this IP version IPv6?
-    #[allow(dead_code)]
-    pub fn is_v6(&self) -> bool {
-        matches!(self, Self::V6)
-    }
-}
-
-impl IpVersionExt for SocketAddr {
-    fn version(&self) -> IpVersion {
-        match self {
-            SocketAddr::V4(_) => IpVersion::V4,
-            SocketAddr::V6(_) => IpVersion::V6,
+    fn new(future: F, hostname: String) -> Self {
+        Self {
+            state: TlsResolverFutureState::Future {
+                future,
+                hostname: Some(hostname),
+            },
+            address: PhantomData,
         }
     }
 }
 
-impl IpVersionExt for IpAddr {
-    fn version(&self) -> IpVersion {
-        match self {
-            IpAddr::V4(_) => IpVersion::V4,
-            IpAddr::V6(_) => IpVersion::V6,
+#[cfg(feature = "tls")]
+impl<F, A, E> Future for TlsResolverFuture<F, A, E>
+where
+    F: Future<Output = Result<A, E>>,
+{
+    type Output = Result<TlsAddr<A>, TlsResolverError<E>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.as_mut().project().state.project() {
+            TlsResolverFutureStateProj::Future { future, hostname } => match future.poll(cx) {
+                Poll::Ready(Ok(addr)) => Poll::Ready(Ok(TlsAddr::new(
+                    addr,
+                    hostname
+                        .take()
+                        .expect("TlsResolverFuture polled after ready"),
+                ))),
+                Poll::Ready(Err(err)) => Poll::Ready(Err(TlsResolverError::Resolver(err))),
+                Poll::Pending => Poll::Pending,
+            },
+            TlsResolverFutureStateProj::MissingHostname(uri) => {
+                Poll::Ready(Err(TlsResolverError::MissingHostname(
+                    uri.take().expect("TlsResolveFuture polled after error"),
+                )))
+            }
         }
     }
 }
@@ -175,7 +132,7 @@ impl IpVersionExt for IpAddr {
 ///
 /// This resolver uses the `getaddrinfo` system call to resolve
 /// hostnames to IP addresses via the operating system.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct GaiResolver {
     _priv: (),
 }
@@ -200,13 +157,9 @@ impl<B> tower::Service<&http::Request<B>> for GaiResolver {
         let span = tracing::Span::current();
         let (host, port) = match get_host_and_port(req.uri()) {
             Ok((host, port)) => (host, port),
-            Err(e) => {
-                return JoinHandleFuture {
-                    handle: tokio::task::spawn_blocking(move || Err(e)),
-                }
-            }
+            Err(e) => return GaiFuture::error(e),
         };
-        JoinHandleFuture {
+        GaiFuture::handle(JoinHandleFuture {
             handle: tokio::task::spawn_blocking(move || {
                 tracing::trace_span!(parent: &span, "getaddrinfo").in_scope(|| {
                     tracing::trace!("dns resolution starting");
@@ -215,7 +168,7 @@ impl<B> tower::Service<&http::Request<B>> for GaiResolver {
                         .map(SocketAddrs::from_iter)
                 })
             }),
-        }
+        })
     }
 }
 
@@ -242,7 +195,7 @@ fn get_host_and_port(uri: &http::Uri) -> Result<(Box<str>, u16), io::Error> {
     Ok((host.into(), port))
 }
 
-pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> GaiFuture {
+pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> JoinHandleFuture<SocketAddrs> {
     let span = tracing::Span::current();
     JoinHandleFuture {
         handle: tokio::task::spawn_blocking(move || {
@@ -295,7 +248,47 @@ impl<Addr> PinnedDrop for JoinHandleFuture<Addr> {
 
 /// A future returned by `GaiResolver` when resolving via getaddrinfo
 /// in a worker thread.
-pub type GaiFuture = JoinHandleFuture<SocketAddrs>;
+#[derive(Debug)]
+#[pin_project]
+pub struct GaiFuture {
+    #[pin]
+    state: GaiFutureState,
+}
+
+impl GaiFuture {
+    fn error(error: io::Error) -> Self {
+        GaiFuture {
+            state: GaiFutureState::Error(Some(error)),
+        }
+    }
+
+    fn handle(handle: JoinHandleFuture<SocketAddrs>) -> Self {
+        GaiFuture {
+            state: GaiFutureState::JoinHandle(handle),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[pin_project(project = GaiFutureStateProj)]
+enum GaiFutureState {
+    JoinHandle(#[pin] JoinHandleFuture<SocketAddrs>),
+    Error(Option<io::Error>),
+}
+
+impl Future for GaiFuture {
+    type Output = Result<SocketAddrs, io::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.state.project() {
+            GaiFutureStateProj::JoinHandle(handle) => handle.poll(cx),
+            GaiFutureStateProj::Error(err) => {
+                Poll::Ready(Err(err.take().expect("error polled multiple times")))
+            }
+        }
+    }
+}
 
 /// Converts a standard resolver (which can return multiple addresses)
 /// into a resolver that only returns the first address as an IP address,
@@ -352,7 +345,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project().inner.poll(cx) {
-            Poll::Ready(Ok(addrs)) => addrs.0.into_iter().next().map_or_else(
+            Poll::Ready(Ok(addrs)) => addrs.into_iter().next().map_or_else(
                 || {
                     Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::AddrNotAvailable,
