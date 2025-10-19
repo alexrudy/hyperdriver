@@ -4,6 +4,7 @@
 //! negotiated protocol which can be either HTTP/1.1 or HTTP/2 based on the connection
 //! protocol and ALPN negotiation.
 
+use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -29,13 +30,26 @@ use super::connection::{Http1Connection, Http2Connection};
 /// This differs from the HTTP version in that it is constrained to the two flavors of HTTP
 /// protocol, HTTP/1.1 and HTTP/2. HTTP/3 is not yet supported. HTTP/0.9 and HTTP/1.0 are
 /// supported by HTTP/1.1.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub enum HttpProtocol {
     /// Connect using HTTP/1.1
     Http1,
 
     /// Connect using HTTP/2
     Http2,
+
+    /// Connect using HTTP/3
+    Http3,
+}
+
+impl fmt::Debug for HttpProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http1 => write!(f, "HTTP/1"),
+            Self::Http2 => write!(f, "HTTP/2"),
+            Self::Http3 => write!(f, "HTTP/3"),
+        }
+    }
 }
 
 impl HttpProtocol {
@@ -54,6 +68,7 @@ impl HttpProtocol {
         match self {
             Self::Http1 => ::http::Version::HTTP_11,
             Self::Http2 => ::http::Version::HTTP_2,
+            Self::Http3 => ::http::Version::HTTP_3,
         }
     }
 }
@@ -68,7 +83,31 @@ impl From<::http::Version> for HttpProtocol {
     }
 }
 
+/// Wrapper for hyper's HTTP/1 connection builder for compatibility with Chateau
+#[derive(Debug)]
 pub struct Http1Builder<B>(hyper::client::conn::http1::Builder, PhantomData<fn(B)>);
+
+impl<B> Http1Builder<B> {
+    /// Construct a new HTTP/1 connection builder with default settings
+    pub fn new() -> Self {
+        Http1Builder(hyper::client::conn::http1::Builder::new(), PhantomData)
+    }
+}
+
+impl<B> From<hyper::client::conn::http1::Builder> for Http1Builder<B> {
+    fn from(value: hyper::client::conn::http1::Builder) -> Self {
+        Self(value, PhantomData)
+    }
+}
+
+impl<B> Default for Http1Builder<B> {
+    fn default() -> Self {
+        Self(
+            hyper::client::conn::http1::Builder::new(),
+            Default::default(),
+        )
+    }
+}
 
 impl<B> Clone for Http1Builder<B> {
     fn clone(&self) -> Self {
@@ -132,11 +171,41 @@ where
     }
 }
 
-pub struct Http2Builder<B, E>(hyper::client::conn::http2::Builder<E>, PhantomData<fn(B)>);
+/// Wrapper type for hyper's HTTP/2 builder for compatibility with chateau.
+#[derive(Debug)]
+pub struct Http2Builder<B, E> {
+    builder: hyper::client::conn::http2::Builder<E>,
+    body: PhantomData<fn(B)>,
+}
+
+impl<B, E> Http2Builder<B, E>
+where
+    E: Clone,
+{
+    /// Construct a new HTTP/2 connection builder with default settings
+    pub fn new(executor: E) -> Self {
+        Self {
+            builder: hyper::client::conn::http2::Builder::new(executor),
+            body: PhantomData,
+        }
+    }
+}
+
+impl<B, E> From<hyper::client::conn::http2::Builder<E>> for Http2Builder<B, E> {
+    fn from(value: hyper::client::conn::http2::Builder<E>) -> Self {
+        Self {
+            builder: value,
+            body: PhantomData,
+        }
+    }
+}
 
 impl<B, E: Clone> Clone for Http2Builder<B, E> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
+        Self {
+            builder: self.builder.clone(),
+            body: PhantomData,
+        }
     }
 }
 
@@ -144,13 +213,13 @@ impl<B, E> Deref for Http2Builder<B, E> {
     type Target = hyper::client::conn::http2::Builder<E>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.builder
     }
 }
 
 impl<B, E> DerefMut for Http2Builder<B, E> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.builder
     }
 }
 
@@ -183,10 +252,10 @@ where
         let builder = std::mem::replace(self, self.clone());
         // let info = stream.info();
         // let span = tracing::info_span!("connection", version=?http::Version::HTTP_11, peer=%info.remote_addr());
-
         self::future::HttpProtocolFuture::new(async move {
             let (sender, conn) = builder.handshake(TokioIo::new(req)).await?;
             tokio::spawn(async {
+                tracing::trace!("spawned h2 connection");
                 if let Err(err) = conn.await {
                     if err.is_user() {
                         tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
@@ -194,6 +263,23 @@ where
                         tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
                     }
                 }
+                tracing::trace!("finished h2 connection");
+                // let shutdown = running.into_future();
+                // tokio::select! {
+                //     conn_error = conn => {
+                //         if let Err(err) = conn_error {
+                //             if err.is_user() {
+                //                 tracing::error!(err = format!("{err:#}"), "h2 connection driver error");
+                //             } else {
+                //                 tracing::debug!(err = format!("{err:#}"), "h2 connection driver error");
+                //             }
+                //         }
+                //         tracing::trace!("finished h2 connection");
+                //     },
+                //     _ = shutdown => {
+                //         tracing::trace!("got shutdown signal in client");
+                //     }
+                // };
             });
             Ok(Http2Connection::new(sender))
         })
@@ -202,6 +288,7 @@ where
 
 mod future {
     use std::{
+        fmt,
         future::Future,
         pin::Pin,
         task::{Context, Poll},
@@ -211,6 +298,12 @@ mod future {
 
     pub struct HttpProtocolFuture<C> {
         inner: BoxFuture<'static, Result<C, hyper::Error>>,
+    }
+
+    impl<C> fmt::Debug for HttpProtocolFuture<C> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("HttpProtocolFuture").finish()
+        }
     }
 
     impl<C> HttpProtocolFuture<C> {
@@ -230,5 +323,86 @@ mod future {
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             Pin::new(&mut self.inner).poll(cx)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use chateau::client::conn::connection::ConnectionExt as _;
+    use chateau::client::pool::PoolableConnection;
+    use futures_util::{stream::StreamExt as _, TryFutureExt};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tracing_test::traced_test;
+
+    use crate::bridge::rt::TokioExecutor;
+    use crate::client::conn::Protocol as _;
+    use crate::client::conn::{protocol::HttpProtocol, Stream};
+    use crate::client::Error;
+    use crate::service::HttpConnectionInfo as _;
+
+    use super::*;
+
+    #[cfg(feature = "stream")]
+    async fn transport() -> Result<(Stream, Stream), BoxError> {
+        let (client, mut incoming) = chateau::stream::duplex::pair();
+
+        // Connect to the server. This is a helper function that creates a client and server
+        // pair, and returns the client's transport stream and the server's stream.
+        let (tx, rx) = tokio::try_join!(
+            async {
+                let stream = client.connect(1024).await?;
+                Ok::<_, BoxError>(stream)
+            },
+            async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }
+        )?;
+
+        Ok((tx.into(), rx.into()))
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    #[cfg(all(feature = "stream", feature = "tls"))]
+    async fn http_connector_request_h2() {
+        use chateau::client::conn::Connection as _;
+
+        let mut builder = Http2Builder::new(TokioExecutor::new());
+
+        let (stream, rx) = transport().await.unwrap();
+
+        let mut conn = builder.connect(stream).await.unwrap();
+        conn.when_ready().await.unwrap();
+        assert!(conn.is_open());
+        assert_eq!(conn.version(), HttpProtocol::Http2);
+        assert!(conn.can_share());
+        assert!(conn.reuse().is_some());
+
+        let request = http::Request::builder()
+            .version(::http::Version::HTTP_2)
+            .method(http::Method::GET)
+            .uri("http://localhost/")
+            .body(crate::body::Body::empty())
+            .unwrap();
+
+        let request_future = conn
+            .send_request(request)
+            .map_err(|err| Error::Transport(err.into()));
+
+        let server_future = async move {
+            use tracing::trace;
+
+            let mut buf = String::new();
+            let _ = BufReader::new(rx)
+                .read_line(&mut buf)
+                .await
+                .map_err(|err| Error::Transport(err.into()))?;
+            trace!(?buf, "received request");
+            assert_eq!(buf, "PRI * HTTP/2.0\r\n");
+            Ok::<_, Error>(())
+        };
+
+        let (_rtx, rrx) = tokio::join!(request_future, server_future);
+
+        assert!(rrx.is_ok());
     }
 }

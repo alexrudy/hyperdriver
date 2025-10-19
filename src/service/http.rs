@@ -5,6 +5,7 @@ use std::task::{Context, Poll};
 use http::{Request, Response};
 use http_body::Body as HttpBody;
 
+pub use crate::client::conn::protocol::HttpProtocol;
 use crate::BoxError;
 use chateau::client::conn::Connection;
 use chateau::client::pool::{PoolableConnection, Pooled};
@@ -51,16 +52,18 @@ where
     }
 }
 
-pub trait HttpConnection<B>: Connection<http::Request<B>> {
-    fn version(&self) -> http::Version;
+/// A trait to specialize connection info for HTTP connections
+pub trait HttpConnectionInfo<B>: Connection<http::Request<B>> {
+    /// Return the protocol version for this connection.
+    fn version(&self) -> HttpProtocol;
 }
 
-impl<C, B> HttpConnection<B> for Pooled<C, http::Request<B>>
+impl<C, B> HttpConnectionInfo<B> for Pooled<C, http::Request<B>>
 where
-    C: HttpConnection<B> + PoolableConnection<http::Request<B>>,
+    C: HttpConnectionInfo<B> + PoolableConnection<http::Request<B>>,
     B: Send,
 {
-    fn version(&self) -> http::Version {
+    fn version(&self) -> HttpProtocol {
         self.deref().version()
     }
 }
@@ -77,7 +80,9 @@ pub(super) mod http1 {
     use tower::util::MapRequest;
     use tower::ServiceExt;
 
-    use super::HttpConnection;
+    use crate::service::http::HttpProtocol;
+
+    use super::HttpConnectionInfo;
 
     type PreprocessFn<C, B> = fn((C, http::Request<B>)) -> (C, http::Request<B>);
 
@@ -86,7 +91,7 @@ pub(super) mod http1 {
     pub struct Http1ChecksService<S, C, B>
     where
         S: tower::Service<(C, http::Request<B>)>,
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
         inner: MapRequest<S, PreprocessFn<C, B>>,
     }
@@ -94,7 +99,7 @@ pub(super) mod http1 {
     impl<S, C, B> tower::Service<(C, http::Request<B>)> for Http1ChecksService<S, C, B>
     where
         S: tower::Service<(C, http::Request<B>)>,
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
         type Response = S::Response;
 
@@ -114,7 +119,7 @@ pub(super) mod http1 {
     impl<S, C, B> Clone for Http1ChecksService<S, C, B>
     where
         S: tower::Service<(C, http::Request<B>)> + Clone,
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
         fn clone(&self) -> Self {
             Self {
@@ -126,7 +131,7 @@ pub(super) mod http1 {
     impl<S, C, B> Http1ChecksService<S, C, B>
     where
         S: tower::Service<(C, http::Request<B>)>,
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
         /// Create a new `Http1ChecksService`.
         pub fn new(service: S) -> Self {
@@ -171,7 +176,7 @@ pub(super) mod http1 {
     impl<C, B, S> tower::layer::Layer<S> for Http1ChecksLayer<C, B>
     where
         S: tower::Service<(C, http::Request<B>)>,
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
         type Service = Http1ChecksService<S, C, B>;
 
@@ -182,9 +187,9 @@ pub(super) mod http1 {
 
     fn check_http1_request<C, B>((conn, mut req): (C, http::Request<B>)) -> (C, http::Request<B>)
     where
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
-        if conn.version() >= http::Version::HTTP_2 {
+        if conn.version() != HttpProtocol::Http1 {
             return (conn, req);
         }
 
@@ -312,7 +317,9 @@ pub(super) mod http2 {
 
     use ::http;
 
-    use super::HttpConnection;
+    use crate::service::http::HttpProtocol;
+
+    use super::HttpConnectionInfo;
 
     const CONNECTION_HEADERS: [http::HeaderName; 5] = [
         http::header::CONNECTION,
@@ -331,9 +338,6 @@ pub(super) mod http2 {
         Connection(E),
     }
 
-    type PreprocessFn<C, B, E> =
-        fn((C, http::Request<B>)) -> Result<(C, http::Request<B>), HttpRequestError<E>>;
-
     /// A service that checks if the request is HTTP/2 compatible.
     #[derive(Debug, Clone)]
     pub struct Http2ChecksService<S> {
@@ -351,9 +355,9 @@ pub(super) mod http2 {
         (conn, mut req): (C, http::Request<B>),
     ) -> Result<(C, http::Request<B>), HttpRequestError<E>>
     where
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
-        if conn.version() == http::Version::HTTP_2 {
+        if conn.version() == HttpProtocol::Http2 {
             if req.method() == http::Method::CONNECT {
                 tracing::warn!("CONNECT method not allowed on HTTP/2");
                 return Err(HttpRequestError::InvalidMethod(http::Method::CONNECT));
@@ -380,7 +384,7 @@ pub(super) mod http2 {
     impl<S, C, B> tower::Service<(C, http::Request<B>)> for Http2ChecksService<S>
     where
         S: tower::Service<(C, http::Request<B>)>,
-        C: HttpConnection<B>,
+        C: HttpConnectionInfo<B>,
     {
         type Response = S::Response;
 
@@ -406,6 +410,7 @@ pub(super) mod http2 {
 
     mod future {
         use std::{
+            fmt,
             future::Future,
             pin::Pin,
             task::{ready, Context, Poll},
@@ -423,6 +428,7 @@ pub(super) mod http2 {
             Error(Option<HttpRequestError<S::Error>>),
         }
 
+        /// Future returned when applying checks for HTTP/2 connections and requests.
         #[pin_project]
         pub struct Http2ChecksFuture<S, C, B>
         where
@@ -430,6 +436,15 @@ pub(super) mod http2 {
         {
             #[pin]
             state: Http2ChecksState<S, C, B>,
+        }
+
+        impl<S, C, B> fmt::Debug for Http2ChecksFuture<S, C, B>
+        where
+            S: tower::Service<(C, http::Request<B>)>,
+        {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct("Http2ChecksFuture").finish()
+            }
         }
 
         impl<S, C, B> Http2ChecksFuture<S, C, B>

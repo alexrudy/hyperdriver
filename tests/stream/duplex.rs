@@ -5,7 +5,7 @@ async fn braided_duplex() {
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair();
+    let (client, incoming) = chateau::stream::duplex::pair();
 
     let server = hyperdriver::server::conn::Acceptor::from(incoming);
     tokio::spawn(async move {

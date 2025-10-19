@@ -117,7 +117,7 @@ impl tower::Service<MockStream> for MockProtocol {
     fn call(&mut self, stream: MockStream) -> Self::Future {
         ready(Ok(MockSender {
             id: StreamID::new(),
-            stream: stream,
+            stream,
         }))
     }
 }

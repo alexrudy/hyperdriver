@@ -8,6 +8,9 @@
 use std::convert::Infallible;
 use std::net::{SocketAddr, SocketAddrV4};
 
+use hyperdriver::server::ServerAcceptorExt;
+use hyperdriver::server::ServerConnectionInfoExt;
+use hyperdriver::server::ServerProtocolExt;
 use hyperdriver::Body;
 use tracing_subscriber::EnvFilter;
 
@@ -61,7 +64,7 @@ async fn main() {
 
     let server = hyperdriver::server::Server::builder()
         .with_incoming(incoming)
-        .with_tls(tls_config("localhost"))
+        .with_tls(tls_config("localhost").into())
         .with_shared_service(svc)
         .with_connection_info()
         .with_tls_connection_info()

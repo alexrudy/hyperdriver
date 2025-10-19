@@ -11,6 +11,7 @@ use tracing::trace;
 use http_body::Body as HttpBody;
 
 use crate::client::conn::connection::SendRequestFuture;
+use crate::service::HttpConnectionInfo;
 use chateau::client::conn::Connection;
 use chateau::client::pool::PoolableConnection;
 
@@ -42,6 +43,7 @@ impl<B> HttpConnection<B> {
         }
     }
 
+    /// Get the HTTP protocol version
     pub fn version(&self) -> HttpProtocol {
         match &self.inner {
             InnerConnection::H1(_) => HttpProtocol::Http1,
@@ -133,6 +135,18 @@ where
     }
 }
 
+impl<B> HttpConnectionInfo<B> for HttpConnection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    fn version(&self) -> HttpProtocol {
+        match &self.inner {
+            InnerConnection::H1(_) => HttpProtocol::Http1,
+            InnerConnection::H2(_) => HttpProtocol::Http2,
+        }
+    }
+}
+
 /// A builder for configuring and starting HTTP connections.
 ///
 /// This builder allows configuring the HTTP/1 and HTTP/2 settings for the connection,
@@ -144,13 +158,13 @@ where
 /// be done by calling `TransportExt::with_tls` or `TransportExt::without_tls` on the
 /// transport.
 #[derive(Debug)]
-pub struct HttpConnectionBuilder<B> {
+pub struct AlpnHttpConnectionBuilder<B> {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
     _body: PhantomData<fn(B) -> ()>,
 }
 
-impl<B> Clone for HttpConnectionBuilder<B> {
+impl<B> Clone for AlpnHttpConnectionBuilder<B> {
     fn clone(&self) -> Self {
         Self {
             http1: self.http1.clone(),
@@ -160,7 +174,7 @@ impl<B> Clone for HttpConnectionBuilder<B> {
     }
 }
 
-impl<B> HttpConnectionBuilder<B> {
+impl<B> AlpnHttpConnectionBuilder<B> {
     /// Get the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
         &mut self.http1
@@ -172,7 +186,7 @@ impl<B> HttpConnectionBuilder<B> {
     }
 }
 
-impl<B> HttpConnectionBuilder<B>
+impl<B> AlpnHttpConnectionBuilder<B>
 where
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
@@ -248,11 +262,15 @@ where
 
                 self.handshake_h1(transport).await
             }
+            HttpProtocol::Http3 => {
+                //TODO: This should return a protocol error?
+                panic!("Protocol not supported");
+            }
         }
     }
 }
 
-impl<B> Default for HttpConnectionBuilder<B> {
+impl<B> Default for AlpnHttpConnectionBuilder<B> {
     fn default() -> Self {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
@@ -262,7 +280,7 @@ impl<B> Default for HttpConnectionBuilder<B> {
     }
 }
 
-impl<IO, B> tower::Service<IO> for HttpConnectionBuilder<B>
+impl<IO, B> tower::Service<IO> for AlpnHttpConnectionBuilder<B>
 where
     IO: HasTlsConnectionInfo + HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Send + Sync,
@@ -309,8 +327,8 @@ mod future {
     use crate::DebugLiteral;
     use chateau::info::{HasConnectionInfo, HasTlsConnectionInfo};
 
+    use super::AlpnHttpConnectionBuilder;
     use super::HttpConnection;
-    use super::HttpConnectionBuilder;
 
     type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
@@ -342,7 +360,7 @@ mod future {
         <B as Body>::Error: Into<BoxError>,
     {
         pub(super) fn new(
-            builder: HttpConnectionBuilder<B>,
+            builder: AlpnHttpConnectionBuilder<B>,
             stream: IO,
             protocol: HttpProtocol,
         ) -> HttpConnectFuture<IO, B> {
@@ -371,19 +389,22 @@ mod future {
 mod tests {
     use std::fmt::Debug;
     use std::future::Future;
+    use std::sync::Arc;
 
-    use super::*;
+    use chateau::client::conn::connection::ConnectionExt as _;
+    use chateau::stream::duplex::DuplexStream;
+    use futures_util::{stream::StreamExt as _, TryFutureExt};
+    use rustls::pki_types::ServerName;
+    use static_assertions::assert_impl_all;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tracing_test::traced_test;
 
+    use crate::client::conn::stream::mock::MockTls;
     use crate::client::conn::Protocol as _;
     use crate::client::conn::{protocol::HttpProtocol, Stream};
     use crate::client::Error;
 
-    #[cfg(all(feature = "mocks", feature = "tls"))]
-    use chateau::stream::tls::TlsHandshakeStream as _;
-
-    use futures_util::{stream::StreamExt as _, TryFutureExt};
-    use static_assertions::assert_impl_all;
-    use tokio::io::{AsyncBufReadExt, BufReader};
+    use super::*;
 
     #[cfg(feature = "mocks")]
     use tower::Service;
@@ -391,13 +412,13 @@ mod tests {
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
     #[cfg(all(feature = "mocks", feature = "stream"))]
-    assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = hyper::Error, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+    assert_impl_all!(AlpnHttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = hyper::Error, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
 
     #[cfg(feature = "stream")]
     assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, hyper::Error>>, Debug, Send);
 
     #[cfg(feature = "stream")]
-    async fn transport() -> Result<(Stream, Stream), BoxError> {
+    async fn transport() -> Result<(DuplexStream, DuplexStream), BoxError> {
         let (client, mut incoming) = chateau::stream::duplex::pair();
 
         // Connect to the server. This is a helper function that creates a client and server
@@ -410,27 +431,45 @@ mod tests {
             async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }
         )?;
 
-        Ok((tx.into(), rx.into()))
+        Ok((tx, rx))
+    }
+
+    fn tls_info(alpn_h2: bool) -> chateau::info::TlsConnectionInfo {
+        let config = Arc::new(crate::fixtures::tls_client_config());
+        let server = ServerName::try_from("example.com").unwrap();
+        if alpn_h2 {
+            let info = rustls::ClientConnection::new_with_alpn(config, server, vec![b"h2".into()])
+                .unwrap();
+            let mut info = chateau::info::TlsConnectionInfo::client(&info);
+            info.alpn = Some("h2".into());
+            info.server_name = Some("example.com".into());
+            info.validated_server_name = true;
+            info
+        } else {
+            let info = rustls::ClientConnection::new(config, server).unwrap();
+            let mut info = chateau::info::TlsConnectionInfo::client(&info);
+            info.server_name = Some("example.com".into());
+            info
+        }
     }
 
     #[tokio::test]
+    #[traced_test]
     #[cfg(feature = "stream")]
     async fn http_connector_request_h1() {
-        use chateau::client::conn::connection::ConnectionExt as _;
-
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let mut builder = HttpConnectionBuilder::default();
+        let mut builder = AlpnHttpConnectionBuilder::default();
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = builder.connect(stream).await.unwrap();
+        let mut conn = builder
+            .connect(MockTls::new(stream, tls_info(false)))
+            .await
+            .unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
-        assert!(!conn.can_share());
         assert_eq!(conn.version(), HttpProtocol::Http1);
+        assert!(!conn.can_share());
         assert!(conn.reuse().is_none());
-        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/1.1 }");
 
         let request = http::Request::builder()
             .method(http::Method::GET)
@@ -459,25 +498,27 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(all(feature = "stream", feature = "tls"))]
-    async fn http_connector_request_h2() {
-        use chateau::client::conn::connection::ConnectionExt as _;
+    #[traced_test]
+    #[cfg(all(feature = "mocks", feature = "stream", feature = "tls"))]
+    async fn http_connector_alpn_h2() {
+        let (server, client) = transport().await.unwrap();
 
-        let _ = tracing_subscriber::fmt::try_init();
+        let mut builder = AlpnHttpConnectionBuilder::default();
 
-        let mut builder = HttpConnectionBuilder::default();
-
-        let (stream, rx) = transport().await.unwrap();
-
-        let mut conn = builder.connect(stream).await.unwrap();
+        let mut conn = builder
+            .connect(MockTls::new(client, tls_info(true)))
+            .await
+            .unwrap();
         conn.when_ready().await.unwrap();
+
         assert!(conn.is_open());
+        assert_eq!(conn.version(), HttpProtocol::Http2);
         assert!(conn.can_share());
         assert!(conn.reuse().is_some());
 
         let request = http::Request::builder()
-            .version(::http::Version::HTTP_2)
             .method(http::Method::GET)
+            .version(http::Version::HTTP_2)
             .uri("http://localhost/")
             .body(crate::body::Body::empty())
             .unwrap();
@@ -488,7 +529,7 @@ mod tests {
 
         let server_future = async move {
             let mut buf = String::new();
-            let _ = BufReader::new(rx)
+            let _ = BufReader::new(server)
                 .read_line(&mut buf)
                 .await
                 .map_err(|err| Error::Transport(err.into()))?;
@@ -500,47 +541,5 @@ mod tests {
         let (_rtx, rrx) = tokio::join!(request_future, server_future);
 
         assert!(rrx.is_ok());
-    }
-
-    #[cfg(all(feature = "mocks", feature = "stream", feature = "tls"))]
-    #[tokio::test]
-    async fn http_connector_alpn_h2() {
-        use crate::client::conn::stream::mock::MockTls;
-
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let (stream, client) = transport().await.unwrap();
-
-        async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, hyper::Error> {
-            use std::sync::Arc;
-
-            use rustls::pki_types::ServerName;
-
-            let mut builder = HttpConnectionBuilder::default();
-
-            let info = rustls::ClientConnection::new(
-                Arc::new(crate::fixtures::tls_client_config()),
-                ServerName::try_from("example.com").unwrap(),
-            )
-            .unwrap();
-            let tls = chateau::info::TlsConnectionInfo::client(&info);
-
-            builder.connect(MockTls::new(stream, tls)).await
-        }
-
-        async fn handshake(mut stream: Stream) -> Result<(), std::io::Error> {
-            stream.finish_handshake().await?;
-            tracing::info!("Client finished handshake");
-            Ok(())
-        }
-
-        let (conn, client) = tokio::join!(serve(stream), handshake(client));
-        client.unwrap();
-
-        let mut conn = conn.unwrap();
-        assert!(conn.is_open());
-        assert!(conn.can_share());
-        assert!(conn.reuse().is_some());
-        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
     }
 }

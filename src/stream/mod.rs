@@ -7,3 +7,5 @@ mod core;
 
 #[cfg(feature = "stream")]
 pub use core::Braid;
+
+pub use chateau::stream::{duplex, tcp, unix};

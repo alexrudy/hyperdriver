@@ -78,7 +78,7 @@ where
 /// use std::convert::Infallible;
 /// use hyperdriver::body::{Body, Request, Response};
 /// use hyperdriver::server::Server;
-/// use hyperdriver::server::service::{make_service_fn, service_fn};
+/// use chateau::services::{make_service_fn, service_fn};
 ///
 /// let addr = ([127, 0, 0, 1], 3000).into();
 ///

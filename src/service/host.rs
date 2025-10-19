@@ -4,7 +4,9 @@ use http::uri::Port;
 use http::HeaderValue;
 use http::Uri;
 
-use super::http::HttpConnection;
+use crate::service::http::HttpProtocol;
+
+use super::http::HttpConnectionInfo;
 
 /// Returns true if the URI scheme is presumed secure.
 fn is_schema_secure(uri: &Uri) -> bool {
@@ -91,7 +93,7 @@ where
 impl<S, B, C> tower::Service<(C, http::Request<B>)> for SetHostHeader<S>
 where
     S: tower::Service<(C, http::Request<B>)>,
-    C: HttpConnection<B>,
+    C: HttpConnectionInfo<B>,
 {
     type Response = S::Response;
 
@@ -107,7 +109,7 @@ where
     }
 
     fn call(&mut self, (conn, mut req): (C, http::Request<B>)) -> Self::Future {
-        if conn.version() < http::Version::HTTP_2 {
+        if conn.version() == HttpProtocol::Http1 {
             set_host_header(&mut req);
         }
 

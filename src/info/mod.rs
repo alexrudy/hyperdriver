@@ -17,6 +17,8 @@ pub use chateau::stream::duplex::DuplexAddr;
 #[doc(hidden)]
 pub use chateau::stream::unix::UnixAddr;
 
+pub use chateau::info::{ConnectionInfo, HasConnectionInfo, HasTlsConnectionInfo};
+
 /// The transport protocol used for a connection.
 ///
 /// This is for informational purposes only, and can be used
@@ -131,7 +133,7 @@ impl BraidAddr {
     /// Returns the Unix socket address, if this is a Unix socket address.
     pub fn path(&self) -> Option<&Utf8Path> {
         match self {
-            Self::Unix(addr) => addr.path().map(Utf8Path::from_path).flatten(),
+            Self::Unix(addr) => addr.path().and_then(Utf8Path::from_path),
             _ => None,
         }
     }
@@ -316,10 +318,7 @@ mod tests {
 
         let info: ConnectionInfo<UnixAddr> = conn.info();
 
-        assert_eq!(
-            info.remote_addr(),
-            &UnixAddr::from_pathbuf(path.try_into().unwrap())
-        );
+        assert_eq!(info.remote_addr(), &UnixAddr::from_pathbuf(path));
 
         drop(listener);
     }
@@ -327,7 +326,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "client")]
     async fn tcp_connection_info() {
-        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
             .await
             .unwrap();
         let addr = listener.local_addr().unwrap();

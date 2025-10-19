@@ -125,15 +125,14 @@ impl Client {
     }
 
     /// Create a new, empty builder for clients.
-    pub fn builder() -> self::builder::Builder<(), (), ()> {
+    pub fn builder() -> self::builder::Builder<(), ()> {
         Builder::new()
     }
 
     /// Create a new client builder with default settings applied.
     pub fn build_tcp_http() -> self::builder::Builder<
-        conn::dns::GaiResolver,
-        TcpTransport,
-        auto::HttpConnectionBuilder<crate::Body>,
+        TcpTransport<conn::dns::GaiResolver>,
+        auto::AlpnHttpConnectionBuilder<crate::Body>,
     > {
         Builder::default()
     }

@@ -19,13 +19,14 @@ use chateau::services::ServiceRef;
 /// # use hyperdriver::info::ConnectionInfo;
 /// # use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
 /// # use tower::Layer;
-/// use hyperdriver::service::{make_service_fn, service_fn};
+/// # use std::net::SocketAddr;
+/// # use tower::service_fn;
 /// use tower::make::Shared;
 ///
 /// # async fn make_service_with_layer() {
 ///
 /// let service = service_fn(|req: http::Request<Body>| async move {
-///    let info = req.extensions().get::<ConnectionInfo>().unwrap();
+///    let info = req.extensions().get::<ConnectionInfo<SocketAddr>>().unwrap();
 ///    println!("Connection info: {:?}", info);
 ///    Ok::<_, Infallible>(http::Response::new(Body::from("Hello, World!")))
 /// });

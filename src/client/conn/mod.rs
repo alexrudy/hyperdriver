@@ -41,7 +41,14 @@ pub mod connection;
 pub mod dns;
 pub mod protocol;
 pub mod stream;
+pub mod transport;
+
+#[cfg(feature = "tls")]
+pub(in crate::client) mod tls;
 
 pub use self::stream::Stream;
 pub use chateau::client::conn::Connection;
 pub use chateau::client::conn::Protocol;
+
+#[cfg(feature = "tls")]
+pub use self::tls::{AutoTlsTransport, HttpTlsTransport};

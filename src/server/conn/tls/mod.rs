@@ -13,17 +13,16 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use chateau::stream::duplex::DuplexAddr;
     use chateau::stream::tls::TlsHandshakeStream as _;
     use tower::make::Shared;
     use tower::Service;
 
     use tracing::Instrument as _;
 
+    use crate::client::conn::HttpTlsTransport;
     use crate::fixtures;
 
     use chateau::client::conn::transport::duplex::DuplexTransport;
-    use chateau::client::conn::transport::{TlsAddr, TransportExt as _};
     use chateau::client::conn::Transport as _;
 
     use chateau::server::conn::AcceptExt as _;
@@ -45,13 +44,15 @@ mod tests {
         let acceptor = crate::server::conn::Acceptor::from(incoming)
             .with_tls(crate::fixtures::tls_server_config().into());
 
-        let mut client = DuplexTransport::new(1024, client)
-            .with_tls(crate::fixtures::tls_client_config().into());
+        let mut transport = HttpTlsTransport::new(
+            DuplexTransport::new(1024, client),
+            crate::fixtures::tls_client_config().into(),
+        );
 
-        let addr = TlsAddr::new(DuplexAddr::new(), "example.com");
+        let req = http::Request::get("https://example.com").body(()).unwrap();
 
         let client = async move {
-            let mut stream = client.connect(addr).await.unwrap();
+            let mut stream = transport.connect(&req).await.unwrap();
 
             tracing::debug!("client connected");
 

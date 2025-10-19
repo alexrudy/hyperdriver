@@ -171,7 +171,7 @@ where
     fn info(&self) -> chateau::info::ConnectionInfo<IO::Addr> {
         #[cfg(feature = "tls")]
         match self.inner {
-            OptTlsStream::Tls(ref stream) => stream.info().map(|tls_addr| tls_addr.into_addr()),
+            OptTlsStream::Tls(ref stream) => stream.info(),
             OptTlsStream::NoTls(ref stream) => stream.info(),
         }
 
@@ -236,6 +236,17 @@ impl From<UnixStream> for Stream {
         Stream {
             inner: Braid::from(stream).into(),
         }
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<IO> From<OptTlsStream<TlsStream<IO>, IO>> for Stream<IO>
+where
+    IO: HasConnectionInfo,
+    IO::Addr: Unpin + Clone,
+{
+    fn from(stream: OptTlsStream<TlsStream<IO>, IO>) -> Self {
+        Stream { inner: stream }
     }
 }
 

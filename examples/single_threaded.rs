@@ -5,12 +5,17 @@
 use std::cell::Cell;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs as _};
 use std::pin::{pin, Pin};
 use std::rc::Rc;
 use std::task::{ready, Context, Poll};
 use std::thread;
 
+use chateau::client::conn::service::ClientExecutorService;
+use chateau::client::conn::transport::tcp::{TcpConnectionError, TcpTransport};
+use chateau::client::conn::Transport;
+use chateau::services::make_service_fn;
+use chateau::stream::tcp::TcpStream;
 use futures_util::FutureExt;
 use http_body_util::BodyExt;
 use hyper::body::{Body as HttpBody, Bytes, Frame, Incoming};
@@ -18,22 +23,18 @@ use hyper::Request;
 use hyper::{Error, Response};
 use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::service::TowerHyperService;
+use hyperdriver::client::conn::dns::GaiResolver;
 use hyperdriver::client::conn::protocol::auto;
-use hyperdriver::client::conn::protocol::auto::HttpConnection;
-use hyperdriver::client::conn::transport::tcp::{TcpConnectionError, TcpTransport};
-use hyperdriver::client::conn::transport::TransportExt;
-use hyperdriver::client::conn::Transport;
-use hyperdriver::client::pool::{Pooled, UriKey};
-use hyperdriver::client::ConnectionPoolLayer;
+use hyperdriver::client::conn::AutoTlsTransport;
+use hyperdriver::client::{ConnectionPoolLayer, UriKey};
 use hyperdriver::info::HasConnectionInfo;
 use hyperdriver::server::Accept;
-use hyperdriver::service::{make_service_fn, RequestExecutor};
-use hyperdriver::stream::TcpStream;
 use pin_project::pin_project;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tower::service_fn;
+use tower::ServiceExt;
 
 struct Body {
     // Our Body type is !Send and !Sync:
@@ -183,7 +184,8 @@ async fn http1_client(
     let host = url.host().expect("uri has no host");
     let port = url.port_u16().unwrap_or(80);
     let addr = format!("{host}:{port}");
-    let stream = TcpStream::connect(addr).await?;
+    let stream =
+        TcpStream::connect(addr.to_socket_addrs()?.next().expect("No resolved address")).await?;
 
     let io = TokioIo::new(IOTypeNotSend::new(stream));
 
@@ -239,7 +241,7 @@ async fn http1_client(
 }
 
 async fn http2_server(rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-    use hyper::server::conn::http2;
+    use hyperdriver::server::conn::Http2Builder;
 
     let mut stdout = io::stdout();
 
@@ -257,7 +259,7 @@ async fn http2_server(rx: oneshot::Receiver<()>) -> Result<(), Box<dyn std::erro
 
     let server = hyperdriver::Server::builder()
         .with_acceptor(AcceptNotSend::new(listener))
-        .with_protocol(http2::Builder::new(LocalExec))
+        .with_protocol(Http2Builder::new(LocalExec))
         .with_make_service(make_service_fn(|_| {
             let counter = counter.clone();
             async move {
@@ -294,15 +296,14 @@ async fn http2_client(
     let client = tower::ServiceBuilder::new()
         .layer(
             ConnectionPoolLayer::<_, _, _, UriKey>::new(
-                TransportNotSend {
-                    tcp: TcpTransport::<_, TcpStream>::default(),
-                }
-                .without_tls(),
-                auto::HttpConnectionBuilder::<Body>::default(),
+                AutoTlsTransport::new(TransportNotSend {
+                    tcp: TcpTransport::<GaiResolver>::default(),
+                }),
+                auto::AlpnHttpConnectionBuilder::<Body>::default(),
             )
             .with_optional_pool(Some(Default::default())),
         )
-        .service(RequestExecutor::<Pooled<HttpConnection<Body>, Body>, _>::new());
+        .service(ClientExecutorService::new());
 
     let authority = url.authority().unwrap().clone();
 
@@ -314,7 +315,7 @@ async fn http2_client(
             .header(http::header::HOST, authority.as_str())
             .body(Body::from("test".to_string()))?;
 
-        let mut res = client.request(req).await?;
+        let mut res = client.clone().oneshot(req).await?;
 
         let mut stdout = io::stdout();
         stdout
@@ -356,6 +357,16 @@ where
     }
 }
 
+impl<F> chateau::rt::Executor<F> for LocalExec
+where
+    F: std::future::Future + 'static,
+    F::Output: 'static,
+{
+    fn execute(&self, fut: F) {
+        tokio::task::spawn_local(fut);
+    }
+}
+
 #[derive(Debug)]
 #[pin_project]
 struct AcceptNotSend(#[pin] TcpListener);
@@ -367,14 +378,14 @@ impl AcceptNotSend {
 }
 
 impl Accept for AcceptNotSend {
-    type Conn = IOTypeNotSend;
+    type Connection = IOTypeNotSend;
 
     type Error = std::io::Error;
 
     fn poll_accept(
         self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Self::Conn, Self::Error>> {
+    ) -> Poll<Result<Self::Connection, Self::Error>> {
         let stream = ready!(self.project().0.poll_accept(cx)).map(IOTypeNotSend::new);
         Poll::Ready(stream)
     }
@@ -382,25 +393,28 @@ impl Accept for AcceptNotSend {
 
 #[derive(Clone)]
 struct TransportNotSend {
-    tcp: TcpTransport,
+    tcp: TcpTransport<GaiResolver>,
 }
 
-impl Transport for TransportNotSend {
+impl<B> Transport<http::Request<B>> for TransportNotSend
+where
+    B: Send + 'static,
+{
     type IO = TcpStream;
 
     type Error = TcpConnectionError;
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::IO, Self::Error>> + Send>>;
 
-    fn connect(&mut self, req: http::request::Parts) -> <Self as Transport>::Future {
+    fn connect(&mut self, req: &http::Request<B>) -> Self::Future {
         self.tcp.connect(req).boxed()
     }
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), <Self as Transport>::Error>> {
-        self.tcp.poll_ready(cx)
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        Transport::<http::Request<B>>::poll_ready(&mut self.tcp, cx)
     }
 }
 

@@ -5,35 +5,22 @@
 //! [`hyper::client::conn::http2::SendRequest`], allowing the native hyper types to be used
 //! for [`Protocol`](super::Protocol).
 
-use std::ops::{Deref, DerefMut};
-
 use chateau::client::conn::Connection;
 use chateau::client::pool::PoolableConnection;
 use http_body::Body as HttpBody;
 
 pub(super) use self::future::SendRequestFuture;
-use crate::service::HttpConnection;
+use crate::client::conn::protocol::HttpProtocol;
+use crate::service::HttpConnectionInfo;
 
+/// Wrapper for hyper's HTTP/1 connection for compatibility with chateau.
 #[derive(Debug)]
 pub struct Http1Connection<B>(hyper::client::conn::http1::SendRequest<B>);
 
 impl<B> Http1Connection<B> {
+    /// Create a new HTTP/1 connection from raw parts.
     pub fn new(send_request: hyper::client::conn::http1::SendRequest<B>) -> Self {
         Self(send_request)
-    }
-}
-
-impl<B> Deref for Http1Connection<B> {
-    type Target = hyper::client::conn::http1::SendRequest<B>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<B> DerefMut for Http1Connection<B> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -63,12 +50,12 @@ where
     }
 }
 
-impl<B> HttpConnection<B> for Http1Connection<B>
+impl<B> HttpConnectionInfo<B> for Http1Connection<B>
 where
     B: HttpBody + Send + 'static,
 {
-    fn version(&self) -> http::Version {
-        http::Version::HTTP_11
+    fn version(&self) -> HttpProtocol {
+        HttpProtocol::Http1
     }
 }
 
@@ -77,7 +64,7 @@ where
     B: HttpBody + Send + 'static,
 {
     fn is_open(&self) -> bool {
-        self.is_ready()
+        self.0.is_ready()
     }
 
     fn can_share(&self) -> bool {
@@ -89,26 +76,20 @@ where
     }
 }
 
+/// HTTP/2 Connection which makes hyper connections compatible with hyperdriver
 #[derive(Debug, Clone)]
 pub struct Http2Connection<B>(hyper::client::conn::http2::SendRequest<B>);
 
+impl<B> From<hyper::client::conn::http2::SendRequest<B>> for Http2Connection<B> {
+    fn from(value: hyper::client::conn::http2::SendRequest<B>) -> Self {
+        Self(value)
+    }
+}
+
 impl<B> Http2Connection<B> {
+    /// Create a new HTTP/2 connection from the hyper counterpart.
     pub fn new(send_request: hyper::client::conn::http2::SendRequest<B>) -> Self {
         Self(send_request)
-    }
-}
-
-impl<B> Deref for Http2Connection<B> {
-    type Target = hyper::client::conn::http2::SendRequest<B>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<B> DerefMut for Http2Connection<B> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -124,7 +105,8 @@ where
 
     fn send_request(&mut self, request: http::Request<B>) -> Self::Future {
         SendRequestFuture::new(hyper::client::conn::http2::SendRequest::send_request(
-            self, request,
+            &mut self.0,
+            request,
         ))
     }
 
@@ -132,16 +114,22 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        hyper::client::conn::http2::SendRequest::poll_ready(self, cx)
+        hyper::client::conn::http2::SendRequest::poll_ready(&mut self.0, cx)
     }
 }
 
-impl<B> HttpConnection<B> for Http2Connection<B>
+impl<B> Drop for Http2Connection<B> {
+    fn drop(&mut self) {
+        tracing::debug!("Dropped HTTP/2 sender");
+    }
+}
+
+impl<B> HttpConnectionInfo<B> for Http2Connection<B>
 where
     B: HttpBody + Send + 'static,
 {
-    fn version(&self) -> http::Version {
-        http::Version::HTTP_2
+    fn version(&self) -> HttpProtocol {
+        HttpProtocol::Http2
     }
 }
 
@@ -150,7 +138,7 @@ where
     B: HttpBody + Send + 'static,
 {
     fn is_open(&self) -> bool {
-        hyper::client::conn::http2::SendRequest::is_ready(self)
+        hyper::client::conn::http2::SendRequest::is_ready(&self.0)
     }
 
     fn can_share(&self) -> bool {
@@ -158,7 +146,7 @@ where
     }
 
     fn reuse(&mut self) -> Option<Self> {
-        Some(Http2Connection(self.clone()))
+        Some(Http2Connection(self.0.clone()))
     }
 }
 

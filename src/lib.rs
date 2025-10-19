@@ -108,7 +108,6 @@
 //!
 //! [`ExecuteRequest`]: crate::service::ExecuteRequest
 //! [`SetHostHeader`]: crate::service::SetHostHeader
-
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 use std::{fmt, future::Future, pin::Pin};
@@ -122,8 +121,6 @@ pub mod client;
 #[cfg(feature = "client")]
 pub(crate) mod happy_eyeballs;
 pub mod info;
-#[cfg(feature = "server")]
-mod notify;
 #[cfg(feature = "server")]
 mod rewind;
 #[cfg(feature = "server")]

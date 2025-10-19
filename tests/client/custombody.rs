@@ -3,12 +3,11 @@
 use std::{error, fmt, pin::pin};
 
 use bytes::Bytes;
+use chateau::client::conn::transport::duplex::DuplexTransport;
 use futures_util::StreamExt as _;
 use http_body::Body;
 use hyperdriver::bridge::io::TokioIo;
-use hyperdriver::client::conn::{
-    protocol::auto::HttpConnectionBuilder, transport::duplex::DuplexTransport,
-};
+use hyperdriver::client::conn::protocol::auto::AlpnHttpConnectionBuilder;
 use tower::ServiceExt;
 
 #[derive(Debug)]
@@ -52,7 +51,7 @@ impl Body for CustomBody {
 async fn client() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (tx, incoming) = hyperdriver::stream::duplex::pair();
+    let (tx, incoming) = chateau::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -60,7 +59,7 @@ async fn client() {
     let jh = tokio::task::spawn(serve_one_h1(acceptor));
 
     let client = hyperdriver::client::Client::builder()
-        .with_protocol(HttpConnectionBuilder::default())
+        .with_protocol(AlpnHttpConnectionBuilder::default())
         .with_transport(DuplexTransport::new(1024, tx))
         .with_default_pool()
         .with_body::<CustomBody, CustomBody>()

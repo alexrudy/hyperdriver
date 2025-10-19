@@ -1,132 +1,14 @@
 //! DNS resolution utilities.
 
-#[cfg(feature = "tls")]
-use std::marker::PhantomData;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
-use chateau::client::conn::dns::{Resolver, SocketAddrs};
-#[cfg(feature = "tls")]
-use chateau::client::conn::transport::TlsAddr;
+use chateau::client::conn::dns::SocketAddrs;
 use futures_util::Future;
 use pin_project::{pin_project, pinned_drop};
 use tokio::task::JoinHandle;
-
-#[cfg(feature = "tls")]
-#[derive(Debug, thiserror::Error)]
-pub enum TlsResolverError<E> {
-    #[error("{0}")]
-    Resolver(#[source] E),
-    #[error("No hostname in URI for TLS: {0}")]
-    MissingHostname(http::Uri),
-}
-
-#[cfg(feature = "tls")]
-#[derive(Debug, Default, Clone)]
-pub struct TlsResolver<R> {
-    inner: R,
-}
-
-#[cfg(feature = "tls")]
-impl<R> TlsResolver<R> {
-    pub fn new(resolver: R) -> Self {
-        Self { inner: resolver }
-    }
-}
-
-#[cfg(feature = "tls")]
-impl<R, B, A> tower::Service<&http::Request<B>> for TlsResolver<R>
-where
-    R: Resolver<http::Request<B>, Address = A>,
-{
-    type Response = TlsAddr<A>;
-    type Error = TlsResolverError<R::Error>;
-    type Future = TlsResolverFuture<R::Future, A, R::Error>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner
-            .poll_ready(cx)
-            .map_err(TlsResolverError::Resolver)
-    }
-
-    fn call(&mut self, req: &http::Request<B>) -> Self::Future {
-        let Some(hostname) = req.uri().host().map(|s| s.to_owned()) else {
-            return TlsResolverFuture::missing_hostname(req.uri().clone());
-        };
-
-        TlsResolverFuture::new(self.inner.resolve(req), hostname)
-    }
-}
-
-#[cfg(feature = "tls")]
-#[pin_project(project = TlsResolverFutureStateProj)]
-enum TlsResolverFutureState<F> {
-    Future {
-        #[pin]
-        future: F,
-        hostname: Option<String>,
-    },
-
-    MissingHostname(Option<http::Uri>),
-}
-
-#[cfg(feature = "tls")]
-#[pin_project]
-pub struct TlsResolverFuture<F, A, E> {
-    #[pin]
-    state: TlsResolverFutureState<F>,
-    address: PhantomData<fn() -> (A, E)>,
-}
-
-#[cfg(feature = "tls")]
-impl<F, A, E> TlsResolverFuture<F, A, E> {
-    fn missing_hostname(err: http::Uri) -> Self {
-        Self {
-            state: TlsResolverFutureState::MissingHostname(Some(err)),
-            address: PhantomData,
-        }
-    }
-
-    fn new(future: F, hostname: String) -> Self {
-        Self {
-            state: TlsResolverFutureState::Future {
-                future,
-                hostname: Some(hostname),
-            },
-            address: PhantomData,
-        }
-    }
-}
-
-#[cfg(feature = "tls")]
-impl<F, A, E> Future for TlsResolverFuture<F, A, E>
-where
-    F: Future<Output = Result<A, E>>,
-{
-    type Output = Result<TlsAddr<A>, TlsResolverError<E>>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.as_mut().project().state.project() {
-            TlsResolverFutureStateProj::Future { future, hostname } => match future.poll(cx) {
-                Poll::Ready(Ok(addr)) => Poll::Ready(Ok(TlsAddr::new(
-                    addr,
-                    hostname
-                        .take()
-                        .expect("TlsResolverFuture polled after ready"),
-                ))),
-                Poll::Ready(Err(err)) => Poll::Ready(Err(TlsResolverError::Resolver(err))),
-                Poll::Pending => Poll::Pending,
-            },
-            TlsResolverFutureStateProj::MissingHostname(uri) => {
-                Poll::Ready(Err(TlsResolverError::MissingHostname(
-                    uri.take().expect("TlsResolveFuture polled after error"),
-                )))
-            }
-        }
-    }
-}
 
 /// GetAddrInfo based resolver.
 ///
@@ -195,6 +77,8 @@ fn get_host_and_port(uri: &http::Uri) -> Result<(Box<str>, u16), io::Error> {
     Ok((host.into(), port))
 }
 
+//TODO: Bare resolve function isn't used - maybe could be removed?
+#[allow(dead_code)]
 pub(crate) fn resolve<A: ToSocketAddrs + Send + 'static>(addr: A) -> JoinHandleFuture<SocketAddrs> {
     let span = tracing::Span::current();
     JoinHandleFuture {

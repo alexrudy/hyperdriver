@@ -1,13 +1,12 @@
 //! Test a server/client pair with TLS.
 use std::future::Future;
 
+use chateau::{server::GracefulServerExecutor, services::MakeServiceRef};
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
-use hyperdriver::client::conn::transport::TransportExt as _;
+use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::server::conn::Accept;
-use hyperdriver::service::MakeServiceRef;
 use hyperdriver::Body;
-use hyperdriver::{bridge::rt::TokioExecutor, server::GracefulServerExecutor};
 use rustls::ServerConfig;
 
 use hyperdriver::server::{Protocol, Server};
@@ -63,11 +62,11 @@ fn serve_gracefully<A, P, S, BIn, E>(
     server: Server<A, P, S, BIn, E>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeServiceRef<A::Conn, BIn> + Send + 'static,
+    S: MakeServiceRef<A::Connection, BIn> + Send + 'static,
     S::Future: Send + 'static,
-    P: Protocol<S::Service, A::Conn, BIn> + Send + 'static,
+    P: Protocol<S::Service, A::Connection, BIn> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
-    A::Conn: Send + 'static,
+    A::Connection: Send + 'static,
     BIn: HttpBody + Send + 'static,
     E: GracefulServerExecutor<P, S, A, BIn> + Send + 'static,
 {
@@ -88,8 +87,9 @@ where
 
 #[tokio::test]
 async fn tls_echo_h1() {
-    use hyper::client::conn::http1::Builder;
-    use hyperdriver::client::conn::transport::duplex::DuplexTransport;
+    use chateau::client::conn::transport::duplex::DuplexTransport;
+    use hyperdriver::client::conn::protocol::Http1Builder;
+    use hyperdriver::server::ServerProtocolExt as _;
     use hyperdriver::Client;
 
     tls_install_default();
@@ -114,7 +114,7 @@ async fn tls_echo_h1() {
     client_tls.alpn_protocols.push(b"http/1.1".to_vec());
 
     let mut client = Client::builder()
-        .with_protocol(Builder::new())
+        .with_protocol(Http1Builder::new())
         .with_default_pool()
         .with_transport(DuplexTransport::new(1024, duplex_client))
         .with_tls(client_tls)
@@ -142,8 +142,10 @@ async fn tls_echo_h1() {
 
 #[tokio::test]
 async fn tls_echo_h2() {
-    use hyper::client::conn::http2::Builder;
-    use hyperdriver::client::conn::transport::duplex::DuplexTransport;
+    use chateau::client::conn::transport::duplex::DuplexTransport;
+    use hyperdriver::client::conn::protocol::Http2Builder;
+    use hyperdriver::client::conn::HttpTlsTransport;
+    use hyperdriver::server::ServerProtocolExt as _;
     use hyperdriver::Client;
 
     tls_install_default();
@@ -167,8 +169,11 @@ async fn tls_echo_h2() {
     client_tls.alpn_protocols.push(b"h2".to_vec());
 
     let mut client = Client::builder()
-        .with_protocol(Builder::new(TokioExecutor::new()))
-        .with_transport(DuplexTransport::new(1024, duplex_client).with_tls(client_tls.into()))
+        .with_protocol(Http2Builder::new(TokioExecutor::new()))
+        .with_transport(HttpTlsTransport::new(
+            DuplexTransport::new(1024, duplex_client),
+            client_tls.into(),
+        ))
         .build();
 
     let response: http::Response<hyperdriver::Body> = client

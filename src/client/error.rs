@@ -40,16 +40,14 @@ pub enum Error {
     RequestTimeout,
 }
 
-impl<D, T, P, S> From<ConnectionError<D, T, P, S>> for Error
+impl<T, P, S> From<ConnectionError<T, P, S>> for Error
 where
-    D: Into<BoxError>,
     T: Into<BoxError>,
     P: Into<BoxError>,
     S: Into<BoxError>,
 {
-    fn from(error: ConnectionError<D, T, P, S>) -> Self {
+    fn from(error: ConnectionError<T, P, S>) -> Self {
         match error {
-            ConnectionError::Resolving(error) => Error::Transport(error.into()),
             ConnectionError::Connecting(error) => Error::Transport(error.into()),
             ConnectionError::Handshaking(error) => Error::Protocol(error.into()),
             ConnectionError::Service(error) => Error::Connection(error.into()),

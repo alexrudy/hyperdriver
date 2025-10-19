@@ -5,6 +5,7 @@ use futures_util::FutureExt;
 use http_body::Body;
 use http_body_util::combinators::UnsyncBoxBody;
 use hyperdriver::info::DuplexAddr;
+use hyperdriver::server::{ServerConnectionInfoExt, ServerProtocolExt};
 use pin_project::pin_project;
 
 #[pin_project]
@@ -67,7 +68,7 @@ impl tower::Service<http::Request<CustomBody>> for CustomService {
     fn call(&mut self, req: http::Request<CustomBody>) -> Self::Future {
         let info = req
             .extensions()
-            .get::<hyperdriver::info::ConnectionInfo<DuplexAddr>>()
+            .get::<chateau::info::ConnectionInfo<DuplexAddr>>()
             .unwrap();
         assert_eq!(*info.remote_addr(), DuplexAddr::new());
         let mut incoming_body = req.into_body();
@@ -78,10 +79,10 @@ impl tower::Service<http::Request<CustomBody>> for CustomService {
 
 #[tokio::test]
 async fn custom_body_server() {
-    let (_, incoming) = hyperdriver::stream::duplex::pair();
+    let (_, incoming) = chateau::stream::duplex::pair();
     let service = CustomService;
 
-    let server = hyperdriver::server::Server::builder()
+    let server = chateau::server::Server::builder()
         .with_acceptor(incoming)
         .with_auto_http()
         .with_shared_service(service)

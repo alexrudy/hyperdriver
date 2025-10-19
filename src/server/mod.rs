@@ -22,6 +22,7 @@
 //! # Example
 //! ```rust
 //! # use hyperdriver::Body;
+//! # use hyperdriver::server::{ServerAcceptorExt, ServerProtocolExt};
 //! # type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 //!
 //! async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
@@ -43,6 +44,7 @@
 mod builder;
 pub mod conn;
 
+pub use self::builder::{ServerAcceptorExt, ServerConnectionInfoExt, ServerProtocolExt};
 pub use self::conn::auto::Builder as AutoBuilder;
 pub use chateau::server::{Accept, Connection, Protocol};
 pub use chateau::server::{GracefulShutdown, Server, ServerError, Serving};
