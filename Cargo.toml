@@ -37,7 +37,7 @@ ouroboros = { version = "0.18", optional = true }
 parking_lot = { version = "0.12", optional = true, features = ["arc_lock"] }
 pin-project = { version = "1" }
 rustls-native-certs = { version = "0.8.2", optional = true }
-thiserror = { version = "2", optional = true }
+thiserror = { version = "2" }
 tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
 
@@ -84,7 +84,6 @@ axum = ["dep:axum"]
 client = [
     "incoming",
     "dep:parking_lot",
-    "dep:thiserror",
     "dep:tower-http",
     "tower/timeout",
 ]
@@ -92,7 +91,7 @@ default = ["client", "server", "stream"]
 docs = []
 incoming = []
 mocks = []
-server = ["incoming", "dep:ouroboros", "dep:thiserror"]
+server = ["incoming", "dep:ouroboros"]
 sni = []
 stream = []
 tls = ["dep:rustls-native-certs", "dep:rustls", "chateau/tls"]
@@ -127,7 +126,7 @@ required-features = ["server", "tls", "tls-ring"]
 [[example]]
 name = "single-threaded"
 path = "examples/single_threaded.rs"
-required-features = ["server", "client"]
+required-features = ["server", "client", "tls", "tls-ring"]
 
 
 [[test]]

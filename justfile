@@ -39,11 +39,11 @@ cargo-hack-args := "--target-dir target/hack/"
 
 [private]
 check-hack-each:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature
+    cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature --skip tls
 
 [private]
 check-hack-powerset:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --skip docs,axum,sni,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --skip docs,axum,sni,tls,tls-ring,tls-aws-lc
 
 [private]
 check-hack-tests: (check-hack-targets "tests")

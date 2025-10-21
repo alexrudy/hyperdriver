@@ -1,6 +1,6 @@
 //! Unix Domain Socket transport implementation for client connections.
 //!
-//! This module contains the [`UnixTransport`] type, which is a [`tower::Service`] that connects to
+//! This module contains the [`UnixExtensionTransport`] type, which is a [`tower::Service`] that connects to
 //! Unix domain sockets. Unlike TCP transports, Unix sockets use filesystem paths as addresses.
 //!
 //! The transport extracts the socket path from the URI authority or path component and establishes

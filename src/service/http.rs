@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 use http::{Request, Response};
 use http_body::Body as HttpBody;
 
-pub use crate::client::conn::protocol::HttpProtocol;
+pub use crate::info::HttpProtocol;
 use crate::BoxError;
 use chateau::client::conn::Connection;
 use chateau::client::pool::{PoolableConnection, Pooled};

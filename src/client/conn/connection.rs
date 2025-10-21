@@ -10,7 +10,7 @@ use chateau::client::pool::PoolableConnection;
 use http_body::Body as HttpBody;
 
 pub(super) use self::future::SendRequestFuture;
-use crate::client::conn::protocol::HttpProtocol;
+use crate::info::HttpProtocol;
 use crate::service::HttpConnectionInfo;
 
 /// Wrapper for hyper's HTTP/1 connection for compatibility with chateau.

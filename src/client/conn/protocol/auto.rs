@@ -385,7 +385,7 @@ mod future {
     }
 }
 
-#[cfg(all(test, feature = "stream"))]
+#[cfg(all(test, feature = "stream", feature = "mocks"))]
 mod tests {
     use std::fmt::Debug;
     use std::future::Future;

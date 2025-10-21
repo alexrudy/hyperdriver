@@ -136,6 +136,7 @@ pub use server::Server;
 
 pub use helpers::IntoRequestParts;
 
+#[allow(unused)]
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

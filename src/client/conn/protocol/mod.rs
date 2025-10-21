@@ -4,7 +4,6 @@
 //! negotiated protocol which can be either HTTP/1.1 or HTTP/2 based on the connection
 //! protocol and ALPN negotiation.
 
-use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -24,64 +23,7 @@ pub use hyper::client::conn::http1;
 pub use hyper::client::conn::http2;
 
 use super::connection::{Http1Connection, Http2Connection};
-
-/// The HTTP protocol to use for a connection.
-///
-/// This differs from the HTTP version in that it is constrained to the two flavors of HTTP
-/// protocol, HTTP/1.1 and HTTP/2. HTTP/3 is not yet supported. HTTP/0.9 and HTTP/1.0 are
-/// supported by HTTP/1.1.
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub enum HttpProtocol {
-    /// Connect using HTTP/1.1
-    Http1,
-
-    /// Connect using HTTP/2
-    Http2,
-
-    /// Connect using HTTP/3
-    Http3,
-}
-
-impl fmt::Debug for HttpProtocol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Http1 => write!(f, "HTTP/1"),
-            Self::Http2 => write!(f, "HTTP/2"),
-            Self::Http3 => write!(f, "HTTP/3"),
-        }
-    }
-}
-
-impl HttpProtocol {
-    /// Does this protocol allow multiplexing?
-    pub fn multiplex(&self) -> bool {
-        matches!(self, Self::Http2)
-    }
-
-    /// HTTP Version
-    ///
-    /// Convert the protocol to an HTTP version.
-    ///
-    /// For HTTP/1.1, this returns `::http::Version::HTTP_11`.
-    /// For HTTP/2, this returns `::http::Version::HTTP_2`.
-    pub fn version(&self) -> ::http::Version {
-        match self {
-            Self::Http1 => ::http::Version::HTTP_11,
-            Self::Http2 => ::http::Version::HTTP_2,
-            Self::Http3 => ::http::Version::HTTP_3,
-        }
-    }
-}
-
-impl From<::http::Version> for HttpProtocol {
-    fn from(version: ::http::Version) -> Self {
-        match version {
-            ::http::Version::HTTP_11 | ::http::Version::HTTP_10 => Self::Http1,
-            ::http::Version::HTTP_2 => Self::Http2,
-            _ => panic!("Unsupported HTTP protocol"),
-        }
-    }
-}
+use crate::info::HttpProtocol;
 
 /// Wrapper for hyper's HTTP/1 connection builder for compatibility with Chateau
 #[derive(Debug)]
@@ -326,7 +268,7 @@ mod future {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "stream", feature = "tls"))]
 mod tests {
 
     use chateau::client::conn::connection::ConnectionExt as _;
@@ -343,7 +285,6 @@ mod tests {
 
     use super::*;
 
-    #[cfg(feature = "stream")]
     async fn transport() -> Result<(Stream, Stream), BoxError> {
         let (client, mut incoming) = chateau::stream::duplex::pair();
 
@@ -362,7 +303,6 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
-    #[cfg(all(feature = "stream", feature = "tls"))]
     async fn http_connector_request_h2() {
         use chateau::client::conn::Connection as _;
 

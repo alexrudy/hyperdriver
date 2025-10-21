@@ -11,6 +11,8 @@ use camino::Utf8Path;
 #[cfg(feature = "stream")]
 use camino::Utf8PathBuf;
 
+use thiserror::Error;
+
 #[doc(hidden)]
 pub use chateau::stream::duplex::DuplexAddr;
 
@@ -18,6 +20,70 @@ pub use chateau::stream::duplex::DuplexAddr;
 pub use chateau::stream::unix::UnixAddr;
 
 pub use chateau::info::{ConnectionInfo, HasConnectionInfo, HasTlsConnectionInfo};
+
+/// The HTTP protocol to use for a connection.
+///
+/// This differs from the HTTP version in that it is constrained to the two flavors of HTTP
+/// protocol, HTTP/1.1 and HTTP/2. HTTP/3 is not yet supported. HTTP/0.9 and HTTP/1.0 are
+/// supported by HTTP/1.1.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub enum HttpProtocol {
+    /// Connect using HTTP/1.1
+    Http1,
+
+    /// Connect using HTTP/2
+    Http2,
+
+    /// Connect using HTTP/3
+    Http3,
+}
+
+impl fmt::Debug for HttpProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http1 => write!(f, "HTTP/1"),
+            Self::Http2 => write!(f, "HTTP/2"),
+            Self::Http3 => write!(f, "HTTP/3"),
+        }
+    }
+}
+
+impl HttpProtocol {
+    /// Does this protocol allow multiplexing?
+    pub fn multiplex(&self) -> bool {
+        matches!(self, Self::Http2)
+    }
+
+    /// HTTP Version
+    ///
+    /// Convert the protocol to an HTTP version.
+    ///
+    /// For HTTP/1.1, this returns `::http::Version::HTTP_11`.
+    /// For HTTP/2, this returns `::http::Version::HTTP_2`.
+    pub fn version(&self) -> ::http::Version {
+        match self {
+            Self::Http1 => ::http::Version::HTTP_11,
+            Self::Http2 => ::http::Version::HTTP_2,
+            Self::Http3 => ::http::Version::HTTP_3,
+        }
+    }
+}
+
+/// Error when trying to convert an HTTP Version string into a supported protocol identifier
+#[derive(Debug, Error)]
+#[error("Unsupported protocol: {0:?}")]
+pub struct UnsupportedProtocol(::http::Version);
+
+impl TryFrom<::http::Version> for HttpProtocol {
+    type Error = UnsupportedProtocol;
+    fn try_from(version: ::http::Version) -> Result<Self, Self::Error> {
+        match version {
+            ::http::Version::HTTP_11 | ::http::Version::HTTP_10 => Ok(Self::Http1),
+            ::http::Version::HTTP_2 => Ok(Self::Http2),
+            ver => Err(UnsupportedProtocol(ver)),
+        }
+    }
+}
 
 /// The transport protocol used for a connection.
 ///
