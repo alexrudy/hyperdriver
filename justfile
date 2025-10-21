@@ -39,11 +39,11 @@ cargo-hack-args := "--target-dir target/hack/"
 
 [private]
 check-hack-each:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature --skip tls
+    cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature --skip tls,tls-ring,tls-aws-lc
 
 [private]
 check-hack-powerset:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --skip docs,axum,sni,tls,tls-ring,tls-aws-lc
+    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --group-features tls,tls-ring --group-features tls,tls-aws-lc --skip docs,axum,sni
 
 [private]
 check-hack-tests: (check-hack-targets "tests")
@@ -59,8 +59,7 @@ check-hack-all-targets: (check-hack-targets "all-targets")
 
 # Check compilation combinations for a specific target
 check-hack-targets targets='tests':
-    cargo +{{rust}} hack check --{{targets}} {{cargo-hack-args}} --no-private --feature-powerset --exclude-no-default-features --include-features mocks,tls-ring,server,client,stream
-
+    cargo +{{rust}} hack check --{{targets}} {{cargo-hack-args}} --no-private --feature-powerset --exclude-no-default-features --group-features tls,tls-ring --group-features tls,tls-aws-lc --skip docs,axum,sni
 # Build the library in release mode
 build:
     cargo +{{rust}} build --release

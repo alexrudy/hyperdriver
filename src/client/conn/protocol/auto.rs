@@ -385,7 +385,7 @@ mod future {
     }
 }
 
-#[cfg(all(test, feature = "stream", feature = "mocks"))]
+#[cfg(all(test, feature = "stream", feature = "mocks", feature = "tls"))]
 mod tests {
     use std::fmt::Debug;
     use std::future::Future;
@@ -406,18 +406,13 @@ mod tests {
 
     use super::*;
 
-    #[cfg(feature = "mocks")]
     use tower::Service;
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-    #[cfg(all(feature = "mocks", feature = "stream"))]
     assert_impl_all!(AlpnHttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = hyper::Error, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
-
-    #[cfg(feature = "stream")]
     assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, hyper::Error>>, Debug, Send);
 
-    #[cfg(feature = "stream")]
     async fn transport() -> Result<(DuplexStream, DuplexStream), BoxError> {
         let (client, mut incoming) = chateau::stream::duplex::pair();
 
@@ -455,7 +450,6 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
-    #[cfg(feature = "stream")]
     async fn http_connector_request_h1() {
         let mut builder = AlpnHttpConnectionBuilder::default();
 
@@ -499,7 +493,6 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
-    #[cfg(all(feature = "mocks", feature = "stream", feature = "tls"))]
     async fn http_connector_alpn_h2() {
         let (server, client) = transport().await.unwrap();
 

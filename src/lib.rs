@@ -198,8 +198,8 @@ pub(crate) mod helpers {
 }
 
 /// Test fixtures for the `hyperdriver` crate.
-#[cfg(test)]
-#[cfg(feature = "tls")]
+#[cfg(all(test, feature = "tls"))]
+#[allow(dead_code)]
 pub(crate) mod fixtures {
 
     use rustls::ServerConfig;

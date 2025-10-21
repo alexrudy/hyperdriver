@@ -121,7 +121,7 @@ required-features = ["client", "tls", "tls-ring"]
 [[example]]
 name = "h2-server"
 path = "examples/server/h2.rs"
-required-features = ["server", "tls", "tls-ring"]
+required-features = ["server", "stream", "tls", "tls-ring"]
 
 [[example]]
 name = "single-threaded"
@@ -187,7 +187,7 @@ required-features = ["server", "stream"]
 [[test]]
 name = "tls"
 path = "tests/tls.rs"
-required-features = ["client", "server", "tls", "tls-ring"]
+required-features = ["client", "server", "stream", "tls", "tls-ring"]
 
 [[test]]
 name = "upgrades"

@@ -8,7 +8,7 @@ pub mod sni;
 pub use chateau::server::conn::tls::acceptor::TlsAcceptor;
 pub use chateau::server::conn::tls::info::TlsConnectionInfoLayer;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client", feature = "stream"))]
 mod tests {
 
     use std::convert::Infallible;

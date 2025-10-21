@@ -54,11 +54,8 @@ where
     info: ConnectionInfo<IO::Addr>,
 
     #[cfg(feature = "tls")]
-    tls: TlsConnectionInfoReceiver,
-
-    #[cfg(feature = "tls")]
     #[pin]
-    inner: TlsBraid<TlsStream<IO>, IO>,
+    inner: OptTlsStream<TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]

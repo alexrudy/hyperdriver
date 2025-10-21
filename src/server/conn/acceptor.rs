@@ -24,6 +24,7 @@ use crate::server::conn::tls::TlsAcceptor as RawTlsAcceptor;
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
 use chateau::info::HasConnectionInfo;
+#[cfg(feature = "stream")]
 use chateau::stream::duplex::DuplexIncoming;
 
 /// Accept incoming connections for streams which might
