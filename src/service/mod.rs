@@ -26,7 +26,7 @@ pub use self::incoming::{
 pub use self::incoming::{
     IncomingRequestLayer, IncomingRequestService, IncomingResponseLayer, IncomingResponseService,
 };
-
-pub use option::{OptionLayer, OptionLayerExt, OptionService};
-pub use timeout::{Timeout, TimeoutLayer};
+pub use self::option::{OptionLayer, OptionLayerExt, OptionService};
+pub use self::timeout::{Timeout, TimeoutLayer};
+pub use chateau::services::SharedService;
 pub use tower::{service_fn, Service, ServiceBuilder, ServiceExt};

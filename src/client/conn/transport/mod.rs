@@ -4,3 +4,8 @@
 
 #[cfg(target_family = "unix")]
 pub mod unix;
+
+pub use chateau::client::conn::transport::duplex;
+#[cfg(feature = "tls")]
+pub use chateau::client::conn::transport::tls;
+pub use chateau::client::conn::transport::{tcp, Transport, TransportExt};

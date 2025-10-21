@@ -47,7 +47,9 @@ pub mod transport;
 pub(in crate::client) mod tls;
 
 pub use self::stream::Stream;
+pub use chateau::client::conn::connector::{Connector, ConnectorLayer, ConnectorService};
 pub use chateau::client::conn::Connection;
+pub use chateau::client::conn::ConnectionError;
 pub use chateau::client::conn::Protocol;
 
 #[cfg(feature = "tls")]
