@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::pin::pin;
 
 use http_body::Body;
+use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
@@ -22,6 +23,22 @@ use chateau::info::HasConnectionInfo;
 use chateau::info::HasTlsConnectionInfo;
 
 use super::HttpProtocol;
+
+/// Error occured during ALPN-negotiated connection start.
+#[derive(Debug, Error)]
+pub enum AutoHttpProtocolError {
+    /// HTTP/1 handshake error
+    #[error("HTTP/1: {0:?}")]
+    Http1(hyper::Error),
+
+    /// HTTP/2 handshake error
+    #[error("HTTP/2: {0:?}")]
+    Http2(hyper::Error),
+
+    /// Attempt to use a protocol not supported
+    #[error("Unsupported protocol: {0:?}")]
+    UnsupportedProtocol(HttpProtocol),
+}
 
 /// An HTTP connection which is either HTTP1 or HTTP2
 pub struct HttpConnection<B> {
@@ -237,7 +254,7 @@ where
         &self,
         transport: IO,
         protocol: HttpProtocol,
-    ) -> Result<HttpConnection<B>, hyper::Error>
+    ) -> Result<HttpConnection<B>, AutoHttpProtocolError>
     where
         IO: HasTlsConnectionInfo
             + HasConnectionInfo
@@ -249,23 +266,30 @@ where
         <IO as HasConnectionInfo>::Addr: Clone,
     {
         match protocol {
-            HttpProtocol::Http2 => self.handshake_h2(transport).await,
+            HttpProtocol::Http2 => self
+                .handshake_h2(transport)
+                .await
+                .map_err(AutoHttpProtocolError::Http2),
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
                 if transport.tls_info().and_then(|tls| tls.alpn.as_deref()) == Some("h2") {
                     trace!("alpn h2 switching");
-                    return self.handshake_h2(transport).await;
+                    return self
+                        .handshake_h2(transport)
+                        .await
+                        .map_err(AutoHttpProtocolError::Http2);
                 }
 
                 #[cfg(feature = "tls")]
                 trace!(tls=?transport.tls_info(), "no alpn h2 switching");
 
-                self.handshake_h1(transport).await
+                self.handshake_h1(transport)
+                    .await
+                    .map_err(AutoHttpProtocolError::Http1)
             }
-            HttpProtocol::Http3 => {
-                //TODO: This should return a protocol error?
-                panic!("Protocol not supported");
-            }
+            HttpProtocol::Http3 => Err(AutoHttpProtocolError::UnsupportedProtocol(
+                HttpProtocol::Http3,
+            )),
         }
     }
 }
@@ -290,7 +314,7 @@ where
 {
     type Response = HttpConnection<B>;
 
-    type Error = hyper::Error;
+    type Error = AutoHttpProtocolError;
 
     type Future = future::HttpConnectFuture<IO, B>;
 
@@ -328,12 +352,13 @@ mod future {
     use chateau::info::{HasConnectionInfo, HasTlsConnectionInfo};
 
     use super::AlpnHttpConnectionBuilder;
+    use super::AutoHttpProtocolError;
     use super::HttpConnection;
 
     type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
     pub struct HttpConnectFuture<IO, B> {
-        future: BoxFuture<'static, HttpConnection<B>, hyper::Error>,
+        future: BoxFuture<'static, HttpConnection<B>, AutoHttpProtocolError>,
         _io: PhantomData<IO>,
     }
 
@@ -377,7 +402,7 @@ mod future {
     where
         IO: Unpin,
     {
-        type Output = Result<HttpConnection<B>, hyper::Error>;
+        type Output = Result<HttpConnection<B>, AutoHttpProtocolError>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             self.future.poll_unpin(cx)
@@ -410,8 +435,8 @@ mod tests {
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-    assert_impl_all!(AlpnHttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = hyper::Error, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
-    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, hyper::Error>>, Debug, Send);
+    assert_impl_all!(AlpnHttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = AutoHttpProtocolError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, AutoHttpProtocolError>>, Debug, Send);
 
     async fn transport() -> Result<(DuplexStream, DuplexStream), BoxError> {
         let (client, mut incoming) = chateau::stream::duplex::pair();
