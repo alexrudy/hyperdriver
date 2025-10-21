@@ -1,12 +1,12 @@
 [package]
 name = "hyperdriver"
-version = "0.12.0-rc1"
+version = "0.12.0-rc2"
 edition = "2021"
 description = "The missing middle for Hyper - Servers and Clients with ergonomic APIs"
 license = "MIT"
 repository = "https://github.com/alexrudy/hyperdriver"
 documentation = "https://docs.rs/hyperdriver"
-rust-version = "1.85"
+rust-version = "1.87"
 readme = "README.md"
 authors = ["Alex Rudy <opensource@alexrudy.net>"]
 categories = [
