@@ -15,6 +15,8 @@ use chateau::info::HasConnectionInfo;
 use chateau::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
 use chateau::stream::duplex::DuplexStream;
+#[cfg(feature = "tls")]
+use chateau::stream::tls::TlsHandshakeInfo;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -127,6 +129,20 @@ where
 {
     fn tls_info(&self) -> Option<&chateau::info::TlsConnectionInfo> {
         self.inner.tls_info()
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<IO> TlsHandshakeInfo for Stream<IO>
+where
+    IO: AsyncRead + AsyncWrite + Send + Unpin + HasConnectionInfo,
+    IO::Addr: Unpin,
+{
+    fn recv(&self) -> chateau::info::tls::TlsConnectionInfoReceiver {
+        match &self.inner {
+            OptTlsStream::NoTls(_) => chateau::info::tls::TlsConnectionInfoReceiver::empty(),
+            OptTlsStream::Tls(stream) => stream.recv(),
+        }
     }
 }
 
