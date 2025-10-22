@@ -3,6 +3,7 @@
 //! The server and client are differentiated for TLS support, but otherwise,
 //! TCP and Duplex streams are the same whether they are server or client.
 
+use std::fmt;
 #[cfg(feature = "tls")]
 use std::io;
 use std::task::{Context, Poll};
@@ -11,6 +12,7 @@ use std::task::{Context, Poll};
 use crate::stream::Braid;
 use chateau::info::ConnectionInfo;
 use chateau::info::HasConnectionInfo;
+use chateau::info::HasTlsConnectionInfo;
 #[cfg(feature = "stream")]
 use chateau::stream::duplex::DuplexStream;
 use pin_project::pin_project;
@@ -102,6 +104,29 @@ where
     type Addr = IO::Addr;
     fn info(&self) -> ConnectionInfo<IO::Addr> {
         self.info.clone()
+    }
+}
+
+#[cfg(feature = "tls")]
+impl<IO, A> HasTlsConnectionInfo for Stream<IO>
+where
+    IO: HasConnectionInfo<Addr = A> + HasTlsConnectionInfo,
+    A: fmt::Debug + fmt::Display + Clone + Send + 'static,
+    TlsStream<IO>: HasConnectionInfo<Addr = A> + HasTlsConnectionInfo,
+{
+    fn tls_info(&self) -> Option<&chateau::info::TlsConnectionInfo> {
+        self.inner.tls_info()
+    }
+}
+
+#[cfg(not(feature = "tls"))]
+impl<IO, A> HasTlsConnectionInfo for Stream<IO>
+where
+    IO: HasConnectionInfo<Addr = A> + HasTlsConnectionInfo,
+    A: fmt::Debug + fmt::Display + Clone + Send + 'static,
+{
+    fn tls_info(&self) -> Option<&chateau::info::TlsConnectionInfo> {
+        self.inner.tls_info()
     }
 }
 
