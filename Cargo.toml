@@ -42,8 +42,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
 
 [dependencies.chateau]
-# version = "0.2.0-rc1"
-git = "https://github.com/alexrudy/chateau.git"
+version = "0.2.0-rc2"
 features = ["client", "server", "duplex"]
 
 [dependencies.rustls]
