@@ -2,6 +2,8 @@ version: 2
 updates:
   - package-ecosystem: "cargo" # See documentation for possible values
     directory: "/" # Location of package manifests
+    allow:
+      - dependency-type: direct
     schedule:
       interval: "weekly"
     groups:
@@ -9,3 +11,8 @@ updates:
         applies-to: "version-updates"
         patterns:
           - "*opentelemetry*"
+          - "tracing-*"
+      rustls:
+        applies-to: "version-updates"
+        patterns:
+          - "rustls*"
