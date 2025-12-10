@@ -294,7 +294,10 @@ async fn http2_client(
     let client = tower::ServiceBuilder::new()
         .layer(
             ConnectionPoolLayer::<_, _, _, UriKey>::new(
-                TcpTransport::<_, TcpStream>::default().without_tls(),
+                TransportNotSend {
+                    tcp: TcpTransport::<_, TcpStream>::default(),
+                }
+                .without_tls(),
                 auto::HttpConnectionBuilder::<Body>::default(),
             )
             .with_optional_pool(Some(Default::default())),
