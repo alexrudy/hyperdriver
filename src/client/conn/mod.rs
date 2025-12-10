@@ -25,7 +25,7 @@
 //! The protocol is responsible for encoding and decoding request and response objects. Usually, this means
 //! HTTP/1.1 or HTTP/2, but it could be any protocol which sends and receives data over a connection.
 //!
-//! Protocols implement the [`Protocol`] trait, which is a service that accepts a [`ProtocolRequest`] and
+//! Protocols implement the [`Protocol`] trait, which is a service that accepts the IO stream and
 //! returns a connection. The connection is responsible for sending and receiving HTTP requests and responses.
 //!
 //! ## Connection
@@ -51,6 +51,7 @@ pub use chateau::client::conn::connector::{Connector, ConnectorLayer, ConnectorS
 pub use chateau::client::conn::Connection;
 pub use chateau::client::conn::ConnectionError;
 pub use chateau::client::conn::Protocol;
+pub use chateau::client::conn::Transport;
 
 #[cfg(feature = "tls")]
 pub use self::tls::{AutoTlsTransport, HttpTlsTransport};

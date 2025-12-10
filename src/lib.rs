@@ -68,12 +68,11 @@
 //! A client can also be composed of services. In this case, there is only one "service", it must accept
 //! a [`http::Request`] and return a [`http::Response`]. At the inner-most level, there is a connection step,
 //! where the [`http::Request`] is coupled with a connection, to be used to send the request. At this point,
-//! the service will switch from accepting a [`http::Request`] to accepting an [`ExecuteRequest`]
-//! type, which includes the request and the connection.
+//! the service will switch from accepting a [`http::Request`] to accepting a tuple of the connection and request.
 //!
 //! The default way to do this in `hyperdriver` is to use the [`crate::client::ConnectionPoolService`] type,
 //! which implements connections and connection pooling. Many middleware services can be applied both above
-//! (when the service only has an [`http::Request`]) and below (when the service has an [`ExecuteRequest`]) this
+//! (when the service only has an [`http::Request`]) and below (when the service has an [`ClientExecutorService`]) this
 //! type. Some middleware might have slightly different behavior. For example, the [`SetHostHeader`] middleware
 //! will apply the `Host` header to the request based on the version of the request if the connection is not
 //! available yet. Usually this is not desired, since an HTTP/1.1 request might be internally upgraded to
@@ -106,7 +105,7 @@
 //! [tonic]: https://docs.rs/tonic
 //! [tokio::io]: https://docs.rs/tokio/1/tokio/io/index.html
 //!
-//! [`ExecuteRequest`]: crate::service::ExecuteRequest
+//! [`ClientExecutorService`]: chateau::client::conn::service::ClientExecutorService
 //! [`SetHostHeader`]: crate::service::SetHostHeader
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
