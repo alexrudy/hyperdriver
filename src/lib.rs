@@ -107,7 +107,6 @@
 //!
 //! [`ClientExecutorService`]: chateau::client::conn::service::ClientExecutorService
 //! [`SetHostHeader`]: crate::service::SetHostHeader
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 use std::{fmt, future::Future, pin::Pin};
 
