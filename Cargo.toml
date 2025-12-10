@@ -42,7 +42,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
 
 [dependencies.chateau]
-version = "0.2.0-rc2"
+version = "0.2.0"
 features = ["client", "server", "duplex"]
 
 [dependencies.rustls]
