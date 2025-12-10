@@ -11,7 +11,7 @@ use hyper::{header, Request, Response};
 use thiserror::Error;
 use tower::{Layer, Service};
 
-use crate::info::TlsConnectionInfo;
+use chateau::info::TlsConnectionInfo;
 
 /// Error returned by the SNI Middleware.
 #[derive(Debug, Error)]

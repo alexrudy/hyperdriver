@@ -95,7 +95,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.76"
+          toolchain: "1.85"
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Run cargo build

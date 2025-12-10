@@ -2,14 +2,14 @@
 use std::pin::pin;
 
 use camino::Utf8PathBuf;
+use chateau::client::conn::transport::unix::{StaticAddressUnixTransport, UnixTransport};
+use chateau::stream::unix::UnixStream;
+use chateau::stream::unix::{UnixAddr, UnixListener};
 use futures_util::StreamExt as _;
 use http::StatusCode;
 use hyperdriver::bridge::io::TokioIo;
-use hyperdriver::client::conn::transport::unix::{StaticAddressUnixTransport, UnixTransport};
+use hyperdriver::client::conn::transport::unix::UnixExtensionTransport;
 use hyperdriver::server::conn::Acceptor;
-use hyperdriver::stream::unix::{UnixAddr, UnixListener};
-
-use hyperdriver::stream::UnixStream;
 use hyperdriver::{Body, Client};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -26,7 +26,7 @@ async fn transport() -> Result<(), BoxError> {
     let acceptor: Acceptor<UnixListener> = Acceptor::new(listener);
     let server = tokio::spawn(serve_one_h1(acceptor));
 
-    let transport: UnixTransport<UnixStream> = UnixTransport::new(Default::default());
+    let transport = UnixExtensionTransport::from(UnixTransport::new(Default::default()));
     let mut client = Client::builder()
         .without_pool()
         .with_transport(transport)
@@ -35,7 +35,7 @@ async fn transport() -> Result<(), BoxError> {
         .without_tls()
         .build();
 
-    let addr = UnixAddr::from_pathbuf(dir.path().join(SOCKET).try_into().unwrap());
+    let addr = UnixAddr::from_pathbuf(dir.path().join(SOCKET));
     let req = http::Request::get("http://test/")
         .extension(addr)
         .body(Body::empty())?;

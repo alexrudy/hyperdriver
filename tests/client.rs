@@ -6,15 +6,15 @@ use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::Body;
 use std::pin::pin;
 
-use hyperdriver::client::conn::protocol::auto::HttpConnectionBuilder;
-use hyperdriver::client::conn::transport::duplex::DuplexTransport;
+use chateau::client::conn::transport::duplex::DuplexTransport;
+use hyperdriver::client::conn::protocol::{auto::AlpnHttpConnectionBuilder, Http2Builder};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
 async fn client() -> Result<(), BoxError> {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (tx, incoming) = hyperdriver::stream::duplex::pair();
+    let (tx, incoming) = chateau::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -22,7 +22,7 @@ async fn client() -> Result<(), BoxError> {
     let server = tokio::spawn(serve_one_h1(acceptor));
 
     let mut client = hyperdriver::client::Client::builder()
-        .with_protocol(HttpConnectionBuilder::default())
+        .with_protocol(AlpnHttpConnectionBuilder::default())
         .with_transport(DuplexTransport::new(1024, tx.clone()))
         .with_default_pool()
         .build();
@@ -43,7 +43,7 @@ async fn client() -> Result<(), BoxError> {
 async fn client_h2() -> Result<(), BoxError> {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (tx, incoming) = hyperdriver::stream::duplex::pair();
+    let (tx, incoming) = chateau::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -51,7 +51,7 @@ async fn client_h2() -> Result<(), BoxError> {
     let server = tokio::spawn(serve_one_h2(acceptor));
 
     let mut client = hyperdriver::client::Client::builder()
-        .with_protocol(HttpConnectionBuilder::default())
+        .with_protocol(Http2Builder::new(TokioExecutor::new()))
         .with_transport(DuplexTransport::new(1024, tx))
         .with_default_pool()
         .build();

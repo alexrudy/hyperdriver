@@ -1,4 +1,6 @@
-use hyper::rt::Executor;
+use chateau::rt::Executor;
+use hyper::rt::Executor as HyperExecutor;
+
 /// A tokio executor for running futures within hyper.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TokioExecutor;
@@ -20,6 +22,16 @@ where
     }
 }
 
+impl<F> HyperExecutor<F> for TokioExecutor
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    fn execute(&self, future: F) {
+        tokio::spawn(future);
+    }
+}
+
 /// A tokio executor for running futures on the current thread.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TokioCurrentThreadExecutor;
@@ -32,6 +44,16 @@ impl TokioCurrentThreadExecutor {
 }
 
 impl<F> Executor<F> for TokioCurrentThreadExecutor
+where
+    F: std::future::Future + 'static,
+    F::Output: 'static,
+{
+    fn execute(&self, future: F) {
+        tokio::task::spawn_local(future);
+    }
+}
+
+impl<F> HyperExecutor<F> for TokioCurrentThreadExecutor
 where
     F: std::future::Future + 'static,
     F::Output: 'static,

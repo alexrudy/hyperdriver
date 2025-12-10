@@ -7,8 +7,8 @@ use std::{fmt, task::Poll};
 use hyper::{Request, Response};
 use tower::{Layer, Service};
 
-use crate::info::{ConnectionInfo, HasConnectionInfo};
-use crate::service::ServiceRef;
+use chateau::info::{ConnectionInfo, HasConnectionInfo};
+use chateau::services::ServiceRef;
 
 /// A middleware which adds connection information to the request extensions.
 ///
@@ -19,13 +19,14 @@ use crate::service::ServiceRef;
 /// # use hyperdriver::info::ConnectionInfo;
 /// # use hyperdriver::server::conn::MakeServiceConnectionInfoLayer;
 /// # use tower::Layer;
-/// use hyperdriver::service::{make_service_fn, service_fn};
+/// # use std::net::SocketAddr;
+/// # use tower::service_fn;
 /// use tower::make::Shared;
 ///
 /// # async fn make_service_with_layer() {
 ///
 /// let service = service_fn(|req: http::Request<Body>| async move {
-///    let info = req.extensions().get::<ConnectionInfo>().unwrap();
+///    let info = req.extensions().get::<ConnectionInfo<SocketAddr>>().unwrap();
 ///    println!("Connection info: {:?}", info);
 ///    Ok::<_, Infallible>(http::Response::new(Body::from("Hello, World!")))
 /// });
@@ -111,7 +112,7 @@ mod future {
     use pin_project::pin_project;
     use std::future::Future;
 
-    use crate::service::ServiceRef;
+    use chateau::services::ServiceRef;
 
     use super::*;
 
@@ -234,7 +235,7 @@ mod tests {
             .layer(MakeServiceConnectionInfoLayer::new())
             .service(Shared::new(service));
 
-        let (client, incoming) = crate::stream::duplex::pair();
+        let (client, incoming) = chateau::stream::duplex::pair();
 
         let (_, conn) = tokio::try_join!(client.connect(1024), incoming.accept()).unwrap();
 

@@ -3,21 +3,23 @@ use std::future::Future;
 use std::future::IntoFuture;
 use std::pin::pin;
 
+use chateau::client::conn::Connection as _;
+use chateau::server::{GracefulServerExecutor, ServerExecutor};
+use chateau::services::MakeServiceRef;
 use futures_util::FutureExt as _;
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyper::Response;
 use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::client::conn::protocol::HttpProtocol;
 use hyperdriver::client::conn::Stream;
 use hyperdriver::info::BraidAddr;
 use hyperdriver::server::conn::Accept;
-use hyperdriver::server::GracefulServerExecutor;
-use hyperdriver::server::ServerExecutor;
-use hyperdriver::service::MakeServiceRef;
-use hyperdriver::Body;
-
 use hyperdriver::server::{Protocol, Server};
+use hyperdriver::server::{ServerAcceptorExt, ServerConnectionInfoExt, ServerProtocolExt};
+use hyperdriver::Body;
+use tracing::Instrument as _;
+use tracing_test::traced_test;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
@@ -36,12 +38,14 @@ async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError
     )))
 }
 
-async fn connection<P: hyperdriver::client::conn::Protocol<Stream, hyperdriver::Body>>(
+async fn connection<
+    P: chateau::client::conn::Protocol<Stream, http::Request<hyperdriver::Body>>,
+>(
     client: &hyperdriver::stream::duplex::DuplexClient,
     mut protocol: P,
 ) -> Result<P::Connection, Box<dyn std::error::Error>> {
     let stream = client.connect(1024).await?;
-    let conn = protocol.connect(stream.into(), HttpProtocol::Http1).await?;
+    let conn = protocol.connect(stream.into()).await?;
     Ok(conn)
 }
 
@@ -56,11 +60,11 @@ fn serve<A, P, S, BIn, E>(
     server: Server<A, P, S, BIn, E>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeServiceRef<A::Conn, BIn> + Send + 'static,
+    S: MakeServiceRef<A::Connection, BIn> + Send + 'static,
     S::Future: Send + 'static,
-    P: Protocol<S::Service, A::Conn, BIn> + Send + 'static,
+    P: Protocol<S::Service, A::Connection, BIn> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
-    A::Conn: Send + 'static,
+    A::Connection: Send + 'static,
     BIn: HttpBody + Send + 'static,
     E: ServerExecutor<P, S, A, BIn> + Send + 'static,
 {
@@ -91,11 +95,11 @@ fn serve_gracefully<A, P, S, B, E>(
     server: Server<A, P, S, B, E>,
 ) -> impl Future<Output = Result<(), BoxError>>
 where
-    S: MakeServiceRef<A::Conn, B> + Send + 'static,
+    S: MakeServiceRef<A::Connection, B> + Send + 'static,
     S::Future: Send + 'static,
-    P: Protocol<S::Service, A::Conn, B> + Send + 'static,
+    P: Protocol<S::Service, A::Connection, B> + Send + 'static,
     A: Accept + Unpin + Send + 'static,
-    A::Conn: Send + 'static,
+    A::Connection: Send + 'static,
     B: HttpBody + Send + 'static,
     E: GracefulServerExecutor<P, S, A, B> + Send + 'static,
 {
@@ -104,20 +108,21 @@ where
         if rx.await.is_err() {
             tracing::trace!("shutdown with err?");
         }
+        tracing::debug!("shutdown received");
     }));
-    tracing::trace!("spawned server");
+    tracing::debug!("spawned server");
 
     async move {
-        tracing::trace!("sending shutdown signal");
+        tracing::debug!("sending shutdown signal");
         let _ = tx.send(());
         handle.await.unwrap().map_err(Into::into)
     }
 }
 
 #[tokio::test]
+#[traced_test]
 async fn echo_h1() {
-    use hyper::client::conn::http1::Builder;
-    let _ = tracing_subscriber::fmt::try_init();
+    use hyperdriver::client::conn::protocol::Http1Builder;
 
     let (client, incoming) = hyperdriver::stream::duplex::pair();
 
@@ -129,83 +134,136 @@ async fn echo_h1() {
         .with_tokio();
 
     let handle = serve_gracefully(server);
+    let test = async {
+        let mut conn = connection(&client, Http1Builder::new()).await.unwrap();
+        tracing::trace!("connected");
 
-    let mut conn = connection(&client, Builder::new()).await.unwrap();
-    tracing::trace!("connected");
+        let response = conn.send_request(hello_world()).await.unwrap();
+        tracing::trace!("sent request");
+        let (_, body) = response.into_parts();
 
-    let response = conn.send_request(hello_world()).await.unwrap();
-    tracing::trace!("sent request");
-    let (_, body) = response.into_parts();
+        let data = body.collect().await.unwrap().to_bytes();
+        assert_eq!(&*data, b"hello world");
 
-    let data = body.collect().await.unwrap().to_bytes();
-    assert_eq!(&*data, b"hello world");
+        handle.await.unwrap();
+    };
 
-    handle.await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), test)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
 async fn echo_h2() {
-    use hyper::client::conn::http2::Builder;
+    use hyperdriver::client::conn::protocol::Http2Builder;
+    use tracing_subscriber::fmt;
 
-    let _ = tracing_subscriber::fmt::try_init();
+    let _ = fmt::try_init();
 
-    let (client, incoming) = hyperdriver::stream::duplex::pair();
+    let test = async {
+        let (client, incoming) = hyperdriver::stream::duplex::pair();
+        let server = hyperdriver::server::Server::builder()
+            .with_incoming(incoming)
+            .with_http2()
+            .with_shared_service(tower::service_fn(echo))
+            .with_connection_info()
+            .with_tokio();
 
-    let server = hyperdriver::server::Server::builder()
-        .with_incoming(incoming)
-        .with_http2()
-        .with_shared_service(tower::service_fn(echo))
-        .with_connection_info()
-        .with_tokio();
+        let guard = serve_gracefully(server);
 
-    let guard = serve_gracefully(server);
+        let span = tracing::info_span!("client");
+        let mut conn = connection(&client, Http2Builder::new(TokioExecutor::new()))
+            .instrument(span.clone())
+            .await
+            .unwrap();
 
-    let mut conn = connection(&client, Builder::new(TokioExecutor::new()))
+        tracing::trace!("sending request");
+        let response = conn
+            .send_request(hello_world())
+            .instrument(span.clone())
+            .await
+            .unwrap();
+        tracing::trace!("processing response");
+        let (_, body) = response.into_parts();
+
+        let data = body
+            .collect()
+            .instrument(span.clone())
+            .await
+            .unwrap()
+            .to_bytes();
+        tracing::trace!("assert response");
+        assert_eq!(&*data, b"hello world");
+
+        tracing::trace!("sending request");
+        let response = conn
+            .send_request(hello_world())
+            .instrument(span.clone())
+            .await
+            .unwrap();
+        tracing::trace!("processing response");
+        let (_, body) = response.into_parts();
+
+        let data = body
+            .collect()
+            .instrument(span.clone())
+            .await
+            .unwrap()
+            .to_bytes();
+        tracing::trace!("assert response");
+        assert_eq!(&*data, b"hello world");
+        drop(conn);
+
+        tracing::debug!("wait for server guard");
+
+        guard.await.unwrap();
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), test)
         .await
         .unwrap();
-
-    let response = conn.send_request(hello_world()).await.unwrap();
-    let (_, body) = response.into_parts();
-
-    let data = body.collect().await.unwrap().to_bytes();
-    assert_eq!(&*data, b"hello world");
-
-    guard.await.unwrap();
+    tracing::debug!("Test has finished, waiting for cleanup");
 }
 
 #[tokio::test]
+#[traced_test]
 async fn echo_h1_early_disconnect() {
-    use hyper::client::conn::http1::Builder;
-    let _ = tracing_subscriber::fmt::try_init();
+    use hyperdriver::client::conn::protocol::Http1Builder;
 
     let (client, incoming) = hyperdriver::stream::duplex::pair();
 
-    let server = hyperdriver::server::Server::builder()
-        .with_incoming(incoming)
-        .with_http1()
-        .with_shared_service(tower::service_fn(echo))
-        .with_connection_info()
-        .with_tokio();
+    let test = async {
+        let server = hyperdriver::server::Server::builder()
+            .with_incoming(incoming)
+            .with_http1()
+            .with_shared_service(tower::service_fn(echo))
+            .with_connection_info()
+            .with_tokio();
 
-    let handle = serve(server);
+        let handle = serve(server);
+        let mut conn = connection(&client, Http1Builder::new()).await.unwrap();
+        drop(client);
+        tracing::trace!("connected");
 
-    let mut conn = connection(&client, Builder::new()).await.unwrap();
-    drop(client);
-    tracing::trace!("connected");
+        let response = conn.send_request(hello_world()).await.unwrap();
+        tokio::task::yield_now().await;
 
-    let response = conn.send_request(hello_world()).await.unwrap();
-    tokio::task::yield_now().await;
+        tracing::trace!("sent request");
+        let (_, body) = response.into_parts();
+        let data = body.collect().await.unwrap().to_bytes();
+        assert_eq!(&*data, b"hello world");
 
-    tracing::trace!("sent request");
-    let (_, body) = response.into_parts();
-    let data = body.collect().await.unwrap().to_bytes();
-    assert_eq!(&*data, b"hello world");
-
-    assert!(handle.await.is_err());
+        assert!(handle.await.is_err());
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), test)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
 async fn echo_auto_h1() {
+    use hyperdriver::client::conn::protocol::Http1Builder;
+
     let _ = tracing_subscriber::fmt::try_init();
 
     let (client, incoming) = hyperdriver::stream::duplex::pair();
@@ -219,9 +277,7 @@ async fn echo_auto_h1() {
 
     let handle = serve_gracefully(server);
 
-    let mut conn = connection(&client, hyper::client::conn::http1::Builder::new())
-        .await
-        .unwrap();
+    let mut conn = connection(&client, Http1Builder::new()).await.unwrap();
     tracing::trace!("connected");
 
     let response = conn.send_request(hello_world()).await.unwrap();
@@ -236,32 +292,35 @@ async fn echo_auto_h1() {
 
 #[tokio::test]
 async fn echo_auto_h2() {
+    use hyperdriver::client::conn::protocol::Http2Builder;
     let _ = tracing_subscriber::fmt::try_init();
 
     let (client, incoming) = hyperdriver::stream::duplex::pair();
 
-    let server = hyperdriver::Server::builder()
-        .with_incoming(incoming)
-        .with_auto_http()
-        .with_shared_service(tower::service_fn(echo))
-        .with_connection_info()
-        .with_tokio();
-    let handle = serve_gracefully(server);
+    let test = async {
+        let server = hyperdriver::Server::builder()
+            .with_incoming(incoming)
+            .with_auto_http()
+            .with_shared_service(tower::service_fn(echo))
+            .with_connection_info()
+            .with_tokio();
+        let handle = serve_gracefully(server);
 
-    let mut conn = connection(
-        &client,
-        hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
-    )
-    .await
-    .unwrap();
-    tracing::trace!("connected");
+        let mut conn = connection(&client, Http2Builder::new(TokioExecutor::new()))
+            .await
+            .unwrap();
+        tracing::trace!("connected");
 
-    let response = conn.send_request(hello_world()).await.unwrap();
-    tracing::trace!("sent request");
-    let (_, body) = response.into_parts();
+        let response = conn.send_request(hello_world()).await.unwrap();
+        tracing::trace!("sent request");
+        let (_, body) = response.into_parts();
 
-    let data = body.collect().await.unwrap().to_bytes();
-    assert_eq!(&*data, b"hello world");
-
-    handle.await.unwrap();
+        let data = body.collect().await.unwrap().to_bytes();
+        assert_eq!(&*data, b"hello world");
+        drop(conn);
+        handle.await.unwrap();
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), test)
+        .await
+        .unwrap();
 }

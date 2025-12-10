@@ -5,24 +5,40 @@ use std::marker::PhantomData;
 use std::pin::pin;
 
 use http_body::Body;
+use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
 use http_body::Body as HttpBody;
 
 use crate::client::conn::connection::SendRequestFuture;
-use crate::client::conn::Connection;
-use crate::client::pool::PoolableConnection;
+use crate::service::HttpConnectionInfo;
+use chateau::client::conn::Connection;
+use chateau::client::pool::PoolableConnection;
 
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
-use crate::client::conn::connection::ConnectionError;
-use crate::info::HasConnectionInfo;
-use crate::info::HasTlsConnectionInfo;
 use crate::BoxError;
+use chateau::info::HasConnectionInfo;
+use chateau::info::HasTlsConnectionInfo;
 
 use super::HttpProtocol;
-use super::ProtocolRequest;
+
+/// Error occured during ALPN-negotiated connection start.
+#[derive(Debug, Error)]
+pub enum AutoHttpProtocolError {
+    /// HTTP/1 handshake error
+    #[error("HTTP/1: {0:?}")]
+    Http1(hyper::Error),
+
+    /// HTTP/2 handshake error
+    #[error("HTTP/2: {0:?}")]
+    Http2(hyper::Error),
+
+    /// Attempt to use a protocol not supported
+    #[error("Unsupported protocol: {0:?}")]
+    UnsupportedProtocol(HttpProtocol),
+}
 
 /// An HTTP connection which is either HTTP1 or HTTP2
 pub struct HttpConnection<B> {
@@ -43,6 +59,14 @@ impl<B> HttpConnection<B> {
             inner: InnerConnection::H2(conn),
         }
     }
+
+    /// Get the HTTP protocol version
+    pub fn version(&self) -> HttpProtocol {
+        match &self.inner {
+            InnerConnection::H1(_) => HttpProtocol::Http1,
+            InnerConnection::H2(_) => HttpProtocol::Http2,
+        }
+    }
 }
 
 impl<B> fmt::Debug for HttpConnection<B>
@@ -61,11 +85,11 @@ enum InnerConnection<B> {
     H1(hyper::client::conn::http1::SendRequest<B>),
 }
 
-impl<B> Connection<B> for HttpConnection<B>
+impl<B> Connection<http::Request<B>> for HttpConnection<B>
 where
     B: HttpBody + Send + 'static,
 {
-    type ResBody = hyper::body::Incoming;
+    type Response = http::Response<hyper::body::Incoming>;
 
     type Error = hyper::Error;
 
@@ -93,16 +117,9 @@ where
             InnerConnection::H1(conn) => conn.poll_ready(cx),
         }
     }
-
-    fn version(&self) -> http::Version {
-        match &self.inner {
-            InnerConnection::H2(_) => http::Version::HTTP_2,
-            InnerConnection::H1(_) => http::Version::HTTP_11,
-        }
-    }
 }
 
-impl<B> PoolableConnection<B> for HttpConnection<B>
+impl<B> PoolableConnection<http::Request<B>> for HttpConnection<B>
 where
     B: HttpBody + Send + 'static,
 {
@@ -135,6 +152,18 @@ where
     }
 }
 
+impl<B> HttpConnectionInfo<B> for HttpConnection<B>
+where
+    B: HttpBody + Send + 'static,
+{
+    fn version(&self) -> HttpProtocol {
+        match &self.inner {
+            InnerConnection::H1(_) => HttpProtocol::Http1,
+            InnerConnection::H2(_) => HttpProtocol::Http2,
+        }
+    }
+}
+
 /// A builder for configuring and starting HTTP connections.
 ///
 /// This builder allows configuring the HTTP/1 and HTTP/2 settings for the connection,
@@ -146,13 +175,13 @@ where
 /// be done by calling `TransportExt::with_tls` or `TransportExt::without_tls` on the
 /// transport.
 #[derive(Debug)]
-pub struct HttpConnectionBuilder<B> {
+pub struct AlpnHttpConnectionBuilder<B> {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
     _body: PhantomData<fn(B) -> ()>,
 }
 
-impl<B> Clone for HttpConnectionBuilder<B> {
+impl<B> Clone for AlpnHttpConnectionBuilder<B> {
     fn clone(&self) -> Self {
         Self {
             http1: self.http1.clone(),
@@ -162,7 +191,7 @@ impl<B> Clone for HttpConnectionBuilder<B> {
     }
 }
 
-impl<B> HttpConnectionBuilder<B> {
+impl<B> AlpnHttpConnectionBuilder<B> {
     /// Get the HTTP/1.1 configuration.
     pub fn http1(&mut self) -> &mut hyper::client::conn::http1::Builder {
         &mut self.http1
@@ -174,23 +203,19 @@ impl<B> HttpConnectionBuilder<B> {
     }
 }
 
-impl<B> HttpConnectionBuilder<B>
+impl<B> AlpnHttpConnectionBuilder<B>
 where
     B: Body + Unpin + Send + 'static,
     <B as Body>::Data: Send,
     <B as Body>::Error: Into<BoxError>,
 {
-    async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
+    async fn handshake_h2<IO>(&self, stream: IO) -> Result<HttpConnection<B>, hyper::Error>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!("handshake h2");
         // let span = tracing::info_span!(parent: tracing::Span::none(), "connection", version = ?http::Version::HTTP_2, peer = %stream.info().remote_addr());
-        let (sender, conn) = self
-            .http2
-            .handshake(TokioIo::new(stream))
-            .await
-            .map_err(|error| ConnectionError::Handshake(error.into()))?;
+        let (sender, conn) = self.http2.handshake(TokioIo::new(stream)).await?;
         tokio::spawn(async {
             let conn = pin!(conn);
             if let Err(err) = conn.await {
@@ -207,18 +232,14 @@ where
         Ok(HttpConnection::h2(sender))
     }
 
-    async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection<B>, ConnectionError>
+    async fn handshake_h1<IO>(&self, stream: IO) -> Result<HttpConnection<B>, hyper::Error>
     where
         IO: HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
         trace!(version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr(), "handshake h1");
         // let span = tracing::info_span!("connection", version = ?http::Version::HTTP_11, peer = %stream.info().remote_addr());
 
-        let (sender, conn) = self
-            .http1
-            .handshake(TokioIo::new(stream))
-            .await
-            .map_err(|error| ConnectionError::Handshake(error.into()))?;
+        let (sender, conn) = self.http1.handshake(TokioIo::new(stream)).await?;
         tokio::spawn(async {
             if let Err(err) = conn.with_upgrades().await {
                 tracing::error!(err = format!("{err:#}"), "h1 connection driver error");
@@ -233,7 +254,7 @@ where
         &self,
         transport: IO,
         protocol: HttpProtocol,
-    ) -> Result<HttpConnection<B>, ConnectionError>
+    ) -> Result<HttpConnection<B>, AutoHttpProtocolError>
     where
         IO: HasTlsConnectionInfo
             + HasConnectionInfo
@@ -245,26 +266,35 @@ where
         <IO as HasConnectionInfo>::Addr: Clone,
     {
         match protocol {
-            HttpProtocol::Http2 => self.handshake_h2(transport).await,
+            HttpProtocol::Http2 => self
+                .handshake_h2(transport)
+                .await
+                .map_err(AutoHttpProtocolError::Http2),
             HttpProtocol::Http1 => {
                 #[cfg(feature = "tls")]
-                if transport.tls_info().and_then(|tls| tls.alpn.as_ref())
-                    == Some(&crate::info::Protocol::Http(http::Version::HTTP_2))
-                {
+                if transport.tls_info().and_then(|tls| tls.alpn.as_deref()) == Some("h2") {
                     trace!("alpn h2 switching");
-                    return self.handshake_h2(transport).await;
+                    return self
+                        .handshake_h2(transport)
+                        .await
+                        .map_err(AutoHttpProtocolError::Http2);
                 }
 
                 #[cfg(feature = "tls")]
                 trace!(tls=?transport.tls_info(), "no alpn h2 switching");
 
-                self.handshake_h1(transport).await
+                self.handshake_h1(transport)
+                    .await
+                    .map_err(AutoHttpProtocolError::Http1)
             }
+            HttpProtocol::Http3 => Err(AutoHttpProtocolError::UnsupportedProtocol(
+                HttpProtocol::Http3,
+            )),
         }
     }
 }
 
-impl<B> Default for HttpConnectionBuilder<B> {
+impl<B> Default for AlpnHttpConnectionBuilder<B> {
     fn default() -> Self {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
@@ -274,7 +304,7 @@ impl<B> Default for HttpConnectionBuilder<B> {
     }
 }
 
-impl<IO, B> tower::Service<ProtocolRequest<IO, B>> for HttpConnectionBuilder<B>
+impl<IO, B> tower::Service<IO> for AlpnHttpConnectionBuilder<B>
 where
     IO: HasTlsConnectionInfo + HasConnectionInfo + AsyncRead + AsyncWrite + Send + Unpin + 'static,
     IO::Addr: Clone + Send + Sync,
@@ -284,7 +314,7 @@ where
 {
     type Response = HttpConnection<B>;
 
-    type Error = ConnectionError;
+    type Error = AutoHttpProtocolError;
 
     type Future = future::HttpConnectFuture<IO, B>;
 
@@ -295,10 +325,13 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument("http-connect", level="trace", skip_all, fields(addr=?req.transport.info().remote_addr()))]
-    fn call(&mut self, req: ProtocolRequest<IO, B>) -> Self::Future {
+    #[tracing::instrument("http-connect", level="trace", skip_all, fields(addr=?req.info().remote_addr()))]
+    fn call(&mut self, req: IO) -> Self::Future {
         let builder = std::mem::replace(self, self.clone());
-        future::HttpConnectFuture::new(builder, req.transport, req.version)
+        //TODO: Should there be some way to force an HTTP2 connection from the get-go?
+        // Since this could depend on the HTTP request, we'd need a different way to propogate that along with the
+        // IO stream into this method.
+        future::HttpConnectFuture::new(builder, req, HttpProtocol::Http1)
     }
 }
 
@@ -313,19 +346,19 @@ mod future {
     use http_body::Body;
     use tokio::io::{AsyncRead, AsyncWrite};
 
-    use crate::client::conn::connection::ConnectionError;
     use crate::client::conn::protocol::HttpProtocol;
-    use crate::info::{HasConnectionInfo, HasTlsConnectionInfo};
     use crate::BoxError;
     use crate::DebugLiteral;
+    use chateau::info::{HasConnectionInfo, HasTlsConnectionInfo};
 
+    use super::AlpnHttpConnectionBuilder;
+    use super::AutoHttpProtocolError;
     use super::HttpConnection;
-    use super::HttpConnectionBuilder;
 
     type BoxFuture<'a, T, E> = crate::BoxFuture<'a, Result<T, E>>;
 
     pub struct HttpConnectFuture<IO, B> {
-        future: BoxFuture<'static, HttpConnection<B>, ConnectionError>,
+        future: BoxFuture<'static, HttpConnection<B>, AutoHttpProtocolError>,
         _io: PhantomData<IO>,
     }
 
@@ -352,7 +385,7 @@ mod future {
         <B as Body>::Error: Into<BoxError>,
     {
         pub(super) fn new(
-            builder: HttpConnectionBuilder<B>,
+            builder: AlpnHttpConnectionBuilder<B>,
             stream: IO,
             protocol: HttpProtocol,
         ) -> HttpConnectFuture<IO, B> {
@@ -369,7 +402,7 @@ mod future {
     where
         IO: Unpin,
     {
-        type Output = Result<HttpConnection<B>, ConnectionError>;
+        type Output = Result<HttpConnection<B>, AutoHttpProtocolError>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             self.future.poll_unpin(cx)
@@ -377,41 +410,36 @@ mod future {
     }
 }
 
-#[cfg(all(test, feature = "stream"))]
+#[cfg(all(test, feature = "stream", feature = "mocks", feature = "tls"))]
 mod tests {
     use std::fmt::Debug;
     use std::future::Future;
+    use std::sync::Arc;
 
-    use super::*;
+    use chateau::client::conn::connection::ConnectionExt as _;
+    use chateau::stream::duplex::DuplexStream;
+    use futures_util::{stream::StreamExt as _, TryFutureExt};
+    use rustls::pki_types::ServerName;
+    use static_assertions::assert_impl_all;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tracing_test::traced_test;
 
-    use crate::client::conn::connection::ConnectionError;
-
+    use crate::client::conn::stream::mock::MockTls;
     use crate::client::conn::Protocol as _;
     use crate::client::conn::{protocol::HttpProtocol, Stream};
     use crate::client::Error;
 
-    #[cfg(all(feature = "mocks", feature = "tls"))]
-    use crate::stream::tls::TlsHandshakeStream as _;
+    use super::*;
 
-    use futures_util::{stream::StreamExt as _, TryFutureExt};
-    use http::Version;
-    use static_assertions::assert_impl_all;
-    use tokio::io::{AsyncBufReadExt, BufReader};
-
-    #[cfg(feature = "mocks")]
     use tower::Service;
 
     type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-    #[cfg(all(feature = "mocks", feature = "stream"))]
-    assert_impl_all!(HttpConnectionBuilder<crate::Body>: Service<ProtocolRequest<Stream, crate::Body>, Response = HttpConnection<crate::Body>, Error = ConnectionError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+    assert_impl_all!(AlpnHttpConnectionBuilder<crate::Body>: Service<Stream, Response = HttpConnection<crate::Body>, Error = AutoHttpProtocolError, Future = future::HttpConnectFuture<Stream, crate::Body>>, Debug, Clone);
+    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, AutoHttpProtocolError>>, Debug, Send);
 
-    #[cfg(feature = "stream")]
-    assert_impl_all!(future::HttpConnectFuture<Stream, crate::Body>: Future<Output = Result<HttpConnection<crate::Body>, ConnectionError>>, Debug, Send);
-
-    #[cfg(feature = "stream")]
-    async fn transport() -> Result<(Stream, Stream), BoxError> {
-        let (client, mut incoming) = crate::stream::duplex::pair();
+    async fn transport() -> Result<(DuplexStream, DuplexStream), BoxError> {
+        let (client, mut incoming) = chateau::stream::duplex::pair();
 
         // Connect to the server. This is a helper function that creates a client and server
         // pair, and returns the client's transport stream and the server's stream.
@@ -423,27 +451,44 @@ mod tests {
             async { Ok(incoming.next().await.ok_or("Acceptor closed")??) }
         )?;
 
-        Ok((tx.into(), rx.into()))
+        Ok((tx, rx))
+    }
+
+    fn tls_info(alpn_h2: bool) -> chateau::info::TlsConnectionInfo {
+        let config = Arc::new(crate::fixtures::tls_client_config());
+        let server = ServerName::try_from("example.com").unwrap();
+        if alpn_h2 {
+            let info = rustls::ClientConnection::new_with_alpn(config, server, vec![b"h2".into()])
+                .unwrap();
+            let mut info = chateau::info::TlsConnectionInfo::client(&info);
+            info.alpn = Some("h2".into());
+            info.server_name = Some("example.com".into());
+            info.validated_server_name = true;
+            info
+        } else {
+            let info = rustls::ClientConnection::new(config, server).unwrap();
+            let mut info = chateau::info::TlsConnectionInfo::client(&info);
+            info.server_name = Some("example.com".into());
+            info
+        }
     }
 
     #[tokio::test]
-    #[cfg(feature = "stream")]
+    #[traced_test]
     async fn http_connector_request_h1() {
-        use crate::client::conn::connection::ConnectionExt as _;
-
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let mut builder = HttpConnectionBuilder::default();
+        let mut builder = AlpnHttpConnectionBuilder::default();
 
         let (stream, rx) = transport().await.unwrap();
 
-        let mut conn = builder.connect(stream, HttpProtocol::Http1).await.unwrap();
+        let mut conn = builder
+            .connect(MockTls::new(stream, tls_info(false)))
+            .await
+            .unwrap();
         conn.when_ready().await.unwrap();
         assert!(conn.is_open());
+        assert_eq!(conn.version(), HttpProtocol::Http1);
         assert!(!conn.can_share());
-        assert_eq!(conn.version(), Version::HTTP_11);
         assert!(conn.reuse().is_none());
-        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/1.1 }");
 
         let request = http::Request::builder()
             .method(http::Method::GET)
@@ -472,27 +517,26 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(all(feature = "stream", feature = "tls"))]
-    async fn http_connector_request_h2() {
-        use crate::client::conn::connection::ConnectionExt as _;
+    #[traced_test]
+    async fn http_connector_alpn_h2() {
+        let (server, client) = transport().await.unwrap();
 
-        let _ = tracing_subscriber::fmt::try_init();
+        let mut builder = AlpnHttpConnectionBuilder::default();
 
-        let mut builder = HttpConnectionBuilder::default();
-
-        let (stream, rx) = transport().await.unwrap();
-
-        let mut conn = builder.connect(stream, HttpProtocol::Http2).await.unwrap();
+        let mut conn = builder
+            .connect(MockTls::new(client, tls_info(true)))
+            .await
+            .unwrap();
         conn.when_ready().await.unwrap();
+
         assert!(conn.is_open());
+        assert_eq!(conn.version(), HttpProtocol::Http2);
         assert!(conn.can_share());
-        assert_eq!(conn.version(), Version::HTTP_2);
         assert!(conn.reuse().is_some());
-        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
 
         let request = http::Request::builder()
-            .version(::http::Version::HTTP_2)
             .method(http::Method::GET)
+            .version(http::Version::HTTP_2)
             .uri("http://localhost/")
             .body(crate::body::Body::empty())
             .unwrap();
@@ -503,7 +547,7 @@ mod tests {
 
         let server_future = async move {
             let mut buf = String::new();
-            let _ = BufReader::new(rx)
+            let _ = BufReader::new(server)
                 .read_line(&mut buf)
                 .await
                 .map_err(|err| Error::Transport(err.into()))?;
@@ -515,43 +559,5 @@ mod tests {
         let (_rtx, rrx) = tokio::join!(request_future, server_future);
 
         assert!(rrx.is_ok());
-    }
-
-    #[cfg(all(feature = "mocks", feature = "stream", feature = "tls"))]
-    #[tokio::test]
-    async fn http_connector_alpn_h2() {
-        use crate::client::conn::stream::mock::MockTls;
-
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let (stream, client) = transport().await.unwrap();
-
-        async fn serve(stream: Stream) -> Result<HttpConnection<crate::Body>, ConnectionError> {
-            let mut builder = HttpConnectionBuilder::default();
-
-            let tls = crate::info::TlsConnectionInfo::new_client(Some(
-                crate::info::Protocol::http(http::Version::HTTP_2),
-            ));
-
-            builder
-                .connect(MockTls::new(stream, tls), HttpProtocol::Http1)
-                .await
-        }
-
-        async fn handshake(mut stream: Stream) -> Result<(), std::io::Error> {
-            stream.finish_handshake().await?;
-            tracing::info!("Client finished handshake");
-            Ok(())
-        }
-
-        let (conn, client) = tokio::join!(serve(stream), handshake(client));
-        client.unwrap();
-
-        let mut conn = conn.unwrap();
-        assert!(conn.is_open());
-        assert!(conn.can_share());
-        assert_eq!(conn.version(), Version::HTTP_2);
-        assert!(conn.reuse().is_some());
-        assert_eq!(format!("{conn:?}"), "HttpConnection { version: HTTP/2.0 }");
     }
 }

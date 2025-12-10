@@ -2,9 +2,11 @@
 
 use std::pin::pin;
 
+use chateau::client::conn::transport::duplex::DuplexTransport;
 use futures_util::StreamExt as _;
 use hyper::upgrade::Upgraded;
-use hyperdriver::{bridge::io::TokioIo, client::conn::transport::duplex::DuplexTransport};
+use hyperdriver::bridge::io::TokioIo;
+use hyperdriver::client::conn::protocol::Http1Builder;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -121,7 +123,7 @@ async fn client_http1() {
     let transport = server_for_client_upgrade().await.unwrap();
 
     let mut client = hyperdriver::Client::builder()
-        .with_protocol(hyper::client::conn::http1::Builder::new())
+        .with_protocol(Http1Builder::new())
         .with_default_pool()
         .with_transport(transport)
         .build();

@@ -1,23 +1,24 @@
 //! Test hyperdriver client using low-level connector.
+use chateau::client::conn::connector::ConnectorLayer;
 use futures_util::StreamExt;
 use http::StatusCode;
-use hyperdriver::bridge::io::TokioIo;
-use hyperdriver::client::conn::connector::ConnectorLayer;
+use hyperdriver::{bridge::io::TokioIo, client::conn::protocol::Http1Builder};
 
-use hyperdriver::service::RequestExecutor;
+use chateau::client::conn::service::ClientExecutorService;
+use chateau::client::conn::Connection as _;
 use hyperdriver::Body;
 use std::pin::pin;
 use tower::ServiceExt;
 
-use hyperdriver::client::conn::protocol::http1::Builder as HttpConnectionBuilder;
-use hyperdriver::client::conn::transport::duplex::DuplexTransport;
+use chateau::client::conn::transport::duplex::DuplexTransport;
+use hyperdriver::client::conn::protocol::Http1Builder as HttpConnectionBuilder;
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]
 async fn client() -> Result<(), BoxError> {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (tx, incoming) = hyperdriver::stream::duplex::pair();
+    let (tx, incoming) = chateau::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -27,9 +28,9 @@ async fn client() -> Result<(), BoxError> {
     let client = tower::ServiceBuilder::new()
         .layer(ConnectorLayer::new(
             DuplexTransport::new(1024, tx.clone()),
-            HttpConnectionBuilder::new(),
+            HttpConnectionBuilder::default(),
         ))
-        .service(RequestExecutor::new());
+        .service(ClientExecutorService::new());
 
     let req = http::Request::get("http://test/").body(Body::empty())?;
 
@@ -46,7 +47,7 @@ async fn client() -> Result<(), BoxError> {
 async fn connector() -> Result<(), BoxError> {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (tx, incoming) = hyperdriver::stream::duplex::pair();
+    let (tx, incoming) = chateau::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =
         hyperdriver::server::conn::Acceptor::from(incoming);
@@ -54,19 +55,15 @@ async fn connector() -> Result<(), BoxError> {
     let server = tokio::spawn(serve_one_h1(acceptor));
 
     let req = http::Request::get("http://test/").body(Body::empty())?;
-    let (parts, body) = req.into_parts();
 
-    let connector = hyperdriver::client::conn::Connector::new(
+    let connector = chateau::client::conn::Connector::new(
         DuplexTransport::new(1024, tx.clone()),
-        HttpConnectionBuilder::new(),
-        parts.clone(),
-        http::Version::HTTP_11.into(),
+        Http1Builder::default(),
+        req,
     );
 
-    let mut conn = connector.await?;
-    let resp = conn
-        .send_request(http::Request::from_parts(parts, body))
-        .await?;
+    let (mut conn, req) = connector.await?;
+    let resp = conn.send_request(req).await?;
 
     assert_eq!(resp.status(), StatusCode::OK);
     server.abort();

@@ -25,7 +25,7 @@
 //! The protocol is responsible for encoding and decoding request and response objects. Usually, this means
 //! HTTP/1.1 or HTTP/2, but it could be any protocol which sends and receives data over a connection.
 //!
-//! Protocols implement the [`Protocol`] trait, which is a service that accepts a [`ProtocolRequest`] and
+//! Protocols implement the [`Protocol`] trait, which is a service that accepts the IO stream and
 //! returns a connection. The connection is responsible for sending and receiving HTTP requests and responses.
 //!
 //! ## Connection
@@ -38,15 +38,20 @@
 //! and response objects, and for sending and receiving the data over the transport.
 
 pub mod connection;
-pub mod connector;
 pub mod dns;
 pub mod protocol;
 pub mod stream;
 pub mod transport;
 
-pub use self::connection::Connection;
-pub use self::connector::Connector;
-pub use self::protocol::{Protocol, ProtocolRequest};
+#[cfg(feature = "tls")]
+pub(in crate::client) mod tls;
+
 pub use self::stream::Stream;
-pub use self::transport::Transport;
-pub use self::transport::{TlsTransport, TransportExt as _};
+pub use chateau::client::conn::connector::{Connector, ConnectorLayer, ConnectorService};
+pub use chateau::client::conn::Connection;
+pub use chateau::client::conn::ConnectionError;
+pub use chateau::client::conn::Protocol;
+pub use chateau::client::conn::Transport;
+
+#[cfg(feature = "tls")]
+pub use self::tls::{AutoTlsTransport, HttpTlsTransport};

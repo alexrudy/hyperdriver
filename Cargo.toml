@@ -1,12 +1,12 @@
 [package]
 name = "hyperdriver"
-version = "0.11.2"
+version = "0.12.0-rc2"
 edition = "2021"
 description = "The missing middle for Hyper - Servers and Clients with ergonomic APIs"
 license = "MIT"
 repository = "https://github.com/alexrudy/hyperdriver"
 documentation = "https://docs.rs/hyperdriver"
-rust-version = "1.85"
+rust-version = "1.87"
 readme = "README.md"
 authors = ["Alex Rudy <opensource@alexrudy.net>"]
 categories = [
@@ -32,24 +32,21 @@ futures-util = "0.3"
 http = { version = "1" }
 http-body = { version = "1" }
 http-body-util = { version = "0.1" }
-hyper = { version = "1", features = ["full"] }
+hyper = { version = "1.7", features = ["full"] }
 ouroboros = { version = "0.18", optional = true }
 parking_lot = { version = "0.12", optional = true, features = ["arc_lock"] }
 pin-project = { version = "1" }
 rustls-native-certs = { version = "0.8.2", optional = true }
-socket2 = { version = "0.5", optional = true }
-thiserror = { version = "2", optional = true }
+thiserror = { version = "2" }
 tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
 
+[dependencies.chateau]
+version = "0.2"
+features = ["client", "server", "duplex"]
+
 [dependencies.rustls]
 version = ">=0.23.18"    # RUSTSEC-2024-0399 is fixed in 0.23.18
-features = ["tls12"]
-default-features = false
-optional = true
-
-[dependencies.tokio-rustls]
-version = "0.26"
 features = ["tls12"]
 default-features = false
 optional = true
@@ -79,6 +76,7 @@ static-assertions = { version = "1", package = "static_assertions" }
 tempfile = "3"
 tracing-opentelemetry = "0.31"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-test = { version = "0.2", features = [] }
 webpki-roots.version = "1.0"
 
 [features]
@@ -86,8 +84,6 @@ axum = ["dep:axum"]
 client = [
     "incoming",
     "dep:parking_lot",
-    "dep:socket2",
-    "dep:thiserror",
     "dep:tower-http",
     "tower/timeout",
 ]
@@ -95,12 +91,12 @@ default = ["client", "server", "stream"]
 docs = []
 incoming = []
 mocks = []
-server = ["incoming", "dep:ouroboros", "dep:thiserror"]
+server = ["incoming", "dep:ouroboros"]
 sni = []
 stream = []
-tls = ["dep:rustls-native-certs", "dep:rustls", "dep:tokio-rustls"]
-tls-aws-lc = ["rustls/aws_lc_rs", "tokio-rustls/aws_lc_rs"]
-tls-ring = ["rustls/ring", "tokio-rustls/ring"]
+tls = ["dep:rustls-native-certs", "dep:rustls", "chateau/tls"]
+tls-aws-lc = ["rustls/aws_lc_rs", "chateau/tls-aws-lc"]
+tls-ring = ["rustls/ring", "chateau/tls-ring"]
 
 [[example]]
 name = "google"
@@ -125,12 +121,12 @@ required-features = ["client", "tls", "tls-ring"]
 [[example]]
 name = "h2-server"
 path = "examples/server/h2.rs"
-required-features = ["server", "tls", "tls-ring"]
+required-features = ["server", "stream", "tls", "tls-ring"]
 
 [[example]]
 name = "single-threaded"
 path = "examples/single_threaded.rs"
-required-features = ["server", "client"]
+required-features = ["server", "client", "tls", "tls-ring"]
 
 
 [[test]]
@@ -191,7 +187,7 @@ required-features = ["server", "stream"]
 [[test]]
 name = "tls"
 path = "tests/tls.rs"
-required-features = ["client", "server", "tls", "tls-ring"]
+required-features = ["client", "server", "stream", "tls", "tls-ring"]
 
 [[test]]
 name = "upgrades"

@@ -11,18 +11,79 @@ use camino::Utf8Path;
 #[cfg(feature = "stream")]
 use camino::Utf8PathBuf;
 
-#[cfg(feature = "tls")]
-pub mod tls;
-#[cfg(feature = "tls")]
-pub use self::tls::HasTlsConnectionInfo;
-#[cfg(feature = "tls")]
-pub use self::tls::TlsConnectionInfo;
+use thiserror::Error;
+
 #[doc(hidden)]
-pub use crate::stream::duplex::DuplexAddr;
-#[cfg(feature = "stream")]
-use crate::stream::tcp::make_canonical;
+pub use chateau::stream::duplex::DuplexAddr;
+
 #[doc(hidden)]
-pub use crate::stream::unix::UnixAddr;
+pub use chateau::stream::unix::UnixAddr;
+
+pub use chateau::info::{ConnectionInfo, HasConnectionInfo, HasTlsConnectionInfo};
+
+/// The HTTP protocol to use for a connection.
+///
+/// This differs from the HTTP version in that it is constrained to the two flavors of HTTP
+/// protocol, HTTP/1.1 and HTTP/2. HTTP/3 is not yet supported. HTTP/0.9 and HTTP/1.0 are
+/// supported by HTTP/1.1.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub enum HttpProtocol {
+    /// Connect using HTTP/1.1
+    Http1,
+
+    /// Connect using HTTP/2
+    Http2,
+
+    /// Connect using HTTP/3
+    Http3,
+}
+
+impl fmt::Debug for HttpProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http1 => write!(f, "HTTP/1"),
+            Self::Http2 => write!(f, "HTTP/2"),
+            Self::Http3 => write!(f, "HTTP/3"),
+        }
+    }
+}
+
+impl HttpProtocol {
+    /// Does this protocol allow multiplexing?
+    pub fn multiplex(&self) -> bool {
+        matches!(self, Self::Http2)
+    }
+
+    /// HTTP Version
+    ///
+    /// Convert the protocol to an HTTP version.
+    ///
+    /// For HTTP/1.1, this returns `::http::Version::HTTP_11`.
+    /// For HTTP/2, this returns `::http::Version::HTTP_2`.
+    pub fn version(&self) -> ::http::Version {
+        match self {
+            Self::Http1 => ::http::Version::HTTP_11,
+            Self::Http2 => ::http::Version::HTTP_2,
+            Self::Http3 => ::http::Version::HTTP_3,
+        }
+    }
+}
+
+/// Error when trying to convert an HTTP Version string into a supported protocol identifier
+#[derive(Debug, Error)]
+#[error("Unsupported protocol: {0:?}")]
+pub struct UnsupportedProtocol(::http::Version);
+
+impl TryFrom<::http::Version> for HttpProtocol {
+    type Error = UnsupportedProtocol;
+    fn try_from(version: ::http::Version) -> Result<Self, Self::Error> {
+        match version {
+            ::http::Version::HTTP_11 | ::http::Version::HTTP_10 => Ok(Self::Http1),
+            ::http::Version::HTTP_2 => Ok(Self::Http2),
+            ver => Err(UnsupportedProtocol(ver)),
+        }
+    }
+}
 
 /// The transport protocol used for a connection.
 ///
@@ -138,7 +199,7 @@ impl BraidAddr {
     /// Returns the Unix socket address, if this is a Unix socket address.
     pub fn path(&self) -> Option<&Utf8Path> {
         match self {
-            Self::Unix(addr) => addr.path(),
+            Self::Unix(addr) => addr.path().and_then(Utf8Path::from_path),
             _ => None,
         }
     }
@@ -146,7 +207,7 @@ impl BraidAddr {
     /// Returns the canonical TCP address, if this is a TCP socket address.
     pub fn canonical(self) -> Self {
         match self {
-            Self::Tcp(addr) => Self::Tcp(make_canonical(addr)),
+            Self::Tcp(addr) => Self::Tcp(addr),
             _ => self,
         }
     }
@@ -155,7 +216,7 @@ impl BraidAddr {
 #[cfg(feature = "stream")]
 impl From<std::net::SocketAddr> for BraidAddr {
     fn from(addr: std::net::SocketAddr) -> Self {
-        Self::Tcp(make_canonical(addr))
+        Self::Tcp(addr)
     }
 }
 
@@ -197,7 +258,7 @@ impl From<(std::net::Ipv6Addr, u16)> for BraidAddr {
 #[cfg(feature = "stream")]
 impl From<Utf8PathBuf> for BraidAddr {
     fn from(addr: Utf8PathBuf) -> Self {
-        Self::Unix(UnixAddr::from_pathbuf(addr))
+        Self::Unix(UnixAddr::from_pathbuf(addr.into_std_path_buf()))
     }
 }
 
@@ -215,99 +276,6 @@ impl From<DuplexAddr> for BraidAddr {
     }
 }
 
-/// Information about a connection to a stream.
-#[cfg(feature = "stream")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectionInfo<Addr = BraidAddr> {
-    /// The local address for this connection.
-    pub local_addr: Addr,
-
-    /// The remote address for this connection.
-    pub remote_addr: Addr,
-}
-
-/// Information about a connection to a stream.
-#[cfg(not(feature = "stream"))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectionInfo<Addr> {
-    /// The local address for this connection.
-    pub local_addr: Addr,
-
-    /// The remote address for this connection.
-    pub remote_addr: Addr,
-}
-
-impl<Addr> Default for ConnectionInfo<Addr>
-where
-    Addr: Default,
-{
-    fn default() -> Self {
-        Self {
-            local_addr: Addr::default(),
-            remote_addr: Addr::default(),
-        }
-    }
-}
-
-#[cfg(feature = "stream")]
-impl ConnectionInfo<BraidAddr> {
-    pub(crate) fn duplex() -> Self {
-        ConnectionInfo {
-            local_addr: BraidAddr::Duplex,
-            remote_addr: BraidAddr::Duplex,
-        }
-    }
-}
-
-#[cfg(not(feature = "stream"))]
-impl ConnectionInfo<DuplexAddr> {
-    pub(crate) fn duplex() -> Self {
-        ConnectionInfo {
-            local_addr: DuplexAddr::new(),
-            remote_addr: DuplexAddr::new(),
-        }
-    }
-}
-
-impl<Addr> ConnectionInfo<Addr> {
-    /// The local address for this connection
-    pub fn local_addr(&self) -> &Addr {
-        &self.local_addr
-    }
-
-    /// The remote address for this connection
-    pub fn remote_addr(&self) -> &Addr {
-        &self.remote_addr
-    }
-
-    /// Map the addresses in this connection info to a new type.
-    pub fn map<T, F>(self, f: F) -> ConnectionInfo<T>
-    where
-        F: Fn(Addr) -> T,
-    {
-        ConnectionInfo {
-            local_addr: f(self.local_addr),
-            remote_addr: f(self.remote_addr),
-        }
-    }
-}
-
-/// Trait for types which can provide connection information.
-pub trait HasConnectionInfo {
-    /// The address type for this connection.
-    type Addr: fmt::Display + fmt::Debug + Send;
-
-    /// Get the connection information for this stream.
-    fn info(&self) -> ConnectionInfo<Self::Addr>;
-}
-
-#[cfg(not(feature = "tls"))]
-/// Trait for types which can provide TLS connection information, not populated without the `tls` feature.
-pub trait HasTlsConnectionInfo {}
-
-#[cfg(not(feature = "tls"))]
-impl<T> HasTlsConnectionInfo for T where T: HasConnectionInfo {}
-
 #[cfg(test)]
 mod tests {
 
@@ -320,8 +288,11 @@ mod tests {
     use tokio::net::UnixListener;
 
     #[cfg(feature = "client")]
-    use crate::stream::tcp::TcpStream;
-    use crate::stream::unix::UnixStream;
+    use chateau::stream::tcp::TcpStream;
+    use chateau::{
+        info::{ConnectionInfo, HasConnectionInfo},
+        stream::unix::UnixStream,
+    };
 
     use super::*;
 
@@ -365,19 +336,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "stream")]
-    fn test_make_canonical() {
-        assert_eq!(
-            make_canonical("[::1]:8080".parse().unwrap()),
-            "[::1]:8080".parse().unwrap()
-        );
-        assert_eq!(
-            make_canonical("[::ffff:192.0.2.128]:8080".parse().unwrap()),
-            "192.0.2.128:8080".parse().unwrap()
-        )
-    }
-
-    #[test]
     fn connection_info_default() {
         let info = ConnectionInfo::<DuplexAddr>::default();
 
@@ -388,7 +346,7 @@ mod tests {
     #[test]
     fn unix_addr() {
         let addr = UnixAddr::from_pathbuf("/tmp/foo.sock".into());
-        assert_eq!(addr.path(), Some("/tmp/foo.sock".into()));
+        assert_eq!(addr.path(), Some(std::path::Path::new("/tmp/foo.sock")));
 
         let addr = UnixAddr::unnamed();
         assert_eq!(addr.path(), None);
@@ -426,10 +384,7 @@ mod tests {
 
         let info: ConnectionInfo<UnixAddr> = conn.info();
 
-        assert_eq!(
-            info.remote_addr(),
-            &UnixAddr::from_pathbuf(path.try_into().unwrap())
-        );
+        assert_eq!(info.remote_addr(), &UnixAddr::from_pathbuf(path));
 
         drop(listener);
     }
@@ -437,7 +392,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "client")]
     async fn tcp_connection_info() {
-        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
             .await
             .unwrap();
         let addr = listener.local_addr().unwrap();

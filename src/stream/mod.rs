@@ -4,15 +4,8 @@
 
 #[cfg(feature = "stream")]
 mod core;
-pub mod duplex;
-pub mod tcp;
-#[cfg(feature = "tls")]
-pub mod tls;
-pub mod unix;
 
 #[cfg(feature = "stream")]
 pub use core::Braid;
-pub use tcp::TcpStream;
-#[cfg(feature = "tls")]
-pub use tls::TlsBraid;
-pub use unix::UnixStream;
+
+pub use chateau::stream::{duplex, tcp, unix};
