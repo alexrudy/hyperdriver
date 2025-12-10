@@ -43,8 +43,8 @@ type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
 /// A wrapper for different internal body types which implements [http_body::Body](http_body::Body)
 /// It is always backed by [`Bytes`] for simplicity.
 ///
-/// Bodies can be created from [`Bytes`](bytes::Bytes), [`String`](std::string::String),
-/// or [`&'static str`](str) using [`From`](std::convert::From) implementations.
+/// Bodies can be created from [`Bytes`](bytes::Bytes), [`String`],
+/// or [`&'static str`](str) using [`From`] implementations.
 ///
 /// An empty body can be created with [Body::empty](Body::empty).
 #[derive(Debug)]
