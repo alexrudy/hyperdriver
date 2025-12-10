@@ -6,6 +6,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0-rc2.1](https://github.com/alexrudy/hyperdriver/compare/v0.12.0-rc2...v0.12.0-rc2.1) - 2025-12-10
+
+### <!-- 0 -->⛰️ Features
+
+- Transport trait is dyn-compatible
+- Add generic body type to PoolableConnection
+- Connector Service
+- Expose the client connector publicly.
+- *(client)* Flexible APIs to leverage the TCP transport
+- client Transport trait now accepts http::request::Parts
+- Allow client services to support a custom body type
+- Client connection upgrade support
+- Make connection pool generic over the key type
+- Client pool can delay drop for checkout
+- Client now uses Body type instead of Incoming for response bodies
+- expose tcp and unix listeners in stream module
+- Improved span tracing
+- improved tracing for checkouts
+- refactor connector
+- Make the happy eyeballs algorithm default timeout 30s
+- [**breaking**] remove `TransportStream` type.
+- [**breaking**] remove PID file module, publish as separate crate
+- feat!(discovery): remove discovery support
+- *(body)* [**breaking**] Remove the TryCloneRequest trait from the body module.
+- *(client)* [**breaking**] Remove support for retries from the client
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- upgrades test doesn’t require TLS
+- single threaded example pool key
+- make connection trait object safe
+- AcceptorCore and Braid should be opaque
+- Mark errors as non_exhaustive
+- Ensure that feature combinations compile in —test mode
+- Ensure that services polled to readiness are used directly
+
+### <!-- 2 -->🚜 Refactor
+
+- support chateau backend
+- consolidate BoxError and BoxFuture into common type aliases
+- regularize imports for http:: crate and Body
+
+### <!-- 3 -->📚 Documentation
+
+- Improved main module documentation
+
+### Discovery
+
+- ergonomics around name
+
+### DuplexClient
+
+- :new() -> pair()
+
+### Fixup
+
+- server feature, with_tls doc link and DuplexAddr
+
+### Platter
+
+- A basic hyper-v1 server framework
+
+### WIP
+
+- Adjusting builder trait bounds
+- Before Claude
+- Before Claude
+
+### Bugfix
+
+- TCP address resolver must be clone and replaced in the transport service
+- delayed drop could duplicate connections
+
+### Chrore
+
+- refactor delayed checkout state management
+
+### Deps
+
+- Upgrade opentelemetry to 0.27 and tracing-openetelmetry to 0.28
+- Upgrade tower to 0.5-series
+
 ## [0.9.0](https://github.com/alexrudy/hyperdriver/compare/v0.8.5...v0.9.0) - 2025-03-18
 
 ### <!-- 0 -->⛰️ Features
