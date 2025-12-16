@@ -24,6 +24,7 @@ use tower::ServiceExt;
 use self::conn::protocol::auto;
 use crate::BoxError;
 use chateau::client::conn::transport::tcp::TcpTransport;
+pub use chateau::client::pool;
 pub use chateau::client::ConnectionPoolLayer;
 pub use chateau::client::ConnectionPoolService;
 use chateau::services::SharedService;

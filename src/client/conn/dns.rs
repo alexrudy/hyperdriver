@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
-use chateau::client::conn::dns::SocketAddrs;
+pub use chateau::client::conn::dns::*;
 use futures_util::Future;
 use pin_project::{pin_project, pinned_drop};
 use tokio::task::JoinHandle;
