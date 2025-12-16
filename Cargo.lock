@@ -709,7 +709,6 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "ouroboros",
- "parking_lot",
  "pem-rfc7468",
  "pin-project",
  "rustls",

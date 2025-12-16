@@ -8,7 +8,10 @@
 
 use std::future::Future;
 
-pub use chateau::client::conn::transport::unix::{UnixConnectionError, UnixRequest};
+pub use chateau::client::conn::transport::unix::{
+    StaticAddressUnixTransport, UnixConnectionError, UnixRequest, UnixTransport,
+    UnixTransportConfig,
+};
 use chateau::stream::unix::{UnixAddr, UnixStream};
 
 use crate::BoxFuture;

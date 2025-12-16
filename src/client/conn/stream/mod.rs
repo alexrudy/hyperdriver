@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 #[cfg(feature = "tls")]
-use chateau::client::conn::stream::tls::TlsStream;
+pub use chateau::client::conn::stream::tls;
+
 #[cfg(feature = "stream")]
 use chateau::stream::{tcp::TcpStream, unix::UnixStream};
 use pin_project::pin_project;
@@ -46,7 +47,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: OptTlsStream<TlsStream<IO>, IO>,
+    inner: OptTlsStream<tls::TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -66,7 +67,7 @@ where
 {
     #[cfg(feature = "tls")]
     #[pin]
-    inner: OptTlsStream<TlsStream<IO>, IO>,
+    inner: OptTlsStream<tls::TlsStream<IO>, IO>,
 
     #[cfg(not(feature = "tls"))]
     #[pin]
@@ -140,7 +141,7 @@ where
         };
 
         Stream {
-            inner: OptTlsStream::Tls(TlsStream::new(core, domain, config)),
+            inner: OptTlsStream::Tls(tls::TlsStream::new(core, domain, config)),
         }
     }
 }
@@ -240,12 +241,12 @@ impl From<UnixStream> for Stream {
 }
 
 #[cfg(feature = "tls")]
-impl<IO> From<OptTlsStream<TlsStream<IO>, IO>> for Stream<IO>
+impl<IO> From<OptTlsStream<tls::TlsStream<IO>, IO>> for Stream<IO>
 where
     IO: HasConnectionInfo,
     IO::Addr: Unpin + Clone,
 {
-    fn from(stream: OptTlsStream<TlsStream<IO>, IO>) -> Self {
+    fn from(stream: OptTlsStream<tls::TlsStream<IO>, IO>) -> Self {
         Stream { inner: stream }
     }
 }
