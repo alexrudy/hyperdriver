@@ -1,7 +1,5 @@
 //! Core stream type for braid providing [AsyncRead] and [AsyncWrite].
 
-use std::pin::pin;
-
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
