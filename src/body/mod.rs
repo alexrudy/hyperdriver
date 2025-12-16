@@ -25,7 +25,6 @@ For reading incoming requests, defer to [hyper::body::Incoming].
 )]
 
 use std::fmt;
-use std::pin::pin;
 use std::pin::Pin;
 
 use bytes::Bytes;
