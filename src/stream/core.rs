@@ -1,5 +1,6 @@
 //! Core stream type for braid providing [AsyncRead] and [AsyncWrite].
 
+use chateau::client::pool::PoolableStream;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -50,14 +51,29 @@ impl HasConnectionInfo for Braid {
 }
 
 macro_rules! dispatch_core {
-    ($driver:ident.$method:ident($($args:expr),+)) => {
+    (pin $driver:ident.$method:ident($($args:expr),*)) => {
 
         match $driver.project().inner.project() {
-            BraidCoreProjection::Tcp(stream) => stream.$method($($args),+),
-            BraidCoreProjection::Duplex(stream) => stream.$method($($args),+),
-            BraidCoreProjection::Unix(stream) => stream.$method($($args),+),
+            BraidCoreProjection::Tcp(stream) => stream.$method($($args),*),
+            BraidCoreProjection::Duplex(stream) => stream.$method($($args),*),
+            BraidCoreProjection::Unix(stream) => stream.$method($($args),*),
         }
     };
+
+    ($driver:ident.$method:ident($($args:expr),*)) => {
+
+        match &$driver.inner {
+            BraidCore::Tcp(stream) => stream.$method($($args),*),
+            BraidCore::Duplex(stream) => stream.$method($($args),*),
+            BraidCore::Unix(stream) => stream.$method($($args),*),
+        }
+    };
+}
+
+impl PoolableStream for Braid {
+    fn can_share(&self) -> bool {
+        dispatch_core!(self.can_share())
+    }
 }
 
 impl AsyncRead for Braid {
@@ -66,7 +82,7 @@ impl AsyncRead for Braid {
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        dispatch_core!(self.poll_read(cx, buf))
+        dispatch_core!(pin self.poll_read(cx, buf))
     }
 }
 
@@ -76,21 +92,21 @@ impl AsyncWrite for Braid {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        dispatch_core!(self.poll_write(cx, buf))
+        dispatch_core!(pin self.poll_write(cx, buf))
     }
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        dispatch_core!(self.poll_flush(cx))
+        dispatch_core!(pin self.poll_flush(cx))
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        dispatch_core!(self.poll_shutdown(cx))
+        dispatch_core!(pin self.poll_shutdown(cx))
     }
 }
 
