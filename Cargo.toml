@@ -35,7 +35,7 @@ http-body-util = { version = "0.1" }
 hyper = { version = "1.7", features = ["full"] }
 ouroboros = { version = "0.18", optional = true }
 pin-project = { version = "1" }
-rustls-native-certs = { version = "0.8.2", optional = true }
+rustls-native-certs = { version = "0.8.3", optional = true }
 thiserror = { version = "2" }
 tokio = { version = "1", features = ["full"] }
 tracing = { version = "^0.1" }
