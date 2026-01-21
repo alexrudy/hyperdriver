@@ -197,9 +197,8 @@ where
 
         if let Some(info) = self.info.take() {
             tracing::trace!(
-                "Inserting connection info {}<{}>",
+                "Inserting connection info {}",
                 std::any::type_name_of_val(&info),
-                std::any::type_name_of_val(info.local_addr())
             );
             req.extensions_mut().insert(info);
         } else {

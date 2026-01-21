@@ -54,6 +54,7 @@ where
             ConnectionError::Unavailable => {
                 Error::Connection("pool closed, no connection can be made".into())
             }
+            ConnectionError::Key(error) => Error::Connection(error.into()),
             _ => Error::Connection("Unknown error occured".into()),
         }
     }

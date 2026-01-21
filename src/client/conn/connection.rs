@@ -119,12 +119,6 @@ where
     }
 }
 
-impl<B> Drop for Http2Connection<B> {
-    fn drop(&mut self) {
-        tracing::debug!("Dropped HTTP/2 sender");
-    }
-}
-
 impl<B> HttpConnectionInfo<B> for Http2Connection<B>
 where
     B: HttpBody + Send + 'static,
@@ -153,6 +147,7 @@ where
 
 /// Opaque future for connections
 mod future {
+    use std::error::Error;
     use std::fmt;
     use std::future::Future;
     use std::pin::Pin;
@@ -194,7 +189,18 @@ mod future {
             mut self: Pin<&mut Self>,
             cx: &mut std::task::Context<'_>,
         ) -> std::task::Poll<Self::Output> {
-            self.inner.as_mut().poll(cx)
+            self.inner.as_mut().poll(cx).map(|r| {
+                r.inspect_err(|error| {
+                    tracing::debug!("hyper::Error for connection: {error:#}");
+
+                    let mut source = error.source();
+
+                    while let Some(error) = source {
+                        tracing::debug!("Caused by: {}", error);
+                        source = error.source();
+                    }
+                })
+            })
         }
     }
 }
