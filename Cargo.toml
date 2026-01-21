@@ -62,7 +62,7 @@ default-features = false
 optional = true
 
 [dev-dependencies]
-clap = { version = "4.5.53" }
+clap = { version = "4.5.54" }
 color-eyre = "0.6"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
