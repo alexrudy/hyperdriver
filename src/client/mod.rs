@@ -244,9 +244,10 @@ impl<B> Key<http::Request<B>> for UriKey {
         let uri = request.uri().clone();
         let parts = uri.into_parts();
         let authority = parts.authority;
-        let scheme = parts
-            .scheme
-            .ok_or_else(|| KeyError::new(format!("Missing scheme in URI: {}", request.uri())))?;
+        let scheme = parts.scheme.unwrap_or_else(|| match request.version() {
+            http::Version::HTTP_2 | http::Version::HTTP_3 => http::uri::Scheme::HTTPS,
+            _ => http::uri::Scheme::HTTP,
+        });
         Ok::<_, KeyError>(Self(scheme, authority))
     }
 }
