@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3](https://github.com/alexrudy/hyperdriver/compare/v0.12.2...v0.12.3) - 2026-01-24
+
+### Bugfix
+
+- *(client)* Ensure that the braid stream can be pooled in Chateau's connection pools.
+
 ## [0.9.0](https://github.com/alexrudy/hyperdriver/compare/v0.8.5...v0.9.0) - 2025-03-18
 
 ### <!-- 0 -->⛰️ Features
