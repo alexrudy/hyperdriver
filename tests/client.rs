@@ -1,13 +1,13 @@
 //! Test hyperdriver client with hyper server implementation
 use futures_util::StreamExt;
 use http::StatusCode;
+use hyperdriver::Body;
 use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::rt::TokioExecutor;
-use hyperdriver::Body;
 use std::pin::pin;
 
 use chateau::client::conn::transport::duplex::DuplexTransport;
-use hyperdriver::client::conn::protocol::{auto::AlpnHttpConnectionBuilder, Http2Builder};
+use hyperdriver::client::conn::protocol::{Http2Builder, auto::AlpnHttpConnectionBuilder};
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 #[tokio::test]

@@ -213,7 +213,7 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use tower::{make::Shared, ServiceBuilder};
+    use tower::{ServiceBuilder, make::Shared};
 
     use crate::{info::DuplexAddr, server::conn::AcceptExt as _};
 

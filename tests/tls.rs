@@ -4,9 +4,9 @@ use std::future::Future;
 use chateau::{server::GracefulServerExecutor, services::MakeServiceRef};
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
+use hyperdriver::Body;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::server::conn::Accept;
-use hyperdriver::Body;
 use rustls::ServerConfig;
 
 use hyperdriver::server::{Protocol, Server};
@@ -88,9 +88,9 @@ where
 #[tokio::test]
 async fn tls_echo_h1() {
     use chateau::client::conn::transport::duplex::DuplexTransport;
+    use hyperdriver::Client;
     use hyperdriver::client::conn::protocol::Http1Builder;
     use hyperdriver::server::ServerProtocolExt as _;
-    use hyperdriver::Client;
 
     tls_install_default();
     let _ = tracing_subscriber::fmt::try_init();
@@ -143,10 +143,10 @@ async fn tls_echo_h1() {
 #[tokio::test]
 async fn tls_echo_h2() {
     use chateau::client::conn::transport::duplex::DuplexTransport;
-    use hyperdriver::client::conn::protocol::Http2Builder;
-    use hyperdriver::client::conn::HttpTlsTransport;
-    use hyperdriver::server::ServerProtocolExt as _;
     use hyperdriver::Client;
+    use hyperdriver::client::conn::HttpTlsTransport;
+    use hyperdriver::client::conn::protocol::Http2Builder;
+    use hyperdriver::server::ServerProtocolExt as _;
 
     tls_install_default();
     let _ = tracing_subscriber::fmt::try_init();

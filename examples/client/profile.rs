@@ -6,22 +6,22 @@
 
 use std::time::Duration;
 
-use clap::{arg, value_parser, ArgMatches};
-use futures_util::{stream::FuturesUnordered, TryStreamExt};
+use clap::{ArgMatches, arg, value_parser};
+use futures_util::{TryStreamExt, stream::FuturesUnordered};
 use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt as _;
-use hyperdriver::{client::Client, Body};
-use opentelemetry::trace::TracerProvider as _;
+use hyperdriver::{Body, client::Client};
 use opentelemetry::KeyValue;
+use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
-use opentelemetry_sdk::trace::Tracer;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::Tracer;
 use opentelemetry_semantic_conventions::{
-    resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME, SERVICE_VERSION},
     SCHEMA_URL,
+    resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME, SERVICE_VERSION},
 };
 use tokio::io::AsyncWriteExt as _;
-use tracing::{instrument, Instrument, Level};
+use tracing::{Instrument, Level, instrument};
 use tracing_subscriber::{filter::Targets, fmt::format::FmtSpan, prelude::*};
 
 const NAME: &str = "profile";

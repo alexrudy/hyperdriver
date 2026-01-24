@@ -16,9 +16,9 @@ use crate::service::HttpConnectionInfo;
 use chateau::client::conn::Connection;
 use chateau::client::pool::PoolableConnection;
 
+use crate::BoxError;
 use crate::bridge::io::TokioIo;
 use crate::bridge::rt::TokioExecutor;
-use crate::BoxError;
 use chateau::info::HasConnectionInfo;
 use chateau::info::HasTlsConnectionInfo;
 
@@ -128,8 +128,8 @@ where
     /// so this shortcut isn't harmful.
     fn is_open(&self) -> bool {
         match &self.inner {
-            InnerConnection::H2(ref conn) => conn.is_ready(),
-            InnerConnection::H1(ref conn) => conn.is_ready(),
+            InnerConnection::H2(conn) => conn.is_ready(),
+            InnerConnection::H1(conn) => conn.is_ready(),
         }
     }
 
@@ -346,9 +346,9 @@ mod future {
     use http_body::Body;
     use tokio::io::{AsyncRead, AsyncWrite};
 
-    use crate::client::conn::protocol::HttpProtocol;
     use crate::BoxError;
     use crate::DebugLiteral;
+    use crate::client::conn::protocol::HttpProtocol;
     use chateau::info::{HasConnectionInfo, HasTlsConnectionInfo};
 
     use super::AlpnHttpConnectionBuilder;
@@ -418,16 +418,16 @@ mod tests {
 
     use chateau::client::conn::connection::ConnectionExt as _;
     use chateau::stream::duplex::DuplexStream;
-    use futures_util::{stream::StreamExt as _, TryFutureExt};
+    use futures_util::{TryFutureExt, stream::StreamExt as _};
     use rustls::pki_types::ServerName;
     use static_assertions::assert_impl_all;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
 
-    use crate::client::conn::stream::mock::MockTls;
-    use crate::client::conn::Protocol as _;
-    use crate::client::conn::{protocol::HttpProtocol, Stream};
     use crate::client::Error;
+    use crate::client::conn::Protocol as _;
+    use crate::client::conn::stream::mock::MockTls;
+    use crate::client::conn::{Stream, protocol::HttpProtocol};
 
     use super::*;
 

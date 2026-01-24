@@ -5,8 +5,8 @@
 //! [`hyper::client::conn::http2::SendRequest`], allowing the native hyper types to be used
 //! for [`Protocol`](super::Protocol).
 
-pub use chateau::client::conn::connection::WhenReady;
 pub use chateau::client::conn::Connection;
+pub use chateau::client::conn::connection::WhenReady;
 pub use chateau::client::pool::PoolableConnection;
 use http_body::Body as HttpBody;
 

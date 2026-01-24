@@ -1,23 +1,23 @@
 #[cfg(feature = "stream")]
 use std::{io, net::SocketAddr};
 
-#[cfg(feature = "tls")]
-use chateau::server::conn::tls::info::TlsConnectionInfoService;
 use chateau::server::NeedsAcceptor;
 use chateau::server::NeedsProtocol;
+#[cfg(feature = "tls")]
+use chateau::server::conn::tls::info::TlsConnectionInfoService;
 use chateau::services::MakeServiceRef;
 use hyper::server::conn::{http1, http2};
 
 use crate::bridge::rt::TokioExecutor;
 
-use super::conn::auto;
+use super::Accept;
+use super::Server;
 #[cfg(feature = "stream")]
 use super::conn::Acceptor;
 use super::conn::Http1Builder;
 use super::conn::Http2Builder;
 use super::conn::MakeServiceConnectionInfoService;
-use super::Accept;
-use super::Server;
+use super::conn::auto;
 
 /// Extension trait to allow additional methods for building servers from common listeners.
 #[allow(async_fn_in_trait)]
@@ -39,7 +39,7 @@ pub trait ServerAcceptorExt<P, S, B, E> {
     #[cfg(feature = "stream")]
     /// Use the provided listener as the acceptor.
     async fn with_listener(self, listener: tokio::net::TcpListener)
-        -> Server<Acceptor, P, S, B, E>;
+    -> Server<Acceptor, P, S, B, E>;
 }
 
 impl<P, S, B, E> ServerAcceptorExt<P, S, B, E> for Server<NeedsAcceptor, P, S, B, E> {

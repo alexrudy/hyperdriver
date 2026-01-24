@@ -54,7 +54,7 @@ mod tests {
 
     use std::{
         convert::Infallible,
-        future::{ready, IntoFuture},
+        future::{IntoFuture, ready},
     };
 
     use super::{builder::ServerProtocolExt as _, *};

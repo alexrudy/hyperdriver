@@ -11,33 +11,33 @@ use http_body::Body;
 use rustls::ClientConfig;
 #[cfg(feature = "tls")]
 use tokio::io::{AsyncRead, AsyncWrite};
-use tower::layer::util::{Identity, Stack};
 use tower::ServiceBuilder;
-use tower_http::follow_redirect::policy;
+use tower::layer::util::{Identity, Stack};
 use tower_http::follow_redirect::FollowRedirectLayer;
+use tower_http::follow_redirect::policy;
 use tower_http::set_header::SetRequestHeaderLayer;
 
 use super::conn::dns::GaiResolver;
 use super::conn::protocol::auto;
+use crate::BoxError;
+use crate::client::UriKey;
 #[cfg(feature = "tls")]
-use crate::client::conn::{tls::future::TransportBraidFuture, AutoTlsTransport};
+use crate::client::conn::{AutoTlsTransport, tls::future::TransportBraidFuture};
 #[cfg(feature = "tls")]
 use crate::client::default_tls_config;
-use crate::client::UriKey;
-use crate::client::{conn::protocol::auto::AlpnHttpConnectionBuilder, Client};
+use crate::client::{Client, conn::protocol::auto::AlpnHttpConnectionBuilder};
 use crate::service::IncomingResponseLayer;
 use crate::service::OptionLayerExt;
 use crate::service::TimeoutLayer;
 use crate::service::{Http1ChecksLayer, Http2ChecksLayer, HttpConnectionInfo, SetHostHeaderLayer};
-use crate::BoxError;
-use chateau::client::conn::transport::tcp::{TcpTransport, TcpTransportConfig};
-#[cfg(feature = "tls")]
-use chateau::client::conn::transport::TlsConnectionError;
+use chateau::client::ConnectionPoolLayer;
 use chateau::client::conn::Connection;
 use chateau::client::conn::Protocol;
 use chateau::client::conn::Transport;
+#[cfg(feature = "tls")]
+use chateau::client::conn::transport::TlsConnectionError;
+use chateau::client::conn::transport::tcp::{TcpTransport, TcpTransportConfig};
 use chateau::client::pool::{PoolableConnection, PoolableStream};
-use chateau::client::ConnectionPoolLayer;
 use chateau::info::HasConnectionInfo;
 use chateau::services::SharedService;
 
@@ -577,11 +577,11 @@ where
     T: Transport<http::Request<crate::Body>> + Clone + Send + Sync + 'static,
     T::Error: Into<BoxError>,
     AutoTlsTransport<T>: Transport<
-        http::Request<crate::Body>,
-        Error = TlsConnectionError<<T as Transport<http::Request<crate::Body>>>::Error>,
-        Future = TransportBraidFuture<T, http::Request<crate::Body>>,
-        IO = Stream<<T as Transport<http::Request<crate::Body>>>::IO>,
-    >,
+            http::Request<crate::Body>,
+            Error = TlsConnectionError<<T as Transport<http::Request<crate::Body>>>::Error>,
+            Future = TransportBraidFuture<T, http::Request<crate::Body>>,
+            IO = Stream<<T as Transport<http::Request<crate::Body>>>::IO>,
+        >,
     <T as Transport<http::Request<crate::Body>>>::IO:
         PoolableStream + HasConnectionInfo + AsyncRead + AsyncWrite + Unpin,
     <<T as Transport<http::Request<crate::Body>>>::IO as HasConnectionInfo>::Addr:
@@ -609,8 +609,8 @@ where
     >>::Connection as Connection<http::Request<crate::Body>>>::Error: Into<BoxError>,
     RP: policy::Policy<crate::Body, super::Error> + Clone + Send + Sync + 'static,
     S: tower::Layer<
-        SharedService<http::Request<crate::Body>, http::Response<crate::Body>, super::Error>,
-    >,
+            SharedService<http::Request<crate::Body>, http::Response<crate::Body>, super::Error>,
+        >,
     S::Service: tower::Service<
             http::Request<crate::Body>,
             Response = http::Response<crate::Body>,

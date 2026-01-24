@@ -28,8 +28,8 @@ use std::fmt;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
+use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{Empty, Full};
 
 #[cfg(feature = "incoming")]

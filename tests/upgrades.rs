@@ -11,8 +11,8 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-async fn server_for_client_upgrade(
-) -> Result<DuplexTransport, Box<dyn std::error::Error + Send + Sync>> {
+async fn server_for_client_upgrade()
+-> Result<DuplexTransport, Box<dyn std::error::Error + Send + Sync>> {
     let (tx, incoming) = hyperdriver::stream::duplex::pair();
 
     let acceptor: hyperdriver::server::conn::Acceptor =

@@ -5,8 +5,8 @@ use std::task::{Context, Poll};
 use http::{Request, Response};
 use http_body::Body as HttpBody;
 
-pub use crate::info::HttpProtocol;
 use crate::BoxError;
+pub use crate::info::HttpProtocol;
 use chateau::client::conn::Connection;
 use chateau::client::pool::{PoolableConnection, Pooled};
 
@@ -75,10 +75,10 @@ pub(super) mod http1 {
     use std::task::{Context, Poll};
 
     use ::http;
-    use http::uri::Scheme;
     use http::Uri;
-    use tower::util::MapRequest;
+    use http::uri::Scheme;
     use tower::ServiceExt;
+    use tower::util::MapRequest;
 
     use crate::service::http::HttpProtocol;
 
@@ -413,7 +413,7 @@ pub(super) mod http2 {
             fmt,
             future::Future,
             pin::Pin,
-            task::{ready, Context, Poll},
+            task::{Context, Poll, ready},
         };
 
         use super::HttpRequestError;

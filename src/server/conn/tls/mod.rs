@@ -14,16 +14,16 @@ mod tests {
     use std::convert::Infallible;
 
     use chateau::stream::tls::TlsHandshakeStream as _;
-    use tower::make::Shared;
     use tower::Service;
+    use tower::make::Shared;
 
     use tracing::Instrument as _;
 
     use crate::client::conn::HttpTlsTransport;
     use crate::fixtures;
 
-    use chateau::client::conn::transport::duplex::DuplexTransport;
     use chateau::client::conn::Transport as _;
+    use chateau::client::conn::transport::duplex::DuplexTransport;
 
     use chateau::server::conn::AcceptExt as _;
 

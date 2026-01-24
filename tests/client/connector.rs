@@ -4,8 +4,8 @@ use futures_util::StreamExt;
 use http::StatusCode;
 use hyperdriver::{bridge::io::TokioIo, client::conn::protocol::Http1Builder};
 
-use chateau::client::conn::service::ClientExecutorService;
 use chateau::client::conn::Connection as _;
+use chateau::client::conn::service::ClientExecutorService;
 use hyperdriver::Body;
 use std::pin::pin;
 use tower::ServiceExt;

@@ -3,15 +3,15 @@
 //! This client can send HTTP requests to a server and print the response.
 //! It provides a simple command-line interface, use `--help` to see the options.
 
-use clap::{arg, value_parser, ArgAction};
+use clap::{ArgAction, arg, value_parser};
 use http::Uri;
 use http_body_util::BodyExt as _;
 use hyperdriver::client::Client;
 use tokio::io::AsyncWriteExt;
 use tracing::Level;
 use tracing_subscriber::{
-    filter::Targets, fmt::format::FmtSpan, layer::SubscriberExt as _, util::SubscriberInitExt as _,
-    Layer as _,
+    Layer as _, filter::Targets, fmt::format::FmtSpan, layer::SubscriberExt as _,
+    util::SubscriberInitExt as _,
 };
 
 #[tokio::main]

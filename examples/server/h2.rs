@@ -8,10 +8,10 @@
 use std::convert::Infallible;
 use std::net::{SocketAddr, SocketAddrV4};
 
+use hyperdriver::Body;
 use hyperdriver::server::ServerAcceptorExt;
 use hyperdriver::server::ServerConnectionInfoExt;
 use hyperdriver::server::ServerProtocolExt;
-use hyperdriver::Body;
 use tracing_subscriber::EnvFilter;
 
 fn tls_config(domain: &str) -> rustls::ServerConfig {

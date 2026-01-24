@@ -4,10 +4,10 @@
 #[cfg(feature = "tls")]
 use std::sync::Arc;
 
+use chateau::client::conn::Transport;
 #[cfg(feature = "tls")]
 use chateau::client::conn::transport::TlsConnectionError;
 use chateau::client::conn::transport::TlsRequest;
-use chateau::client::conn::Transport;
 #[cfg(feature = "tls")]
 use rustls::client::ClientConfig;
 use tokio::io::AsyncRead;
@@ -201,7 +201,7 @@ where
             InnerBraid::Plain(inner) => {
                 inner.poll_ready(cx).map_err(TlsConnectionError::Connection)
             }
-            InnerBraid::Tls(ref mut inner) => tower::Service::poll_ready(inner, cx),
+            InnerBraid::Tls(inner) => tower::Service::poll_ready(inner, cx),
         }
 
         #[cfg(not(feature = "tls"))]

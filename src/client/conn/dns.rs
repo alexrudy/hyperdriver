@@ -2,7 +2,7 @@
 
 use std::net::{IpAddr, ToSocketAddrs};
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::{fmt, io};
 
 pub use chateau::client::conn::dns::*;
@@ -69,7 +69,7 @@ fn get_host_and_port(uri: &http::Uri) -> Result<(Box<str>, u16), io::Error> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "missing port in URI for non-http(s) scheme",
-                ))
+                ));
             }
         },
     };

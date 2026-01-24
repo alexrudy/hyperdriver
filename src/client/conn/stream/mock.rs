@@ -4,8 +4,8 @@
 //! places where a connection is none-the-less required.
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 use tracing::trace;
 
