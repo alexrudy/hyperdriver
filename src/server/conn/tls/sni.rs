@@ -3,11 +3,11 @@
 use std::future::ready;
 
 use futures_util::{
-    future::{Either, MapErr},
     TryFutureExt,
+    future::{Either, MapErr},
 };
 use http::uri::Authority;
-use hyper::{header, Request, Response};
+use hyper::{Request, Response, header};
 use thiserror::Error;
 use tower::{Layer, Service};
 

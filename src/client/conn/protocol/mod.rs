@@ -12,8 +12,8 @@ use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
-use crate::bridge::io::TokioIo;
 use crate::BoxError;
+use crate::bridge::io::TokioIo;
 use chateau::info::HasConnectionInfo;
 
 pub mod auto;
@@ -273,14 +273,14 @@ mod tests {
 
     use chateau::client::conn::connection::ConnectionExt as _;
     use chateau::client::pool::PoolableConnection;
-    use futures_util::{stream::StreamExt as _, TryFutureExt};
+    use futures_util::{TryFutureExt, stream::StreamExt as _};
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tracing_test::traced_test;
 
     use crate::bridge::rt::TokioExecutor;
-    use crate::client::conn::Protocol as _;
-    use crate::client::conn::{protocol::HttpProtocol, Stream};
     use crate::client::Error;
+    use crate::client::conn::Protocol as _;
+    use crate::client::conn::{Stream, protocol::HttpProtocol};
     use crate::service::HttpConnectionInfo as _;
 
     use super::*;

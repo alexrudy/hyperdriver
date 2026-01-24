@@ -18,15 +18,15 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use chateau::client::pool::{Key, KeyError};
-use tower::util::Oneshot;
 use tower::ServiceExt;
+use tower::util::Oneshot;
 
 use self::conn::protocol::auto;
 use crate::BoxError;
-use chateau::client::conn::transport::tcp::TcpTransport;
-pub use chateau::client::pool;
 pub use chateau::client::ConnectionPoolLayer;
 pub use chateau::client::ConnectionPoolService;
+use chateau::client::conn::transport::tcp::TcpTransport;
+pub use chateau::client::pool;
 use chateau::services::SharedService;
 
 mod builder;

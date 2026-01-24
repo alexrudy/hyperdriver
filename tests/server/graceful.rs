@@ -1,14 +1,14 @@
 //! Test server graceful shutdown
 
 use std::future::Future;
-use std::pin::{pin, Pin};
+use std::pin::{Pin, pin};
 use std::task::Context;
 use std::task::Poll;
 
 use chateau::stream::duplex::{self, DuplexClient};
 use futures_util::task::noop_waker;
-use hyperdriver::server::conn::Acceptor;
 use hyperdriver::server::ServerProtocolExt;
+use hyperdriver::server::conn::Acceptor;
 use hyperdriver::{Body, Server};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

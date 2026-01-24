@@ -12,8 +12,8 @@ use std::time::Instant;
 use std::{fmt, future::Future, marker::PhantomData, time::Duration};
 
 use crate::BoxFuture;
-use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use tokio::time::error::Elapsed;
 use tracing::trace;
 
@@ -195,7 +195,7 @@ where
                         .error
                         .take()
                         .map(Err)
-                        .unwrap_or(Err(HappyEyeballsError::NoProgress))
+                        .unwrap_or(Err(HappyEyeballsError::NoProgress));
                 }
             }
         }
@@ -243,9 +243,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::future::Pending;
     use std::future::pending;
     use std::future::ready;
-    use std::future::Pending;
 
     use super::*;
 

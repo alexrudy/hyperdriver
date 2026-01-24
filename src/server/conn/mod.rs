@@ -20,12 +20,12 @@ use thiserror::Error;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
-use crate::server::Protocol;
 use crate::BoxError;
+use crate::server::Protocol;
 pub use acceptor::Acceptor;
 #[cfg(feature = "stream")]
 pub use acceptor::AcceptorCore;
-pub use chateau::server::{conn::AcceptExt, conn::AcceptOne, Accept};
+pub use chateau::server::{Accept, conn::AcceptExt, conn::AcceptOne};
 pub use info::{
     ConnectionWithInfo, MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService,
 };

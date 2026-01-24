@@ -1,12 +1,12 @@
 //! Mock protocol implementation for testing purposes.
 
 use std::convert::Infallible;
-use std::future::{ready, Ready};
+use std::future::{Ready, ready};
 
 use thiserror::Error;
 
-use crate::client::conn::stream::mock::{MockStream, StreamID};
 use crate::client::conn::Connection;
+use crate::client::conn::stream::mock::{MockStream, StreamID};
 use chateau::client::pool::{PoolableConnection, PoolableStream};
 
 /// A minimal protocol sender for testing purposes.

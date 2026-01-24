@@ -1,8 +1,8 @@
 //! Middleware for setting the Host header of a request.
 use http;
-use http::uri::Port;
 use http::HeaderValue;
 use http::Uri;
+use http::uri::Port;
 
 use crate::service::http::HttpProtocol;
 

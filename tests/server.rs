@@ -10,13 +10,13 @@ use futures_util::FutureExt as _;
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt as _;
 use hyper::Response;
+use hyperdriver::Body;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Stream;
 use hyperdriver::info::BraidAddr;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::server::{Protocol, Server};
 use hyperdriver::server::{ServerAcceptorExt, ServerConnectionInfoExt, ServerProtocolExt};
-use hyperdriver::Body;
 use tracing::Instrument as _;
 use tracing_test::traced_test;
 

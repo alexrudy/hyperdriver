@@ -4,6 +4,7 @@
 nightly := "nightly-2025-06-20"
 msrv := "1.87"
 rust := env("RUSTUP_TOOLCHAIN", "stable")
+build := `cargo metadata --format-version=1 --no-deps | jq -r '.build_directory'`
 
 # Run all checks
 all: fmt check-all deny clippy examples docs test machete udeps msrv
@@ -14,11 +15,11 @@ udeps: udeps-one udeps-hack
 
 #[private]
 udeps-one:
-    CARGO_TARGET_DIR="target/udeps" cargo +{{nightly}} udeps --all-features
+    CARGO_BUILD_DIR="{{build}}udeps" CARGO_TARGET_DIR="target/udeps" cargo +{{nightly}} udeps --all-features
 
 #[private]
 udeps-hack:
-    CARGO_TARGET_DIR="target/udeps" cargo +{{nightly}} hack udeps --each-feature
+    CARGO_BUILD_DIR="{{build}}udeps" CARGO_TARGET_DIR="target/udeps" cargo +{{nightly}} hack udeps --each-feature --skip tls
 
 # Use machete to check for unused dependencies
 machete:
@@ -39,11 +40,11 @@ cargo-hack-args := "--target-dir target/hack/"
 
 [private]
 check-hack-each:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature --skip tls,tls-ring,tls-aws-lc
+    CARGO_BUILD_DIR="{{build}}hack/" cargo +{{rust}} hack check {{cargo-hack-args}} --each-feature --skip tls,tls-ring,tls-aws-lc
 
 [private]
 check-hack-powerset:
-    cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --group-features tls,tls-ring --group-features tls,tls-aws-lc --skip docs,axum,sni
+    CARGO_BUILD_DIR="{{build}}hack/" cargo +{{rust}} hack check {{cargo-hack-args}} --feature-powerset --group-features tls,tls-ring --group-features tls,tls-aws-lc --skip docs,axum,sni
 
 [private]
 check-hack-tests: (check-hack-targets "tests")
@@ -59,7 +60,7 @@ check-hack-all-targets: (check-hack-targets "all-targets")
 
 # Check compilation combinations for a specific target
 check-hack-targets targets='tests':
-    cargo +{{rust}} hack check --{{targets}} {{cargo-hack-args}} --no-private --feature-powerset --exclude-no-default-features --group-features tls,tls-ring --group-features tls,tls-aws-lc --skip docs,axum,sni
+    CARGO_BUILD_DIR="{{build}}hack/" cargo +{{rust}} hack check --{{targets}} {{cargo-hack-args}} --no-private --feature-powerset --exclude-no-default-features --group-features tls,tls-ring --group-features tls,tls-aws-lc --skip docs,axum,sni
 # Build the library in release mode
 build:
     cargo +{{rust}} build --release
@@ -84,8 +85,8 @@ read: docs
 
 # Check support for MSRV
 msrv:
-    cargo +{{msrv}} check --target-dir target/msrv/ --all-targets --all-features
-    cargo +{{msrv}} doc --target-dir target/msrv/ --all-features --no-deps
+    CARGO_BUILD_DIR="{{build}}msrv/" cargo +{{msrv}} check --target-dir target/msrv/ --all-targets --all-features
+    CARGO_BUILD_DIR="{{build}}msrv/" cargo +{{msrv}} doc --target-dir target/msrv/  --all-features --no-deps
 
 
 alias t := test

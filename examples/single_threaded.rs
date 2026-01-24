@@ -6,26 +6,26 @@ use std::cell::Cell;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::net::{SocketAddr, ToSocketAddrs as _};
-use std::pin::{pin, Pin};
+use std::pin::{Pin, pin};
 use std::rc::Rc;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::thread;
 
+use chateau::client::conn::Transport;
 use chateau::client::conn::service::ClientExecutorService;
 use chateau::client::conn::transport::tcp::{TcpConnectionError, TcpTransport};
-use chateau::client::conn::Transport;
 use chateau::services::make_service_fn;
 use chateau::stream::tcp::TcpStream;
 use futures_util::FutureExt;
 use http_body_util::BodyExt;
-use hyper::body::{Body as HttpBody, Bytes, Frame, Incoming};
 use hyper::Request;
+use hyper::body::{Body as HttpBody, Bytes, Frame, Incoming};
 use hyper::{Error, Response};
 use hyperdriver::bridge::io::TokioIo;
 use hyperdriver::bridge::service::TowerHyperService;
+use hyperdriver::client::conn::AutoTlsTransport;
 use hyperdriver::client::conn::dns::GaiResolver;
 use hyperdriver::client::conn::protocol::auto;
-use hyperdriver::client::conn::AutoTlsTransport;
 use hyperdriver::client::{ConnectionPoolLayer, UriKey};
 use hyperdriver::info::HasConnectionInfo;
 use hyperdriver::server::Accept;
@@ -33,8 +33,8 @@ use pin_project::pin_project;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tower::service_fn;
 use tower::ServiceExt;
+use tower::service_fn;
 
 struct Body {
     // Our Body type is !Send and !Sync:

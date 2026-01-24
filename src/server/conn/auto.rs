@@ -2,7 +2,7 @@
 
 use std::mem::MaybeUninit;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::{fmt, future::Future, io};
 
 use http_body::Body;
@@ -14,15 +14,15 @@ use hyper::{body, rt::Read};
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::BoxError;
 use crate::bridge::rt::TokioExecutor;
 use crate::bridge::service::TowerHyperService;
 use crate::rewind::Rewind;
 use crate::server::Protocol;
 use crate::service::IncomingRequestService;
-use crate::BoxError;
 
 use super::connecting::Connecting;
-use super::{http1, http2, Connection, ConnectionError};
+use super::{Connection, ConnectionError, http1, http2};
 
 type Adapt<S, BIn, BOut> = TowerHyperService<IncomingRequestService<S, BIn, BOut>>;
 

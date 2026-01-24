@@ -1,5 +1,5 @@
-use tower::layer::util::Stack;
 use tower::ServiceBuilder;
+use tower::layer::util::Stack;
 
 /// Extends `ServiceBuilder` with an `optional` method.
 pub trait OptionLayerExt<S> {

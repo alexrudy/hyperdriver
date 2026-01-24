@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use tower::{util::Oneshot, ServiceExt as _};
+use tower::{ServiceExt as _, util::Oneshot};
 
 /// A hyper service that wraps a tower service.
 #[derive(Debug, Clone)]

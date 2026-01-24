@@ -2,8 +2,8 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::task::ready;
 use std::task::Poll;
+use std::task::ready;
 
 use http;
 use hyper::body::Incoming;
@@ -13,13 +13,13 @@ use ouroboros::self_referencing;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
+use super::ConnectionError;
 use super::auto::Builder;
 use super::auto::UpgradableConnection;
-use super::ConnectionError;
+use crate::BoxError;
 use crate::body::IncomingRequestService;
 use crate::bridge::io::TokioIo;
 use crate::bridge::service::TowerHyperService;
-use crate::BoxError;
 
 type Connection<'a, S, IO, BIn, BOut, E> = UpgradableConnection<
     'a,

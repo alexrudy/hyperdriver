@@ -29,4 +29,4 @@ pub use self::incoming::{
 pub use self::option::{OptionLayer, OptionLayerExt, OptionService};
 pub use self::timeout::{Timeout, TimeoutLayer};
 pub use chateau::services::SharedService;
-pub use tower::{service_fn, Service, ServiceBuilder, ServiceExt};
+pub use tower::{Service, ServiceBuilder, ServiceExt, service_fn};
