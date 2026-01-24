@@ -35,7 +35,7 @@ mod error;
 
 pub use self::error::Error;
 pub use builder::Builder;
-pub use chateau::client::pool::Config as PoolConfig;
+pub use chateau::client::PoolConfig;
 
 #[cfg(feature = "tls")]
 /// Get a default TLS client configuration by loading the platform's native certificates.

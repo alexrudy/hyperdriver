@@ -53,7 +53,7 @@ pub struct Builder<T, P, RP = policy::Standard, S = Identity, BIn = crate::Body,
     timeout: Option<Duration>,
     #[cfg(feature = "tls")]
     tls: Option<ClientConfig>,
-    pool: Option<chateau::client::pool::Config>,
+    pool: Option<chateau::client::PoolConfig>,
     body: std::marker::PhantomData<fn(BIn) -> BOut>,
 }
 
@@ -179,12 +179,12 @@ impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
 
 impl<T, P, RP, S, BIn, BOut> Builder<T, P, RP, S, BIn, BOut> {
     /// Connection pool configuration.
-    pub fn pool(&mut self) -> Option<&mut chateau::client::pool::Config> {
+    pub fn pool(&mut self) -> Option<&mut chateau::client::PoolConfig> {
         self.pool.as_mut()
     }
 
     /// Use the provided connection pool configuration.
-    pub fn with_pool(mut self, pool: chateau::client::pool::Config) -> Self {
+    pub fn with_pool(mut self, pool: chateau::client::PoolConfig) -> Self {
         self.pool = Some(pool);
         self
     }
