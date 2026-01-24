@@ -250,9 +250,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chateau"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc63afb014b70e095310788a3ff02caa2b6b6bea8a596e70723e4700036699f6"
+checksum = "5c02202957e6b60b3c642a4c8aa0e55df877d15cca7c8871d69a0be8ffcde761"
 dependencies = [
  "futures",
  "parking_lot",
