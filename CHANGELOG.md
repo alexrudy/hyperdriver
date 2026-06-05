@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4](https://github.com/alexrudy/hyperdriver/compare/v0.12.3...v0.12.4) - 2026-06-05
+
 ## [0.12.3](https://github.com/alexrudy/hyperdriver/compare/v0.12.2...v0.12.3) - 2026-01-24
 
 ### Bugfix
