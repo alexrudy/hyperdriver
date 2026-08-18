@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use chateau::client::conn::protocol::Multiplexed;
 use http_body::Body;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
@@ -33,6 +34,12 @@ impl<B> Http1Builder<B> {
     /// Construct a new HTTP/1 connection builder with default settings
     pub fn new() -> Self {
         Http1Builder(hyper::client::conn::http1::Builder::new(), PhantomData)
+    }
+}
+
+impl<B> Multiplexed for Http1Builder<B> {
+    fn multiplex(&self) -> bool {
+        false
     }
 }
 
@@ -130,6 +137,12 @@ where
             builder: hyper::client::conn::http2::Builder::new(executor),
             body: PhantomData,
         }
+    }
+}
+
+impl<B, E> Multiplexed for Http2Builder<B, E> {
+    fn multiplex(&self) -> bool {
+        true
     }
 }
 

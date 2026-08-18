@@ -4,6 +4,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::pin::pin;
 
+use chateau::client::conn::protocol::Multiplexed;
 use http_body::Body;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -178,6 +179,7 @@ where
 pub struct AlpnHttpConnectionBuilder<B> {
     http1: hyper::client::conn::http1::Builder,
     http2: hyper::client::conn::http2::Builder<TokioExecutor>,
+    initial_protocol: HttpProtocol,
     _body: PhantomData<fn(B) -> ()>,
 }
 
@@ -186,8 +188,15 @@ impl<B> Clone for AlpnHttpConnectionBuilder<B> {
         Self {
             http1: self.http1.clone(),
             http2: self.http2.clone(),
+            initial_protocol: self.initial_protocol,
             _body: PhantomData,
         }
+    }
+}
+
+impl<B> Multiplexed for AlpnHttpConnectionBuilder<B> {
+    fn multiplex(&self) -> bool {
+        true
     }
 }
 
@@ -299,6 +308,7 @@ impl<B> Default for AlpnHttpConnectionBuilder<B> {
         Self {
             http1: hyper::client::conn::http1::Builder::new(),
             http2: hyper::client::conn::http2::Builder::new(TokioExecutor::new()),
+            initial_protocol: HttpProtocol::Http1,
             _body: PhantomData,
         }
     }
@@ -331,7 +341,7 @@ where
         //TODO: Should there be some way to force an HTTP2 connection from the get-go?
         // Since this could depend on the HTTP request, we'd need a different way to propogate that along with the
         // IO stream into this method.
-        future::HttpConnectFuture::new(builder, req, HttpProtocol::Http1)
+        future::HttpConnectFuture::new(builder, req, self.initial_protocol)
     }
 }
 

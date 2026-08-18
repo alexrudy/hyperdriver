@@ -34,8 +34,8 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 skip-tree = ["windows-targets", "windows-sys"]
 skip = [
-# { crate = "socket2@0.5.10", wrappers= ["axum"], reason="waiting for axum to update"},
-{ crate="getrandom@0.2.16", wrappers=["ring"], reason="waiting for ring to update"}
+    { crate = "syn@2.0.119", reason = "waiting for syn to update" },
+    { crate="getrandom@0.2.17", wrappers=["ring"], reason="waiting for ring to update"},
 ]
 
 [sources]

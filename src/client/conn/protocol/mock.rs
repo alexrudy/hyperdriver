@@ -3,6 +3,7 @@
 use std::convert::Infallible;
 use std::future::{Ready, ready};
 
+use chateau::client::conn::protocol::Multiplexed;
 use thiserror::Error;
 
 use crate::client::conn::Connection;
@@ -96,9 +97,26 @@ pub struct MockProtocolError {
 }
 
 /// A simple protocol for returning empty responses.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockProtocol {
+    multiplex: bool,
     _private: (),
+}
+
+impl MockProtocol {
+    /// Creates a new mock protocol.
+    pub fn new(multiplex: bool) -> Self {
+        Self {
+            multiplex,
+            _private: (),
+        }
+    }
+}
+
+impl Multiplexed for MockProtocol {
+    fn multiplex(&self) -> bool {
+        self.multiplex
+    }
 }
 
 impl tower::Service<MockStream> for MockProtocol {
