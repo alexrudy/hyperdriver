@@ -37,8 +37,12 @@ impl<B> Http1Builder<B> {
     }
 }
 
-impl<B> Multiplexed for Http1Builder<B> {
+impl<IO, B> Multiplexed<IO> for Http1Builder<B> {
     fn multiplex(&self) -> bool {
+        false
+    }
+
+    fn multiplex_ready(&self, _: &IO) -> bool {
         false
     }
 }
@@ -140,8 +144,12 @@ where
     }
 }
 
-impl<B, E> Multiplexed for Http2Builder<B, E> {
+impl<IO, B, E> Multiplexed<IO> for Http2Builder<B, E> {
     fn multiplex(&self) -> bool {
+        true
+    }
+
+    fn multiplex_ready(&self, _: &IO) -> bool {
         true
     }
 }

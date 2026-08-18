@@ -113,9 +113,13 @@ impl MockProtocol {
     }
 }
 
-impl Multiplexed for MockProtocol {
+impl Multiplexed<MockStream> for MockProtocol {
     fn multiplex(&self) -> bool {
         self.multiplex
+    }
+
+    fn multiplex_ready(&self, io: &MockStream) -> bool {
+        self.multiplex && io.can_share()
     }
 }
 

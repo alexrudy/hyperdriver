@@ -42,8 +42,7 @@ where
         if let Some(mut prefix) = self.prefix.take() {
             if !prefix.is_empty() {
                 let n = std::cmp::min(prefix.len(), remaining(&mut buf));
-
-                put_slice(&mut buf, &prefix[..n]);
+                buf.put_slice(&prefix[..n]);
                 prefix.advance(n);
 
                 if !prefix.is_empty() {
@@ -101,23 +100,4 @@ fn remaining(cursor: &mut ReadBufCursor<'_>) -> usize {
     // SAFETY:
     // We do not uninitialize any set bytes.
     unsafe { cursor.as_mut().len() }
-}
-
-fn put_slice(cursor: &mut ReadBufCursor<'_>, slice: &[u8]) {
-    assert!(
-        remaining(cursor) >= slice.len(),
-        "buf.len() must fit in remaining()"
-    );
-
-    let amt = slice.len();
-
-    // SAFETY:
-    // the length is asserted above
-    unsafe {
-        cursor.as_mut()[..amt]
-            .as_mut_ptr()
-            .cast::<u8>()
-            .copy_from_nonoverlapping(slice.as_ptr(), amt);
-        cursor.advance(amt);
-    }
 }

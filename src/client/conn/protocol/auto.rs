@@ -194,9 +194,16 @@ impl<B> Clone for AlpnHttpConnectionBuilder<B> {
     }
 }
 
-impl<B> Multiplexed for AlpnHttpConnectionBuilder<B> {
+impl<IO, B> Multiplexed<IO> for AlpnHttpConnectionBuilder<B>
+where
+    IO: HasTlsConnectionInfo,
+{
     fn multiplex(&self) -> bool {
         true
+    }
+
+    fn multiplex_ready(&self, io: &IO) -> bool {
+        io.tls_info().and_then(|tls| tls.alpn.as_deref()) == Some("h2")
     }
 }
 

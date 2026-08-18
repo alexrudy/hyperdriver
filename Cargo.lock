@@ -257,9 +257,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chateau"
-version = "0.3.4"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd24cc924dcb787f1ac5906958be52f19f5fed57fcc2a6f39d0b9bb9179bd5bc"
+checksum = "a54b3dfc05aba1abb1d19e84aa00e926b98a61197ecb4d1e2383b06fe75d79e7"
 dependencies = [
  "futures",
  "parking_lot",
@@ -270,6 +270,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tracing",
 ]
