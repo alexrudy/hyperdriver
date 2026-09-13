@@ -29,6 +29,8 @@ jobs:
 
       - name: Install latest stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Determine latest stable version
         id: latest
