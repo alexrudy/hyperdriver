@@ -1,0 +1,113 @@
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+name: Bump pinned stable Rust
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    name: Bump pinned stable Rust
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine current pinned stable version
+        id: current
+        run: |
+          set -euo pipefail
+          current=$(grep -oP 'RUST_STABLE: &toolchain "\K[0-9.]+' .github/workflows/ci.yml)
+          echo "Current pin: $current"
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Install latest stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Determine latest stable version
+        id: latest
+        run: |
+          set -euo pipefail
+          full=$(rustc +stable --version | awk '{print $2}')
+          version=$(echo "$full" | cut -d. -f1,2)
+          echo "Latest stable: $version (full: $full)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update pin if a newer stable is available
+        id: bump
+        run: |
+          set -euo pipefail
+          current="${{ steps.current.outputs.version }}"
+          latest="${{ steps.latest.outputs.version }}"
+          if [ "$current" = "$latest" ]; then
+            echo "Already up to date with stable $current."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          perl -pi -e "s/RUST_STABLE: &toolchain \"\Q$current\E\"/RUST_STABLE: &toolchain \"$latest\"/" .github/workflows/ci.yml
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Check for an existing bump branch or PR
+        if: steps.bump.outputs.changed == 'true'
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="chore/bump-rust-stable-${{ steps.bump.outputs.latest }}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "A branch for this bump already exists; skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply clippy --fix and fmt with the new toolchain
+        if: steps.bump.outputs.changed == 'true' && steps.branch.outputs.exists == 'false'
+        run: |
+          set -x
+          # Some lints can't be auto-fixed; don't fail the job here, let the
+          # opened PR's own CI run surface anything that still needs a human.
+          cargo +stable clippy --fix --allow-dirty --allow-staged --all-targets --all-features -- -D warnings || true
+          cargo +stable fmt --all
+
+      - name: Commit and open pull request
+        if: steps.bump.outputs.changed == 'true' && steps.branch.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          branch="${{ steps.branch.outputs.branch }}"
+          latest="${{ steps.bump.outputs.latest }}"
+
+          git switch -c "$branch"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit; skipping PR."
+            exit 0
+          fi
+
+          git commit -m "Bump pinned stable Rust to $latest"
+          git push origin "$branch"
+
+          body="Automated bump of the pinned stable Rust toolchain used in CI (\`RUST_STABLE\`), with \`cargo clippy --fix\` and \`cargo fmt\` applied against the new toolchain."$'\n\n'"If any lints could not be auto-fixed, CI on this PR will show the remaining failures for manual follow-up."
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "Bump pinned stable Rust to $latest" \
+            --body "$body"
