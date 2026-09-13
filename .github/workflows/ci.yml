@@ -42,6 +42,8 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: *toolchain
     strategy:
       matrix:
         steps:
@@ -82,6 +84,8 @@ jobs:
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: *toolchain
     steps:
       - uses: actions/setup-python@v5
       - run: pip install pre-commit
