@@ -26,7 +26,8 @@ jobs:
       - name: "Remove old certificates"
         run: rm -f tests/minica/example.com/*.pem
       - name: "Generate new certificates"
-        run: minica -domains example.com -dir tests/minica/example.com
+        run: minica -domains example.com
+        working-directory: tests/minica/example.com
       - name: "Commit changes"
         run: |
           git config --global user.name "github-actions"
