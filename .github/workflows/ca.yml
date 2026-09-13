@@ -6,6 +6,7 @@ on:
 name: Update test CA
 
 permissions:
+  contents: write
   pull-requests: write
 
 jobs:
@@ -18,7 +19,7 @@ jobs:
           go-version: "1.22"
           token: ${{ github.token }}
       - name: Check out repository code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: "Install MiniCA"
@@ -28,16 +29,46 @@ jobs:
       - name: "Generate new certificates"
         run: minica -domains example.com
         working-directory: tests/minica/example.com
-      - name: "Commit changes"
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git switch -c chore/ca-update-$(date +'%Y-%m-%d')
-          git add tests/minica/example.com/*.pem
-          git commit -m "Update MiniCA certificates"
-      - name: "Create pull request"
-        run: |
-          git push origin
-          gh pr create -H chore/ca-update-$(date +'%Y-%m-%d') -B main --title "Update MiniCA certificates" --body "Automated certificate renewal"
+
+      - name: Check for an existing update branch
+        id: branch
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="chore/ca-update-$(date +'%Y-%m-%d')"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "A branch for this update already exists; skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and open pull request
+        if: steps.branch.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          branch="${{ steps.branch.outputs.branch }}"
+
+          git switch -c "$branch"
+          git add tests/minica/example.com/*.pem
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit; skipping PR."
+            exit 0
+          fi
+
+          git commit -m "Update MiniCA certificates"
+          git push origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "Update MiniCA certificates" \
+            --body "Automated certificate renewal"
