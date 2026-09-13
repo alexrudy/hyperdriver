@@ -449,7 +449,7 @@ where
             ))
             .layer(IncomingResponseLayer::new());
 
-        let service = SharedService::new(
+        SharedService::new(
             middleware
                 .map_err(super::Error::from)
                 .layer(
@@ -460,9 +460,7 @@ where
                     .with_optional_pool(self.pool.clone()),
                 )
                 .service(executor),
-        );
-
-        service
+        )
     }
 }
 

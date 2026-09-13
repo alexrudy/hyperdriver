@@ -57,7 +57,7 @@ mod tests {
         future::{IntoFuture, ready},
     };
 
-    use super::{builder::ServerProtocolExt as _, *};
+    use super::*;
     use crate::Body;
     use chateau::stream::duplex;
 
