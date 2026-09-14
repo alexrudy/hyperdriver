@@ -28,7 +28,7 @@ jobs:
         run: rm -f tests/minica/example.com/*.pem
       - name: "Generate new certificates"
         run: minica -domains example.com
-        working-directory: tests/minica/example.com
+        working-directory: tests/minica/
 
       - name: Check for an existing update branch
         id: branch
