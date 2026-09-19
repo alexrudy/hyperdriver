@@ -2,8 +2,9 @@
 
 
 nightly := "nightly-2025-06-20"
-msrv := "1.87"
-rust := env("RUSTUP_TOOLCHAIN", "stable")
+msrv := `awk -F'"' '/^rust-version/{print $2}' Cargo.toml`
+pinned-stable := `awk -F'"' '/^channel/{print $2}' rust-toolchain.toml`
+rust := env("RUSTUP_TOOLCHAIN", pinned-stable)
 build := `cargo metadata --format-version=1 --no-deps | jq -r '.build_directory'`
 
 # Run all checks

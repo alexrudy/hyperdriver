@@ -23,7 +23,7 @@ jobs:
         id: current
         run: |
           set -euo pipefail
-          current=$(grep -oP 'RUST_STABLE: &toolchain "\K[0-9.]+' .github/workflows/ci.yml)
+          current=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)
           echo "Current pin: $current"
           echo "version=$current" >> "$GITHUB_OUTPUT"
 
@@ -52,7 +52,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          perl -pi -e "s/RUST_STABLE: &toolchain \"\Q$current\E\"/RUST_STABLE: &toolchain \"$latest\"/" .github/workflows/ci.yml
+          perl -pi -e "s/channel = \"\Q$current\E\"/channel = \"$latest\"/" rust-toolchain.toml
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
 
@@ -104,7 +104,7 @@ jobs:
           git commit -m "Bump pinned stable Rust to $latest"
           git push origin "$branch"
 
-          body="Automated bump of the pinned stable Rust toolchain used in CI (\`RUST_STABLE\`), with \`cargo clippy --fix\` and \`cargo fmt\` applied against the new toolchain."$'\n\n'"If any lints could not be auto-fixed, CI on this PR will show the remaining failures for manual follow-up."
+          body="Automated bump of the pinned stable Rust toolchain in \`rust-toolchain.toml\`, with \`cargo clippy --fix\` and \`cargo fmt\` applied against the new toolchain."$'\n\n'"If any lints could not be auto-fixed, CI on this PR will show the remaining failures for manual follow-up."
 
           gh pr create \
             --base main \
