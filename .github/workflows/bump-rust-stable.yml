@@ -8,6 +8,7 @@ name: Bump pinned stable Rust
 permissions:
   contents: write
   pull-requests: write
+  workflows: write
 
 jobs:
   bump:
