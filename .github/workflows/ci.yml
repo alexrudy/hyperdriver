@@ -9,19 +9,42 @@ name: CI
 
 env:
   RUSTDOCFLAGS: "-Dwarnings"
-  RUST_STABLE: &toolchain "1.92"
-  RUST_MSRV: &msrv "1.87"
   CARGO_TERM_COLOR: always
 
 jobs:
+  versions:
+    name: Determine toolchain versions
+    runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.stable.outputs.version }}
+      msrv: ${{ steps.msrv.outputs.version }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Read pinned stable version
+        id: stable
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^channel/{print $2}' rust-toolchain.toml)
+          echo "Pinned stable: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Read MSRV
+        id: msrv
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^rust-version/{print $2}' Cargo.toml)
+          echo "MSRV: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build
+    needs: versions
     runs-on: ubuntu-latest
     strategy:
       matrix:
         toolchain:
-          - *msrv
-          - *toolchain
+          - "${{ needs.versions.outputs.msrv }}"
+          - "${{ needs.versions.outputs.stable }}"
           - stable
           - nightly
           - beta
@@ -41,9 +64,10 @@ jobs:
 
   check:
     name: Check
+    needs: versions
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: *toolchain
+      RUSTUP_TOOLCHAIN: ${{ needs.versions.outputs.stable }}
     strategy:
       matrix:
         steps:
@@ -73,7 +97,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: *toolchain
+          toolchain: ${{ needs.versions.outputs.stable }}
           components: clippy, rustfmt
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -84,9 +108,10 @@ jobs:
 
   pre-commit:
     name: pre-commit
+    needs: versions
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: *toolchain
+      RUSTUP_TOOLCHAIN: ${{ needs.versions.outputs.stable }}
     steps:
       - uses: actions/setup-python@v5
       - run: pip install pre-commit
@@ -94,7 +119,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: *toolchain
+          toolchain: ${{ needs.versions.outputs.stable }}
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Run pre-commit
@@ -102,11 +127,12 @@ jobs:
 
   test:
     name: Tests
+    needs: versions
     runs-on: ubuntu-latest
     strategy:
       matrix:
         toolchain:
-          - *toolchain
+          - "${{ needs.versions.outputs.stable }}"
           - stable
           - beta
     continue-on-error: ${{ contains(fromJSON('["stable", "nightly", "beta"]'), matrix.toolchain) }}
