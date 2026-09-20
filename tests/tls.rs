@@ -140,6 +140,77 @@ async fn tls_echo_h1() {
     handle.await.unwrap();
 }
 
+/// Verifies that `ServerConnectionInfoExt::with_tls_connection_info` makes
+/// `chateau::info::TlsConnectionInfo` available in the request extensions
+/// for a request that came in over a TLS connection.
+#[tokio::test]
+async fn tls_connection_info_h1() {
+    use chateau::client::conn::transport::duplex::DuplexTransport;
+    use chateau::info::TlsConnectionInfo;
+    use hyperdriver::Client;
+    use hyperdriver::client::conn::protocol::Http1Builder;
+    use hyperdriver::server::ServerConnectionInfoExt as _;
+    use hyperdriver::server::ServerProtocolExt as _;
+
+    tls_install_default();
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let (duplex_client, incoming) = hyperdriver::stream::duplex::pair();
+
+    let acceptor =
+        hyperdriver::server::conn::Acceptor::from(incoming).with_tls(tls_config().into());
+
+    let service = tower::service_fn(|req: http::Request<Body>| async move {
+        let info = req
+            .extensions()
+            .get::<TlsConnectionInfo>()
+            .expect("TLS connection info should be present in request extensions");
+
+        let alpn = info.alpn.clone().unwrap_or_default();
+        Ok::<_, BoxError>(http::Response::new(hyperdriver::body::Body::from(alpn)))
+    });
+
+    let server = hyperdriver::server::Server::builder()
+        .with_acceptor(acceptor)
+        .with_shared_service(service)
+        .with_tls_connection_info()
+        .with_http1()
+        .with_tokio();
+
+    let handle = serve_gracefully(server);
+
+    let mut client_tls = rustls::ClientConfig::builder()
+        .with_root_certificates(tls_root_store())
+        .with_no_client_auth();
+    client_tls.alpn_protocols.push(b"http/1.1".to_vec());
+
+    let mut client = Client::builder()
+        .with_protocol(Http1Builder::new())
+        .with_default_pool()
+        .with_transport(DuplexTransport::new(1024, duplex_client))
+        .with_tls(client_tls)
+        .build();
+
+    let response: http::Response<hyperdriver::Body> = client
+        .request(
+            http::Request::builder()
+                .uri("https://example.com/")
+                .version(http::Version::HTTP_11)
+                .body(hyperdriver::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .map(Into::into);
+    tracing::trace!("sent request");
+    let (_, body) = response.into_parts();
+
+    let data = body.collect().await.unwrap().to_bytes();
+    assert_eq!(&*data, b"http/1.1");
+
+    handle.await.unwrap();
+}
+
 #[tokio::test]
 async fn tls_echo_h2() {
     use chateau::client::conn::transport::duplex::DuplexTransport;

@@ -3,8 +3,6 @@ use std::{io, net::SocketAddr};
 
 use chateau::server::NeedsAcceptor;
 use chateau::server::NeedsProtocol;
-#[cfg(feature = "tls")]
-use chateau::server::conn::tls::info::TlsConnectionInfoService;
 use chateau::services::MakeServiceRef;
 use hyper::server::conn::{http1, http2};
 
@@ -17,6 +15,8 @@ use super::conn::Acceptor;
 use super::conn::Http1Builder;
 use super::conn::Http2Builder;
 use super::conn::MakeServiceConnectionInfoService;
+#[cfg(feature = "tls")]
+use super::conn::MakeServiceTlsConnectionInfoService;
 use super::conn::auto;
 
 /// Extension trait to allow additional methods for building servers from common listeners.
@@ -102,10 +102,11 @@ pub trait ServerConnectionInfoExt<A, P, S, B, E> {
 
     /// Wrap the make service in a service that provides TLS connection information.
     ///
-    /// This will make `crate::info::TlsConnectionInfo` available in the request
+    /// This will make `chateau::info::TlsConnectionInfo` available in the request
     /// extensions for each request handled by the generated service.
     #[cfg(feature = "tls")]
-    fn with_tls_connection_info(self) -> Server<A, P, TlsConnectionInfoService<S>, B, E>;
+    fn with_tls_connection_info(self)
+    -> Server<A, P, MakeServiceTlsConnectionInfoService<S>, B, E>;
 }
 
 impl<A, P, S, B, E> ServerConnectionInfoExt<A, P, S, B, E> for Server<A, P, S, B, E>
@@ -118,7 +119,9 @@ where
     }
 
     #[cfg(feature = "tls")]
-    fn with_tls_connection_info(self) -> Server<A, P, TlsConnectionInfoService<S>, B, E> {
-        self.map_service(TlsConnectionInfoService::new)
+    fn with_tls_connection_info(
+        self,
+    ) -> Server<A, P, MakeServiceTlsConnectionInfoService<S>, B, E> {
+        self.map_service(MakeServiceTlsConnectionInfoService::new)
     }
 }

@@ -29,6 +29,10 @@ pub use chateau::server::{Accept, conn::AcceptExt, conn::AcceptOne};
 pub use info::{
     ConnectionWithInfo, MakeServiceConnectionInfoLayer, MakeServiceConnectionInfoService,
 };
+#[cfg(feature = "tls")]
+pub use info::{
+    ConnectionWithTlsInfo, MakeServiceTlsConnectionInfoLayer, MakeServiceTlsConnectionInfoService,
+};
 pub use stream::Stream;
 
 mod acceptor;
