@@ -39,10 +39,10 @@ pub use crate::service::{AdaptIncomingLayer, AdaptIncomingService};
 pub use crate::service::{IncomingRequestLayer, IncomingRequestService};
 type BoxError = Box<dyn std::error::Error + Sync + std::marker::Send + 'static>;
 
-/// A wrapper for different internal body types which implements [http_body::Body](http_body::Body)
+/// A wrapper for different internal body types which implements [http_body::Body]
 /// It is always backed by [`Bytes`] for simplicity.
 ///
-/// Bodies can be created from [`Bytes`](bytes::Bytes), [`String`],
+/// Bodies can be created from [`Bytes`], [`String`],
 /// or [`&'static str`](str) using [`From`] implementations.
 ///
 /// An empty body can be created with [Body::empty](Body::empty).
