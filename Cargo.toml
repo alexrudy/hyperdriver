@@ -64,12 +64,12 @@ optional = true
 [dev-dependencies]
 clap = { version = "4.5.54" }
 color-eyre = "0.6"
-opentelemetry = "0.32"
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
-opentelemetry-semantic-conventions = { version = "0.32", features = [
+opentelemetry = "0.33"
+opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = { version = "0.33", features = [
     "semconv_experimental",
 ] }
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.33", features = ["rt-tokio"] }
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 static-assertions = { version = "1", package = "static_assertions" }
 tempfile = "3"
