@@ -7,7 +7,7 @@ use std::{fmt, task::Poll};
 use hyper::{Request, Response};
 use tower::{Layer, Service};
 
-use chateau::info::{ConnectionInfo, HasConnectionInfo};
+use chateau::info::{Address, ConnectionInfo, HasConnectionInfo};
 use chateau::services::ServiceRef;
 
 #[cfg(feature = "tls")]
@@ -186,7 +186,7 @@ where
     S::Future: Send,
     S::Error: fmt::Display,
     BIn: Send + 'static,
-    A: Clone + Send + Sync + 'static,
+    A: Address + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -205,7 +205,7 @@ where
                 "Inserting connection info {}",
                 std::any::type_name_of_val(&info),
             );
-            req.extensions_mut().insert(info);
+            req.extensions_mut().insert(info.erase());
         } else {
             tracing::error!("Connection called twice, info is not available");
         }
@@ -429,11 +429,11 @@ mod tests {
     #[tokio::test]
     async fn connection_info_from_service() {
         let service = tower::service_fn(|req: http::Request<crate::Body>| {
-            let info = req
-                .extensions()
-                .get::<ConnectionInfo<DuplexAddr>>()
-                .unwrap();
-            assert_eq!(*info.remote_addr(), DuplexAddr::new());
+            let info = req.extensions().get::<ConnectionInfo>().unwrap();
+            assert_eq!(
+                info.remote_addr_as::<DuplexAddr>(),
+                Some(&DuplexAddr::new())
+            );
             async { Ok::<_, Infallible>(Response::new(())) }
         });
 

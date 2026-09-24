@@ -13,7 +13,6 @@ use hyper::Response;
 use hyperdriver::Body;
 use hyperdriver::bridge::rt::TokioExecutor;
 use hyperdriver::client::conn::Stream;
-use hyperdriver::info::BraidAddr;
 use hyperdriver::server::conn::Accept;
 use hyperdriver::server::{Protocol, Server};
 use hyperdriver::server::{ServerAcceptorExt, ServerConnectionInfoExt, ServerProtocolExt};
@@ -24,9 +23,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 async fn echo(req: http::Request<Body>) -> Result<http::Response<Body>, BoxError> {
     tracing::trace!("processing request");
-    let info = req
-        .extensions()
-        .get::<hyperdriver::info::ConnectionInfo<BraidAddr>>();
+    let info = req.extensions().get::<hyperdriver::info::ConnectionInfo>();
     assert!(info.is_some(), "expected to find connection info");
     tracing::trace!("found connection info: {info:?}");
 

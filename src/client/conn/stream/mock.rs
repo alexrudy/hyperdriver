@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use tracing::trace;
 
 use chateau::client::pool::PoolableStream;
-use chateau::info::HasConnectionInfo;
+use chateau::info::{Address, HasConnectionInfo};
 
 #[cfg(feature = "tls")]
 pub use self::tls::MockTls;
@@ -104,6 +104,8 @@ impl fmt::Display for MockAddress {
         write!(f, "mock://")
     }
 }
+
+impl Address for MockAddress {}
 
 impl HasConnectionInfo for MockStream {
     type Addr = MockAddress;

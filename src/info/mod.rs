@@ -11,6 +11,8 @@ use camino::Utf8Path;
 #[cfg(feature = "stream")]
 use camino::Utf8PathBuf;
 
+#[cfg(feature = "stream")]
+use chateau::info::Address;
 use thiserror::Error;
 
 #[doc(hidden)]
@@ -169,7 +171,7 @@ pub enum BraidAddr {
     Tcp(std::net::SocketAddr),
 
     /// Represents a duplex connection which has no address.
-    Duplex,
+    Duplex(DuplexAddr),
 
     /// A Unix socket address.
     Unix(UnixAddr),
@@ -180,7 +182,7 @@ impl std::fmt::Display for BraidAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "{addr}"),
-            Self::Duplex => write!(f, "<duplex>"),
+            Self::Duplex(_) => write!(f, "<duplex>"),
             Self::Unix(path) => write!(f, "{path}"),
         }
     }
@@ -209,6 +211,17 @@ impl BraidAddr {
         match self {
             Self::Tcp(addr) => Self::Tcp(addr),
             _ => self,
+        }
+    }
+}
+
+#[cfg(feature = "stream")]
+impl Address for BraidAddr {
+    fn inner(&self) -> Option<&dyn Address> {
+        match self {
+            BraidAddr::Tcp(socket_addr) => Some(socket_addr),
+            BraidAddr::Duplex(duplex) => Some(duplex),
+            BraidAddr::Unix(unix_addr) => Some(unix_addr),
         }
     }
 }
@@ -271,8 +284,8 @@ impl From<UnixAddr> for BraidAddr {
 
 #[cfg(feature = "stream")]
 impl From<DuplexAddr> for BraidAddr {
-    fn from(_: DuplexAddr) -> Self {
-        Self::Duplex
+    fn from(addr: DuplexAddr) -> Self {
+        Self::Duplex(addr)
     }
 }
 
