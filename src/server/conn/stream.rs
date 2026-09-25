@@ -10,6 +10,7 @@ use std::task::{Context, Poll};
 
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
+use chateau::info::Address;
 use chateau::info::ConnectionInfo;
 use chateau::info::HasConnectionInfo;
 use chateau::info::HasTlsConnectionInfo;
@@ -113,7 +114,7 @@ where
 impl<IO, A> HasTlsConnectionInfo for Stream<IO>
 where
     IO: HasConnectionInfo<Addr = A> + HasTlsConnectionInfo,
-    A: fmt::Debug + fmt::Display + Clone + Send + 'static,
+    A: Address + fmt::Debug + fmt::Display + Clone + Send + 'static,
     TlsStream<IO>: HasConnectionInfo<Addr = A> + HasTlsConnectionInfo,
 {
     fn tls_info(&self) -> Option<&chateau::info::TlsConnectionInfo> {
@@ -125,7 +126,7 @@ where
 impl<IO, A> HasTlsConnectionInfo for Stream<IO>
 where
     IO: HasConnectionInfo<Addr = A> + HasTlsConnectionInfo,
-    A: fmt::Debug + fmt::Display + Clone + Send + 'static,
+    A: Address + fmt::Debug + fmt::Display + Clone + Send + 'static,
 {
     fn tls_info(&self) -> Option<&chateau::info::TlsConnectionInfo> {
         self.inner.tls_info()
