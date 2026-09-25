@@ -10,7 +10,6 @@ use std::task::{Context, Poll};
 
 #[cfg(feature = "stream")]
 use crate::stream::Braid;
-#[cfg(feature = "tls")]
 use chateau::info::Address;
 use chateau::info::ConnectionInfo;
 use chateau::info::HasConnectionInfo;
