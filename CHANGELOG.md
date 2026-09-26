@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.8](https://github.com/alexrudy/hyperdriver/compare/v0.12.7...v0.12.8)
+
+### Features
+
+- *(info)* Improved connection info from chateau.
+
 ## [0.12.7](https://github.com/alexrudy/hyperdriver/compare/v0.12.6...v0.12.7) - 2026-09-23
 
 ## [0.12.6](https://github.com/alexrudy/hyperdriver/compare/v0.12.5...v0.12.6) - 2026-09-20
