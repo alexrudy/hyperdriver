@@ -191,8 +191,14 @@ impl tower::Service<http::Request<crate::Body>> for Client {
 
 /// Pool key which is used to identify a connection - using scheme
 /// and authority.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct UriKey(http::uri::Scheme, Option<http::uri::Authority>);
+
+impl fmt::Debug for UriKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "UriKey({})", self)
+    }
+}
 
 impl fmt::Display for UriKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
